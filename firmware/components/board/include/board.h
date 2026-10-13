@@ -17,7 +17,7 @@ extern "C" {
 typedef struct {
     esp_lcd_panel_handle_t panel;
     esp_lcd_touch_handle_t touch;
-    uint16_t *fb[BOARD_LCD_NUM_FBS]; // RGB565 frame buffers owned by the panel driver (PSRAM)
+    uint16_t *fb[BOARD_LCD_NUM_FBS]; // RGB565 frame buffers owned by the panel driver (PSRAM); NULL with on_bounce_fill
 } board_t;
 
 typedef struct {
@@ -26,6 +26,11 @@ typedef struct {
     bool (*on_frame_done)(void *ctx);
     // Called from ISR context on the GT911 INT falling edge.
     void (*on_touch_irq)(void *ctx);
+    // Optional. When set, the panel runs without driver-owned frame buffers (board_t.fb stays NULL) and
+    // this is the only code that supplies pixels: called from ISR context (must be IRAM) to copy
+    // len_bytes of RGB565 data, starting at pixel pos_px of the frame, into dst. pos_px == 0 marks the
+    // start of a frame, including after the driver's VSYNC resync. Return true if a task was woken.
+    bool (*on_bounce_fill)(void *dst, int pos_px, int len_bytes, void *ctx);
     void *ctx;
 } board_callbacks_t;
 

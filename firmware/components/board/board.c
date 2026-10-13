@@ -60,6 +60,11 @@ static IRAM_ATTR bool on_frame_buf_complete(esp_lcd_panel_handle_t panel, const 
     return s_cbs.on_frame_done ? s_cbs.on_frame_done(s_cbs.ctx) : false;
 }
 
+static IRAM_ATTR bool on_bounce_empty(esp_lcd_panel_handle_t panel, void *bounce_buf, int pos_px, int len_bytes, void *ctx)
+{
+    return s_cbs.on_bounce_fill(bounce_buf, pos_px, len_bytes, s_cbs.ctx);
+}
+
 static IRAM_ATTR void on_touch_irq(esp_lcd_touch_handle_t tp)
 {
     if (s_cbs.on_touch_irq) {
@@ -100,6 +105,7 @@ static esp_err_t reset_touch(void)
 
 static esp_err_t init_panel(board_t *b)
 {
+    const bool app_fb = s_cbs.on_bounce_fill != NULL;
     const esp_lcd_rgb_panel_config_t cfg = {
         .clk_src = LCD_CLK_SRC_DEFAULT,
         .timings = {
@@ -116,7 +122,7 @@ static esp_err_t init_panel(board_t *b)
         },
         .data_width = 16,
         .bits_per_pixel = 16,
-        .num_fbs = BOARD_LCD_NUM_FBS,
+        .num_fbs = app_fb ? 0 : BOARD_LCD_NUM_FBS,
         .bounce_buffer_size_px = BOARD_LCD_H_RES * LCD_BOUNCE_LINES,
         .dma_burst_size = 64,
         .hsync_gpio_num = GPIO_NUM_46,
@@ -129,13 +135,21 @@ static esp_err_t init_panel(board_t *b)
             GPIO_NUM_39, GPIO_NUM_0, GPIO_NUM_45, GPIO_NUM_48, GPIO_NUM_47, GPIO_NUM_21,  // G2..G7
             GPIO_NUM_1, GPIO_NUM_2, GPIO_NUM_42, GPIO_NUM_41, GPIO_NUM_40,                // R3..R7
         },
-        .flags.fb_in_psram = 1,
+        .flags.fb_in_psram = !app_fb,
+        .flags.no_fb = app_fb,
     };
     ESP_RETURN_ON_ERROR(esp_lcd_new_rgb_panel(&cfg, &b->panel), TAG, "new rgb panel");
-    const esp_lcd_rgb_panel_event_callbacks_t cbs = {.on_frame_buf_complete = on_frame_buf_complete};
+    const esp_lcd_rgb_panel_event_callbacks_t cbs = {
+        .on_frame_buf_complete = on_frame_buf_complete,
+        .on_bounce_empty = app_fb ? on_bounce_empty : NULL,
+    };
     ESP_RETURN_ON_ERROR(esp_lcd_rgb_panel_register_event_callbacks(b->panel, &cbs, NULL), TAG, "panel cbs");
     ESP_RETURN_ON_ERROR(esp_lcd_panel_reset(b->panel), TAG, "panel reset");
     ESP_RETURN_ON_ERROR(esp_lcd_panel_init(b->panel), TAG, "panel init");
+    if (app_fb) {
+        b->fb[0] = b->fb[1] = NULL;
+        return ESP_OK;
+    }
     void *fb0, *fb1;
     ESP_RETURN_ON_ERROR(esp_lcd_rgb_panel_get_frame_buffer(b->panel, 2, &fb0, &fb1), TAG, "get fbs");
     b->fb[0] = fb0;

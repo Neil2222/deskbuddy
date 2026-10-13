@@ -1,13 +1,18 @@
 # DeskBuddy handover
 
-Snapshot at the end of board bring-up (2026-10-13). For a new machine, start with the README "Fresh Windows setup" section.
+Snapshot at the end of the rendering-engine milestone (2026-10-13). For a new machine, start with the README "Fresh Windows setup" section.
 
 ## Goal
 
-A standalone desk gadget with animated pixel-art characters (5–15 FPS), responsive touch, and later WiFi integrations. Requirements:
-- Full control over firmware and assets.
-- No proprietary apps or cloud services.
-- Maintainable C on ESP-IDF.
+A physical desktop companion for a work laptop:
+- An animated pixel-art character with personality, emotions and touch interactions. Later Tamagotchi-like: persistent needs, moods and time-based behavior.
+- A configurable touchscreen control panel for internal workplace services, using explicitly configured and validated commands. The device never supplies arbitrary URLs.
+- Notifications and events from applications on the laptop or internal servers.
+
+Architecture rules:
+- **USB serial is the primary channel**, bidirectional, to a Windows companion service that talks to internal APIs. The ESP32 needs no access to the corporate network. Wi-Fi is optional.
+- **Keep character behavior, rendering, assets, external events and communication independent**, so a desktop simulator and firmware/asset deployment via GitHub and the companion app stay possible. Development happens mostly at home while the device stays at work.
+- Full control over firmware and assets, no proprietary apps or cloud services, maintainable C on ESP-IDF.
 
 ## Hardware
 
@@ -26,10 +31,12 @@ Connect through the **UART** Type-C port (CH343) with DIP switch #16 on the ESP3
 | Area | State |
 |---|---|
 | Toolchain | ESP-IDF v5.5.5, pinned and installed with `tools/setup-idf.ps1`. Managed components are locked in `dependencies.lock`. |
-| Board support (`firmware/components/board`) | Done: I2C bus, IO expander (native USB kept connected), RGB panel with double buffering and bounce buffers, GT911 with interrupt, backlight brightness |
-| Bring-up firmware (`firmware/bringup`) | Done: test pattern, touch-following dot, benchmarks. Currently flashed on the dev board. |
+| Board support (`firmware/components/board`) | Done: I2C bus, IO expander (native USB kept connected), RGB panel with bounce buffers (driver-owned frame buffers, or app-owned via `on_bounce_fill`), GT911 with interrupt, backlight brightness |
+| Bring-up firmware (`firmware/bringup`) | Done, kept as the hardware regression test. Re-run after the board change: benchmarks unchanged. |
+| Rendering engine (`gfx`, `display`, `layout`) | Done: dirty rectangles, indexed sprites with transparency, integer scaling, flip, frame animation, tear-free double buffering with a proven swap. 26 host unit tests. See [docs/rendering-results.md](docs/rendering-results.md). |
+| Placeholder character (`buddy`, `firmware/deskbuddy`) | Done: idle breathing, blinking, antenna light, tap reaction, happy hops. **Currently flashed on the dev board.** |
 | Factory restore round-trip | Done and verified (restore, then factory boot and touch, then reflash bring-up) |
-| Rendering engine, asset pipeline, app, WiFi | **Not started** (intentionally) |
+| Windows bridge, workplace integrations, control panel, needs/moods, persistence, asset pipeline, Wi-Fi | **Not started** (intentionally) |
 
 ## Completed work
 1. **Research:** hardware discovery from the Waveshare wiki and docs, schematic and example repo. Mistakes found in their docs: "ST7701" is wrong (Waveshare lists an ST7262), and the expander is a programmed MCU, not a CH422G.
@@ -46,6 +53,13 @@ Connect through the **UART** Type-C port (CH343) with DIP switch #16 on the ESP3
    - A 128×128 sprite blit takes 1.6 ms.
    - Touch reports at about 110 Hz, and the MCU path from touch interrupt to frame buffer takes about 1.2 ms.
 6. **Restore round-trip:** factory restore verified (flash digest matches, UI and touch confirmed), then bring-up reflashed and verified again.
+7. **Laptop migration:** new work laptop set up (ESP-IDF v5.5.5 user-level install, reproducible build verified, board detected without reflashing). `setup-idf.ps1` now reports the real ESP-IDF version.
+8. **Rendering engine and placeholder robot:**
+   - Architecture reviewed before implementation.
+   - Implemented as host-testable components with an on-device verify mode.
+   - Verified on hardware: 0 stale pixels over 256 checked frames, 0 scanout resyncs over 10 minutes with the screen lit.
+   - Touch interrupt to reaction frame: 8–45 ms (average about 21.5 ms).
+   - Visually confirmed by the user.
 
 ## Architecture decisions
 
@@ -54,15 +68,20 @@ Connect through the **UART** Type-C port (CH343) with DIP switch #16 on the ESP3
 | ESP-IDF, not Arduino or PlatformIO | Waveshare's current examples are IDF 5.5. Their Arduino route needs a custom offline-only board package. Performance tuning (PSRAM, cache, LCD bounce buffers, task pinning) lives in IDF settings. |
 | ESP-IDF pinned to v5.5.5 | Latest 5.5 patch release, the line Waveshare's examples target. Upgrading is a deliberate change in `tools/common.ps1`. |
 | Own `board` component instead of Waveshare's example code | Their code drives EXIO5 high (killing USB), uses a global I2C singleton, and mixes in LVGL. Ours exposes only `board_init()`, `board_backlight_set()`, panel and touch handles, and frame buffers. |
-| `esp_lcd` RGB driver with 2 PSRAM frame buffers and 10-line bounce buffers | Bounce buffers keep scanout stable while PSRAM is busy, and they make CPU writes to the frame buffer coherent without cache flushes. Two buffers allow tear-free swaps. |
+| `esp_lcd` RGB driver with 10-line bounce buffers; frame buffers owned by `display` (driver `no_fb` mode) | Bounce buffers keep scanout stable while PSRAM is busy and make CPU writes coherent without cache flushes. Owning the buffers lets `display` prove a buffer is no longer scanned before reuse: the driver's frame-done callback alone cannot (it can race a swap request). |
 | GT911 handled by interrupt in a high-priority task on core 1 | Keeps touch latency independent of rendering. The LCD interrupt runs on core 0. |
 | PSRAM at 80 MHz, code executed from PSRAM | Stable baseline. 120 MHz is experimental in IDF and is still to be evaluated. |
-| No LVGL yet | Undecided. Pixel-art rendering will be a custom dirty-rectangle blitter. LVGL may still be used for menus and settings later. |
+| Custom dirty-rectangle compositor; no LVGL yet | Pixel art needs integer scaling and palette sprites, and full redraws are too expensive (43–47 ms). Composition happens in a 32 KB internal-RAM strip, so PSRAM is only written. LVGL may still be used for the control panel later, presenting through the same `display` path. |
+| Redraw the union of this and the previous frame's dirty rectangles (no copy-forward) | Sources live in internal RAM, so redrawing writes PSRAM only. Copying from the front buffer would read and write PSRAM (17.6 MB/s). |
+| Behavior → pose → view → sprites | The brain knows no pixels, and the renderer knows no behavior. Future needs/moods and external events drive the brain, while the real art replaces `buddy_art`. |
+| Layout in its own component, configured via Kconfig (stage 65 %, panel side) | Keeps the screen split out of the engine. The 35 % control-panel area is reserved and empty. |
+| Host tests with MSVC (Visual Studio Build Tools) and plain CMake | No ESP32 needed. Linux/CI can build the same tests with gcc. The snapshot tool is the seed of a desktop simulator. |
 | Console on UART0, mirrored to USB-Serial/JTAG | Logs available on either port |
 
 ## Known issues and caveats
-- **Full-screen redraws are expensive** (46 ms). The rendering engine must use dirty rectangles. See the results doc.
-- **The touch dot is drawn straight into the visible frame buffer.** Tearing is possible but was not observed. The real renderer should draw into the back buffer.
+- **Full-screen redraws starve the scanout of PSRAM bandwidth.** They take 43 ms, and bounce fills then exceed their 449 µs budget, causing a one-frame resync glitch. Boot redraws happen before the backlight comes on. Later scene changes must avoid lit full redraws (fade, or spread over frames). See the results doc.
+- **Panel went dark once while the firmware kept running. Cause not yet confirmed.** It may be related to host USB power management: the laptop had just turned its screens off with Windows "USB battery saver" enabled (now disabled by the user). Only a board reset restored the picture, and firmware recovery of the IO-expander state is not implemented yet. See the results doc.
+- **The board stays at work while development happens mostly at home.** Future firmware and asset updates must therefore be deployable without physical access: build and publish via GitHub, deliver through the Windows companion app over USB, with a recovery path (OTA slots) if an update fails. Until then, flashing needs someone at the board.
 - **The UART path depends on DIP switch #16.** In the wrong position the CH343 enumerates but esptool reports "No serial data received".
 - **Native USB disappears whenever any firmware sets EXIO5 high,** for example the factory image or Waveshare's examples. Use the UART port in that case.
 - **The GT911 driver logs "I2C address initialization procedure skipped".** This is expected: reset and address selection go through the IO expander and are done in `board.c`.
@@ -100,13 +119,14 @@ tools\flash-backup.ps1 -Action restore -Image <dump>.bin   # writes 16 MB (~1 mi
 **If auto-reset fails:** hold BOOT, tap RESET, release BOOT, then retry.
 
 ## Next steps (not started; to be approved one at a time)
-1. **Rendering core:**
-   - Back-buffer dirty-rectangle compositor with swaps synchronised to frame completion.
-   - Integer-scaled sprite blitter.
-   - Measure at 80 MHz, then evaluate 120 MHz PSRAM.
-2. **Asset pipeline:**
-   - PC-side Python tool that converts PNG/Aseprite art to palettised RGB565 sprite sheets.
+1. **Windows companion bridge (USB serial):** framed, versioned protocol between device and companion service. Events in (notifications); validated, preconfigured action IDs out. Keep it in its own component, independent of rendering and behavior.
+2. **Control panel UI** in the reserved 35 % area: configurable buttons whose actions are IDs validated by the companion service, never URLs. Decide whether LVGL or our own widgets render it; either way it presents through `display`.
+3. **Character life:** needs, moods, personality and time-based behavior in `buddy_brain`, with persistence (NVS) designed together with the flash layout.
+4. **Asset pipeline and real character art:**
+   - A PC tool that converts PNG/Aseprite art to the palette-index format `gfx_image_t` already uses.
    - Stored in a dedicated flash partition.
    - Final partition layout: NVS, two 3 MB OTA slots, about 9 MB of assets.
-3. **Input and UI layer:** gestures and hit-testing on the touch task. Decide on LVGL for menus.
-4. **WiFi:** local provisioning without cloud, OTA updates, then integrations.
+   - Deployed via GitHub releases and the companion app, so updates can be prepared at home while the board stays at work.
+5. **Desktop simulator** built on the host-test project: SDL window plus mouse as touch, reusing `gfx`, `buddy` and `layout` unchanged.
+6. **Robustness:** restore IO-expander state after a supply dropout, evaluate larger bounce buffers and 120 MHz PSRAM for scanout margin, flash writes (NVS/OTA) while scanning out.
+7. **Wi-Fi:** optional, later.
