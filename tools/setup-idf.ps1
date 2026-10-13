@@ -13,4 +13,5 @@ if (-not (Test-Path $idf)) {
 & (Join-Path $idf 'install.ps1') esp32s3
 if ($LASTEXITCODE) { exit $LASTEXITCODE }
 Enter-Idf
-idf.py --version
+# Call idf.py through Python: the idf.py.exe launcher on PATH answers --version with its own version.
+python (Join-Path $idf 'tools\idf.py') --version
