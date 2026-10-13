@@ -1,0 +1,8 @@
+# Vendor reference checkout (git clone, see README)
+_ref/
+# Flash dumps: large binaries, kept locally; SHA-256 recorded in README
+backup/
+# ESP-IDF build outputs
+build/
+managed_components/
+sdkconfig.old
