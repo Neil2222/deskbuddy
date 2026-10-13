@@ -2,55 +2,62 @@
 
 A standalone desk gadget with animated pixel-art characters, built on the Waveshare ESP32-S3-Touch-LCD-7B.
 
-## Hardware (verified on the connected unit)
+Status: board bring-up done (display, backlight, IO expander, GT911 touch). No application code yet.
+See [HANDOVER.md](HANDOVER.md) for project state and next steps, and [docs/bringup-results.md](docs/bringup-results.md) for measurements.
 
-| Item | Value | Source |
-|---|---|---|
-| Module | ESP32-S3-WROOM-1-N16R8, chip rev v0.2, MAC 44:1b:f6:8d:11:78 | esptool |
-| Flash | 16 MB, manufacturer 0x46 / device 0x4018, quad SPI | esptool `flash_id` |
-| PSRAM | 8 MB octal, AP Memory gen 3, runs at 120 MHz in the factory firmware | factory boot log |
-| Display | 1024×600 IPS panel on a 16-bit RGB565 parallel bus driven by the S3 LCD_CAM peripheral. The panel has no SPI command interface, and Waveshare lists an ST7262 as its timing controller. | schematic, Waveshare repo |
-| RGB timing | PCLK 30.85 MHz, falling edge; HSYNC pulse 162, back porch 152, front porch 48; VSYNC pulse 45, back porch 13, front porch 3. That gives about 33.7 Hz refresh. | `13_lvgl_v8_demo/rgb_lcd_port` |
-| Touch | GT911 at I2C 0x5D on SDA GPIO8 / SCL GPIO9 at 400 kHz. INT is GPIO4 (falling edge). RST goes through the IO expander (EXIO1). Firmware 1060, config version 91, report rate 8 ms. | factory boot log |
-| IO expander | I2C 0x24. It is a Waveshare-programmed MCU, not the CH422G named in the docs, and it provides PWM and ADC. EXIO1 = TP_RST, EXIO2 = backlight enable, EXIO3 = LCD reset, EXIO4 = SD_CS, EXIO5 = USB_SEL, EXIO6 = LCD_VDD_EN. Register 0x05 sets backlight PWM and register 0x06 reads battery ADC. | schematic, Waveshare driver |
-| USB, native port | USB-Serial/JTAG (303A:1001) on GPIO19/20, routed through an FSUSB42 mux. **EXIO5 high switches those pins to the CAN transceiver and the USB device disappears.** | schematic, observed |
-| USB, UART port | CH343P (1A86:55D3) on UART0 (GPIO43/44) with DTR/RTS auto-reset. DIP switch #16 must select the ESP32 rather than the external UART header. | schematic, observed |
-| eFuses | No secure boot, no flash encryption, download mode enabled, USB-JTAG enabled | `espefuse summary` |
+## Layout
 
-## Toolchain setup (Windows)
-
-ESP-IDF is pinned to **v5.5.5**. Waveshare's current LVGL examples require IDF 5.5 or later.
-
-```powershell
-git clone -b v5.5.5 --depth 1 --recursive --shallow-submodules https://github.com/espressif/esp-idf.git C:\esp\v5.5.5\esp-idf
-C:\esp\v5.5.5\esp-idf\install.ps1 esp32s3
+```
+firmware/components/board/   Board support: I2C, IO expander, RGB panel, GT911 touch, backlight
+firmware/bringup/            Bring-up firmware: test pattern, touch dot, performance benchmarks
+tools/common.ps1             Pinned ESP-IDF version, IDF path and serial-port resolution
+tools/setup-idf.ps1          One-time ESP-IDF install
+tools/idf.ps1                Runs idf.py in the pinned environment (auto-detects the port)
+tools/flash-backup.ps1       Full 16 MB flash backup / verify / restore
+docs/                        Hardware findings and measured results
 ```
 
-Set `DESKBUDDY_IDF_PATH` if IDF lives somewhere else. Vendor reference code is cloned into `_ref/` and is gitignored:
+## Fresh Windows setup
+
+Prerequisites: Git, Python 3.9–3.13, PowerShell 5.1+ (built in). The CH343 USB-UART driver installs automatically through Windows Update. If it doesn't, use [WCH's driver](https://www.wch-ic.com/downloads/CH343SER_EXE.html).
+
+```powershell
+git clone https://github.com/neil2222/deskbuddy.git
+cd deskbuddy
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned   # once, if scripts are blocked
+tools\setup-idf.ps1                                   # ESP-IDF v5.5.5 -> %USERPROFILE%\esp\v5.5.5\esp-idf
+```
+
+To keep ESP-IDF elsewhere, set `DESKBUDDY_IDF_PATH` to the `esp-idf` directory first, for both setup and later use. The scripts check that this checkout is exactly v5.5.5.
+
+Optional: clone Waveshare's reference code into `_ref/`, which is gitignored:
 
 ```powershell
 git clone --depth 1 https://github.com/waveshareteam/ESP32-S3-Touch-LCD-7B.git _ref/ESP32-S3-Touch-LCD-7B
 ```
 
-## Build / flash
+## Build, flash, monitor
 
 ```powershell
-tools/idf.ps1 -C <project> build
-tools/idf.ps1 -C <project> -p COM6 flash monitor
+tools\idf.ps1 -C firmware\bringup build
+tools\idf.ps1 -C firmware\bringup flash monitor       # Ctrl+] exits the monitor
+tools\idf.ps1 -C firmware\bringup -p COM7 flash       # explicit port
 ```
 
-Flash over the **UART** Type-C port (COM6 on the dev PC). Firmware that drives EXIO5 high, including the factory image, removes the native USB port at runtime.
+- **Port selection:** the port comes from `-p`, else `$env:ESPPORT`, else auto-detection. Auto-detection prefers the CH343 UART port (USB `1A86:55D3`) over native USB (`303A:1001`).
+- **Which Type-C port to use:** prefer the one labelled **UART**. Its DTR/RTS auto-reset works whatever firmware is running.
+  - Set DIP switch #16 (UART select) to the ESP32 side. In the other position the CH343 talks to the external UART header, and esptool gets "No serial data received".
+- **Native USB port** (labelled **USB**) also works with our firmware. Any firmware that drives IO expander pin EXIO5 high disconnects it, and the factory firmware does this.
+- **Pinned versions:**
+  - ESP-IDF is pinned in `tools/common.ps1`.
+  - Managed components are pinned in `firmware/*/dependencies.lock`.
+  - Build settings are in `sdkconfig.defaults`. `sdkconfig` is generated and not committed.
 
-## Factory firmware backup / restore
+## Factory firmware
 
-The full 16 MB dump is in `backup/factory_full_16MB.bin`. It is not in git.
-
-- SHA-256: `fc48538dcb848ff87a321baaa90f073457cbedba8884b9784e65bf0dfdc18874`
-- Factory app: project `rtc_pcf85063`, built with ESP-IDF v5.4-dev on 2025-06-20. It is a single 8 MB factory partition at 0x10000. It does **not** match any binary in Waveshare's repo, so this dump is the only way to restore it.
+The verified 16 MB factory dump is kept **outside Git**. Its filename, checksum, location and restore procedure are in [HANDOVER.md](HANDOVER.md#factory-firmware-backup).
 
 ```powershell
-tools/flash-backup.ps1 -Port COM6 -Action verify  -Image backup/factory_full_16MB.bin   # read-only check
-tools/flash-backup.ps1 -Port COM6 -Action restore -Image backup/factory_full_16MB.bin   # rewrite + verify
+tools\flash-backup.ps1 -Action verify  -Image <dump>.bin    # read-only compare
+tools\flash-backup.ps1 -Action restore -Image <dump>.bin    # write all 16 MB + verify
 ```
-
-Second copy (same SHA-256, with a `SHA256SUMS.txt` next to it): `%USERPROFILE%\Documents\DeskBuddy-backups\ESP32-S3-Touch-LCD-7B_441bf68d1178_factory_full_16MB.bin`.

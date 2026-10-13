@@ -1,8 +1,39 @@
-# Vendor reference checkout (git clone, see README)
-_ref/
-# Flash dumps: large binaries, kept locally; SHA-256 recorded in README
+# --- Hardware data that must never enter Git ---
+# Flash dumps (the factory backup is ~16 MB and device-specific; see HANDOVER.md)
 backup/
-# ESP-IDF build outputs
+*.bin
+*.elf
+*.map
+
+# --- Vendor reference checkout (re-clone, see README) ---
+_ref/
+
+# --- ESP-IDF build outputs (sdkconfig is regenerated from sdkconfig.defaults) ---
 build/
 managed_components/
+sdkconfig
 sdkconfig.old
+
+# --- Credentials and secrets ---
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+secrets.*
+credentials*
+*_secrets.h
+wifi_credentials*
+sdkconfig.local
+
+# --- Editors / OS / temp ---
+.vscode/
+.idea/
+*.swp
+*~
+*.tmp
+*.log
+Thumbs.db
+desktop.ini
+.DS_Store

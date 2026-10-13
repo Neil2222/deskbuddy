@@ -1,0 +1,5 @@
+dependencies:
+  idf: ">=5.5,<5.6"
+  espressif/esp_lcd_touch_gt911:
+    version: "~1.2.1"
+    public: true # board.h exposes esp_lcd_touch_handle_t
