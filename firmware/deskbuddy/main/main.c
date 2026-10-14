@@ -1,14 +1,15 @@
-// DeskBuddy: placeholder character on the rendering engine.
+// DeskBuddy firmware: the ESP32 platform around the shared core (components/deskbuddy_core).
 //
-// Tasks:  touch  (core 1, prio 10)  GT911 interrupt -> input events
-//         render (core 1, prio 5)   events + time -> character pose -> dirty rectangles -> back buffer -> present
+// Tasks:  touch  (core 1, prio 10)  GT911 interrupt -> core touch events on a queue
+//         render (core 1, prio 5)   events + time -> deskbuddy_core -> back buffer -> present
 // The LCD scanout interrupts run on core 0 (board_init is called from app_main there).
+// Everything about what is drawn and how the character behaves lives in the core, shared with the simulator; this
+// file only provides the clock, the event queue, the frame buffers, the backlight and the statistics.
 #include <inttypes.h>
 #include <string.h>
 
 #include "board.h"
-#include "buddy_brain.h"
-#include "buddy_view.h"
+#include "deskbuddy_core.h"
 #include "display.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -16,31 +17,20 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "gfx_repair.h"
-#include "gfx_scene.h"
 #include "input.h"
-#include "layout.h"
 #include "sdkconfig.h"
 
 static const char *TAG = "deskbuddy";
 
 #define W BOARD_LCD_H_RES
 #define H BOARD_LCD_V_RES
-#define X_ALIGN 32           // dirty rectangles start/end on 64-byte PSRAM cache lines
 #define STRIP_PX (16 * 1024) // 32 KB composition buffer in internal RAM
 #define MAX_SLEEP_MS 1000    // wake at least this often (performance log)
 #define RENDER_PRIO 5
 #define RENDER_CORE 1
 
-#ifdef CONFIG_DESKBUDDY_PANEL_LEFT
-#define PANEL_LEFT true
-#else
-#define PANEL_LEFT false
-#endif
-
 static board_t s_board;
-static layout_t s_layout;
-static gfx_scene_t s_scene;
+static core_t s_core;
 
 typedef struct {
     uint32_t renders, full_renders;
@@ -65,30 +55,11 @@ static int64_t max64(int64_t a, int64_t b)
 #ifdef CONFIG_DESKBUDDY_GFX_VERIFY
 static gfx_color_t *s_verify_px;
 
-// Draws the whole scene into a scratch buffer and compares it with the incrementally repaired frame.
 static void verify_frame(const gfx_surface_t *frame, perf_t *perf)
 {
-    gfx_dirty_t all;
-    gfx_dirty_init(&all, W, H, X_ALIGN);
-    gfx_dirty_add(&all, s_layout.screen);
-    const gfx_surface_t ref = {s_verify_px, W, H, W};
-    gfx_scene_render(&s_scene, &all, &ref);
-    uint32_t bad = 0;
+    const gfx_surface_t scratch = {s_verify_px, W, H, W};
     int fx = -1, fy = -1;
-    for (int y = 0; y < H; y++) {
-        const gfx_color_t *a = frame->px + (size_t)y * W, *b = ref.px + (size_t)y * W;
-        if (memcmp(a, b, W * sizeof(gfx_color_t)) == 0) {
-            continue;
-        }
-        for (int x = 0; x < W; x++) {
-            if (a[x] != b[x]) {
-                if (bad++ == 0) {
-                    fx = x;
-                    fy = y;
-                }
-            }
-        }
-    }
+    const uint32_t bad = core_verify(&s_core, frame, &scratch, &fx, &fy);
     perf->verified++;
     if (bad) {
         perf->mismatched++;
@@ -121,74 +92,40 @@ static void perf_log(const perf_t *p, int64_t window_us)
 static void render_task(void *arg)
 {
     QueueHandle_t events = arg;
-    static gfx_dirty_t changes, redraw;
-    static gfx_repair_t repair;
-    static buddy_brain_t brain;
-    static buddy_view_t view;
-    gfx_dirty_init(&changes, W, H, X_ALIGN);
-    gfx_dirty_init(&redraw, W, H, X_ALIGN);
-    gfx_repair_init(&repair, W, H, X_ALIGN);
-
-    const uint32_t t_start = now_ms();
-    if (!buddy_view_init(&view, &s_scene, s_layout.stage, 10, t_start)) {
-        ESP_LOGE(TAG, "character does not fit the stage or art is invalid");
-        vTaskDelete(NULL);
-        return;
-    }
-    buddy_brain_init(&brain, t_start, esp_random());
-    gfx_scene_invalidate(&s_scene, s_layout.screen); // both buffers start black: first two frames are full
-    ESP_LOGI(TAG, "stage %dx%d at x=%d, panel %dx%d at x=%d; character scale %d at (%d,%d)", s_layout.stage.w,
-             s_layout.stage.h, s_layout.stage.x, s_layout.panel.w, s_layout.panel.h, s_layout.panel.x, view.scale,
-             view.x0, view.y0);
-
     perf_t perf = {0};
     int64_t perf_since = esp_timer_get_time();
     int64_t pending_touch_us = 0; // interrupt time of a touch whose reaction is not on screen yet
-    uint32_t presented = 0;
     uint32_t wait_ms = 0;
-#if CONFIG_DESKBUDDY_DEMO_POKE_S > 0
-    uint32_t next_demo = t_start + CONFIG_DESKBUDDY_DEMO_POKE_S * 1000u;
-#endif
 
     for (;;) {
-        input_event_t ev;
-        if (xQueueReceive(events, &ev, pdMS_TO_TICKS(wait_ms)) == pdTRUE) {
+        input_event_t in;
+        if (xQueueReceive(events, &in, pdMS_TO_TICKS(wait_ms)) == pdTRUE) {
             do {
-                if (ev.type == INPUT_DOWN && buddy_view_hit(&view, ev.x, ev.y)) {
-                    buddy_brain_poke(&brain, now_ms());
-                    if (!pending_touch_us) {
-                        pending_touch_us = ev.irq_us;
-                    }
+                if (core_handle_event(&s_core, &in.ev) && !pending_touch_us) {
+                    pending_touch_us = in.irq_us;
                 }
-            } while (xQueueReceive(events, &ev, 0) == pdTRUE);
+            } while (xQueueReceive(events, &in, 0) == pdTRUE);
         }
 
         const uint32_t now = now_ms();
-#if CONFIG_DESKBUDDY_DEMO_POKE_S > 0
-        if ((int32_t)(now - next_demo) >= 0) {
-            buddy_brain_poke(&brain, now);
-            next_demo = now + CONFIG_DESKBUDDY_DEMO_POKE_S * 1000u;
-        }
-#endif
-        buddy_pose_t pose;
-        uint32_t next = buddy_brain_tick(&brain, now, &pose);
-        const uint32_t view_next = buddy_view_apply(&view, &pose, now);
-        next = view_next < next ? view_next : next;
-
-        gfx_dirty_clear(&changes);
-        gfx_scene_collect(&s_scene, &changes);
-        if (changes.count > 0) {
-            gfx_repair_next(&repair, &changes, &redraw);
+        const uint32_t next = core_update(&s_core, now);
+        const gfx_dirty_t *redraw = core_collect(&s_core);
+        if (redraw) {
             const gfx_surface_t back = {display_back_buffer(), W, H, W};
             const int64_t t0 = esp_timer_get_time();
-            gfx_scene_render(&s_scene, &redraw, &back);
+            core_render(&s_core, redraw, &back);
             const int64_t render_us = esp_timer_get_time() - t0;
+            if (s_core.count.frames == 1) {
+                // Deterministic (idle pose, time 0 of every animation): must match the simulator's first frame.
+                ESP_LOGI(TAG, "first full redraw %.1f ms, frame crc32 %08" PRIx32, render_us / 1000.0,
+                         core_frame_crc32(&back));
+            }
 #ifdef CONFIG_DESKBUDDY_GFX_VERIFY
             verify_frame(&back, &perf);
 #endif
             display_present();
 
-            const int area = gfx_dirty_area(&redraw);
+            const int area = gfx_dirty_area(redraw);
             perf.renders++;
             perf.full_renders += area == W * H;
             perf.render_us_sum += render_us;
@@ -202,13 +139,9 @@ static void render_task(void *arg)
                 perf.touch_us_max = max64(perf.touch_us_max, latency);
                 pending_touch_us = 0;
             }
-            // Bring both buffers up to date before the backlight comes on. The first frame was a full redraw and
-            // is in the repair history, so any change makes the second buffer redraw fully too: request one now.
-            // Full redraws starve the scanout of PSRAM bandwidth (a resync glitch); this keeps them in the dark.
-            if (++presented == 1) {
-                ESP_LOGI(TAG, "first full redraw %.1f ms", render_us / 1000.0);
-                gfx_scene_invalidate(&s_scene, (gfx_rect_t){0, 0, 1, 1});
-            } else if (presented == 2) {
+            // Both buffers hold a full frame now. The full redraws starve the scanout of PSRAM bandwidth (a resync
+            // glitch), so they happen before the backlight comes on.
+            if (s_core.count.frames == 2) {
                 ESP_ERROR_CHECK(board_backlight_set(CONFIG_DESKBUDDY_BACKLIGHT_PERCENT));
                 display_stats_t boot;
                 display_stats_take(&boot);
@@ -228,11 +161,7 @@ static void render_task(void *arg)
 
         // Sleep until the pose may change next, minus the time this iteration took.
         const uint32_t spent = now_ms() - now;
-        wait_ms = next > spent && presented != 1 ? next - spent : 0;
-#if CONFIG_DESKBUDDY_DEMO_POKE_S > 0
-        const int32_t to_demo = (int32_t)(next_demo - now_ms());
-        wait_ms = to_demo <= 0 ? 0 : ((uint32_t)to_demo < wait_ms ? (uint32_t)to_demo : wait_ms);
-#endif
+        wait_ms = next > spent ? next - spent : 0;
         if (wait_ms > MAX_SLEEP_MS) {
             wait_ms = MAX_SLEEP_MS;
         }
@@ -242,11 +171,20 @@ static void render_task(void *arg)
 void app_main(void)
 {
     const int64_t t_boot = esp_timer_get_time();
-    s_layout = layout_compute(W, H, CONFIG_DESKBUDDY_STAGE_PERCENT, PANEL_LEFT, X_ALIGN);
+    core_config_t cfg;
+    core_config_defaults(&cfg);
+    cfg.screen_w = W;
+    cfg.screen_h = H;
+    cfg.stage_percent = CONFIG_DESKBUDDY_STAGE_PERCENT;
+#ifdef CONFIG_DESKBUDDY_PANEL_LEFT
+    cfg.panel_left = true;
+#endif
+    cfg.seed = esp_random();
+    cfg.demo_poke_ms = CONFIG_DESKBUDDY_DEMO_POKE_S * 1000u;
 
     gfx_color_t *strip = heap_caps_malloc(STRIP_PX * sizeof(gfx_color_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    if (!strip || !gfx_scene_init(&s_scene, W, H, layout_background, &s_layout, strip, STRIP_PX, X_ALIGN)) {
-        ESP_LOGE(TAG, "no internal RAM for the composition strip");
+    if (!strip || !core_init(&s_core, &cfg, strip, STRIP_PX, now_ms())) {
+        ESP_LOGE(TAG, "core init failed (composition strip, layout or character)");
         abort();
     }
 #ifdef CONFIG_DESKBUDDY_GFX_VERIFY
@@ -268,6 +206,9 @@ void app_main(void)
         ESP_LOGE(TAG, "cannot start the render task");
         abort();
     }
+    const layout_t *l = &s_core.layout;
     ESP_LOGI(TAG, "started in %.0f ms; free internal %u B, PSRAM %u B", (esp_timer_get_time() - t_boot) / 1000.0,
              heap_caps_get_free_size(MALLOC_CAP_INTERNAL), heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+    ESP_LOGI(TAG, "stage %dx%d at x=%d, panel %dx%d at x=%d; character scale %d at (%d,%d)", l->stage.w, l->stage.h,
+             l->stage.x, l->panel.w, l->panel.h, l->panel.x, s_core.view.scale, s_core.view.x0, s_core.view.y0);
 }

@@ -32,7 +32,7 @@ IRAM_ATTR void input_touch_irq(void *ctx)
 // Moves may be dropped when the consumer lags (newer ones follow); down/up must arrive, so they evict the oldest.
 static void push(const input_event_t *ev)
 {
-    if (xQueueSend(s_queue, ev, 0) == pdTRUE || ev->type == INPUT_MOVE) {
+    if (xQueueSend(s_queue, ev, 0) == pdTRUE || ev->ev.type == CORE_EVENT_TOUCH_MOVE) {
         return;
     }
     input_event_t oldest;
@@ -56,18 +56,19 @@ static void touch_task(void *arg)
         esp_lcd_touch_get_data(s_touch, pt, &count, 1);
 
         input_event_t ev = {.irq_us = t};
+        ev.ev.time_ms = (uint32_t)(t / 1000);
         if (count > 0) {
-            ev.x = (int16_t)pt[0].x;
-            ev.y = (int16_t)pt[0].y;
-            ev.type = down ? INPUT_MOVE : INPUT_DOWN;
-            if (ev.type == INPUT_MOVE && ev.x == last.x && ev.y == last.y) {
+            ev.ev.touch.x = (int16_t)pt[0].x;
+            ev.ev.touch.y = (int16_t)pt[0].y;
+            ev.ev.type = down ? CORE_EVENT_TOUCH_MOVE : CORE_EVENT_TOUCH_DOWN;
+            if (ev.ev.type == CORE_EVENT_TOUCH_MOVE && ev.ev.touch.x == last.ev.touch.x &&
+                ev.ev.touch.y == last.ev.touch.y) {
                 continue;
             }
             down = true;
         } else if (down) {
-            ev = last;
-            ev.type = INPUT_UP;
-            ev.irq_us = t;
+            ev.ev.type = CORE_EVENT_TOUCH_UP;
+            ev.ev.touch = last.ev.touch; // released where it was last seen
             down = false;
         } else {
             continue;
