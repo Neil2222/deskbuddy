@@ -17,6 +17,7 @@ sdkconfig.old
 # --- .NET build outputs (companion/) ---
 bin/
 obj/
+companion/publish/
 
 # --- Credentials and secrets ---
 .env
