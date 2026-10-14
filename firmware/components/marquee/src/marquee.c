@@ -256,21 +256,13 @@ int marquee_glyphs(const char *utf8, uint8_t *out, int max)
     return n;
 }
 
-// Lays the glyphs out as LED columns: each glyph without its empty side columns, one blank column between
-// glyphs, a space three columns wide.
-static void layout(marquee_t *m, const uint8_t *glyphs, int n)
+// Lays the glyphs out as LED columns (bit r = font row r): each glyph without its empty side columns, one blank
+// column between glyphs, a space three columns wide. Stops before a glyph that would not fit in max columns.
+static int lay_out(const uint8_t *glyphs, int n, uint8_t *col, int max)
 {
-    m->ncols = 0;
+    int ncols = 0;
     for (int i = 0; i < n; i++) {
-        if (i > 0) {
-            m->col[m->ncols++] = 0;
-        }
         const uint8_t *f = k_font[glyphs[i] - FONT_FIRST];
-        if (glyphs[i] == ' ') {
-            m->col[m->ncols++] = 0;
-            m->col[m->ncols++] = 0;
-            continue;
-        }
         int first = 0, last = 4;
         while (first < 4 && !f[first]) {
             first++;
@@ -278,10 +270,34 @@ static void layout(marquee_t *m, const uint8_t *glyphs, int n)
         while (last > first && !f[last]) {
             last--;
         }
+        const int need = (i > 0) + (glyphs[i] == ' ' ? 2 : last - first + 1);
+        if (ncols + need > max) {
+            break;
+        }
+        if (i > 0) {
+            col[ncols++] = 0;
+        }
+        if (glyphs[i] == ' ') {
+            col[ncols++] = 0;
+            col[ncols++] = 0;
+            continue;
+        }
         for (int c = first; c <= last; c++) {
-            m->col[m->ncols++] = f[c];
+            col[ncols++] = f[c];
         }
     }
+    return ncols;
+}
+
+static void layout(marquee_t *m, const uint8_t *glyphs, int n)
+{
+    m->ncols = lay_out(glyphs, n, m->col, (int)sizeof(m->col));
+}
+
+int marquee_text_columns(const char *utf8, uint8_t *cols, int max)
+{
+    uint8_t glyphs[MARQUEE_TEXT_MAX];
+    return lay_out(glyphs, marquee_glyphs(utf8, glyphs, MARQUEE_TEXT_MAX), cols, max);
 }
 
 static int pass_cols(const marquee_t *m)

@@ -217,22 +217,6 @@ void test_office_pauses_character_mid_monster(void)
     CHECK(buddy_brain_event(&b, BUDDY_EVENT_DRINK_MONSTER, back + 10)); // a new can works
 }
 
-void test_office_moon_button(void)
-{
-    static gfx_scene_t scene;
-    static office_button_t m;
-    CHECK(gfx_scene_init(&scene, W, H, office_background, NULL, s_strip, 16 * 1024, ALIGN));
-    const gfx_rect_t area = {672, 468, 352, 132}; // bottom of the control panel
-    CHECK(office_button_init(&m, &scene, area, 5, 10));
-    const gfx_rect_t r = gfx_sprite_bounds(&m.sprite);
-    CHECK(gfx_rect_contains_rect(area, r));
-    CHECK(office_button_hit(&m, r.x + r.w / 2, r.y + r.h / 2));
-    CHECK(!office_button_hit(&m, 300, 300));
-    office_button_show(&m, false);
-    CHECK(!office_button_hit(&m, r.x + r.w / 2, r.y + r.h / 2)); // hidden buttons cannot be pressed
-    CHECK(!office_button_init(&m, &scene, (gfx_rect_t){0, 0, 10, 10}, 5, 10)); // smaller than the moon itself
-}
-
 // The whole loop as the firmware runs it (scene, character, clock, switch, double-buffer repair): into Office
 // Mode in the middle of the Monster's charging and back again. Every presented buffer must equal a full redraw,
 // full-screen frames (which make the scanout resync) happen only while booting or switching, and the other

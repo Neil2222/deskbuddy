@@ -78,6 +78,10 @@ uint32_t marquee_duration_ms(const marquee_t *m);
 // Text policy: converts UTF-8 into glyph codes (see above), at most max of them. Returns the count.
 int marquee_glyphs(const char *utf8, uint8_t *out, int max);
 
+// The sign's 5x7 font for other pixel text (the touchscreen menu): writes text (UTF-8, same policy) as the sign lays
+// it out, one byte per column with bit r = font row r (7 rows), at most max columns. Returns the column count.
+int marquee_text_columns(const char *utf8, uint8_t *cols, int max);
+
 #ifdef __cplusplus
 }
 #endif

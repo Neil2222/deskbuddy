@@ -38,6 +38,17 @@ const char *buddy_mood_name(buddy_mood_t mood);
 // Looks a name up. Returns false (and leaves *out alone) for anything that is not a mood.
 bool buddy_mood_parse(const char *name, buddy_mood_t *out);
 
+// The face that stands for a mood in pictures of Buddy (the touchscreen menu, the companion's icons): a typical
+// expression from its loop, whether the antenna light is on, and whether a cigarette hangs from his mouth.
+typedef struct {
+    buddy_eyes_t eyes;
+    buddy_mouth_t mouth;
+    bool lit;
+    bool cig;
+} buddy_face_t;
+
+buddy_face_t buddy_mood_face(buddy_mood_t mood);
+
 // Where a mood's loop is.
 typedef struct {
     uint32_t t;     // ms into the current cycle

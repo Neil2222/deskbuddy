@@ -31,7 +31,7 @@ DeskBuddy and the Windows companion (`companion/`) talk over the board's **UART*
 | `status` | | `ok mode=<normal\|office\|monster> mood=<mood> time=<set\|unset> msg=<showing\|idle> queued=<0\|1> uptime=<s>` |
 | `poke` | | `ok`, or `err busy mode=<mode>` (Office Mode, Monster running, screen not up yet) |
 | `monster` | | `ok`, or `err busy mode=<mode>` |
-| `mode.set` | `mode=office\|normal` | `ok` (switches like the moon button / a tap), or `err unavailable` |
+| `mode.set` | `mode=office\|normal` | `ok` (switches like *Office* in the touchscreen menu / a tap on the clock), or `err unavailable` |
 | `time.set` | `utc=<s> [ms=<0-999>] off=<min> [next=<utc s> next_off=<min>]` | `ok` |
 | `msg.show` | `id=<1-4294967295> [style=marquee] text=<percent-encoded UTF-8>` | `ok` (on the sign now), `ok queued=1` (waits its turn), `ok dup=1` (this id was already taken), `err busy mode=<mode>` (one is already waiting), `err unsupported` (unknown style), `err bad_args` |
 | `mood.set` | `name=<mood> [secs=<1-86400>]` | `ok`, `err unsupported` (a mood this firmware does not have), `err bad_args` |
@@ -55,6 +55,7 @@ DeskBuddy and the Windows companion (`companion/`) talk over the board's **UART*
 - **Exactly one at a time:** a new mood replaces the current one and starts its animation from the beginning; the same mood again keeps running (only its duration changes).
 - **`secs`:** back to `idle` after that many seconds (`evt mood` reports it); without it the mood stays until changed. Useful for events: `mood.set name=happy secs=30` after a successful build.
 - **Always accepted,** also in Office Mode and during a Monster sequence or a tap reaction: those play to their end, then the new mood shows. Messages, taps and Monster still interrupt any mood, which then resumes.
+- **One source of truth:** the device owns the mood. Moods picked on the touchscreen menu go the same way as `mood.set`, and every change, from either side, is announced with `evt mood`; the companion shows what the device reports.
 - **For integrations:** an AI agent working, a build or a download in progress → `working`; done → `happy secs=…`; failed → `angry secs=…`; a coffee or smoke break → `peukie`; quiet, nothing going on → `relaxed`; an idle computer → `sleepy`; back → `idle`.
 
 ## Events
@@ -63,7 +64,7 @@ DeskBuddy and the Windows companion (`companion/`) talk over the board's **UART*
 |---|---|
 | `evt boot proto=1 fw=<version>` | the firmware started (the companion re-sends the time) |
 | `evt mode mode=<normal\|office\|monster>` | the mode changed, by touch or by command |
-| `evt mood mood=<mood>` | the mood changed: by `mood.set`, or a timed mood ran out |
+| `evt mood mood=<mood>` | the mood changed: by `mood.set`, on the touchscreen menu, or a timed mood ran out |
 | `evt msg id=<id> state=<showing\|done>` | a message went up on the sign / finished |
 
 ## Errors
@@ -88,6 +89,6 @@ DeskBuddy and the Windows companion (`companion/`) talk over the board's **UART*
 
 ## Adding a mood
 
-1. Firmware: add it to `buddy_mood_t` and its name in `components/buddy/src/buddy_mood.c` (the name list feeds `hello`'s `moods=` and `mood.set`), and write its loop there from the shared pieces (expressions, the hand, particles in `buddy_pose.h`); extend the host tests (`test_mood.c`).
-2. Companion: add an entry to `Activities.cs` with its face (`tools/host-test.ps1 -Icons` exports `face-<mood>.png` from the firmware's art; add the expression to `firmware/tests/host/icons.c`).
+1. Firmware: add it to `buddy_mood_t` and its name in `components/buddy/src/buddy_mood.c` (the name list feeds `hello`'s `moods=` and `mood.set`), its face in `k_faces` there, and write its loop from the shared pieces (expressions, the hand, particles in `buddy_pose.h`); add its tile to the touchscreen menu (`MOOD(...)` in `components/menu/src/menu_items.c`); extend the host tests (`test_mood.c`).
+2. Companion: add an entry to `Activities.cs` with its face (`tools/host-test.ps1 -Icons` exports `face-<mood>.png` from the firmware's art, using the same `k_faces`).
 3. Document it here.

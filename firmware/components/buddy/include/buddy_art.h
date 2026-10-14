@@ -34,15 +34,14 @@ typedef struct {
     int x, y;
 } buddy_point_t;
 
-// Props for the Monster sequence and the trigger button. Points marked "body" move with the robot (lift, shake),
-// "head" ones also with the head (wobble, nod); the others stand on the ground.
+// Props for the Monster sequence. Points marked "body" move with the robot (lift, shake), "head" ones also with
+// the head (wobble, nod); the others stand on the ground.
 typedef struct {
     gfx_image_t can[BUDDY_CAN_LEVELS], can_crushed, can_shadow;
     gfx_image_t port, plug, coil, hand, alert;
     gfx_image_t bolt[BUDDY_BOLT_SHAPES];
     gfx_image_t spark[BUDDY_SPARK_FRAMES], poof[BUDDY_POOF_FRAMES];
     gfx_image_t battery[BUDDY_BATTERY_FRAMES]; // indexed by buddy_props_t.battery - 1
-    gfx_image_t plate;                         // button background
 
     // Mood props: the cigarette by length and ember, and the particle kinds (part_frames[kind] frames each).
     gfx_image_t cig[BUDDY_CIG_LENGTHS][BUDDY_EMBERS];

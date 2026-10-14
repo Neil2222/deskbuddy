@@ -1,4 +1,4 @@
-// Office Mode: a quiet desk clock that replaces the cartoon, and the moon button that turns it on.
+// Office Mode: a quiet desk clock that replaces the cartoon, and the moon that stands for it.
 //
 // Hardware independent: the caller supplies the wall-clock time (or none), the scene, and the glyph memory. The
 // clock face is HH:MM in large thin numerals (24-hour), with the date underneath in letter-spaced capitals
@@ -54,15 +54,9 @@ uint32_t office_clock_apply(office_clock_t *c, const struct tm *tm, uint32_t ms)
 // Formats the date line for tm ("TUE 14 OCT 2026"), or "CLOCK NOT SET" for NULL.
 void office_clock_date_text(const struct tm *tm, char out[OFFICE_DATE_MAX]);
 
-// The moon in the control panel: tap it to switch to Office Mode.
-typedef struct {
-    gfx_sprite_t sprite;
-} office_button_t;
-
-// Centres the button in `area` at the given scale, at depth z. Returns false if it does not fit.
-bool office_button_init(office_button_t *b, gfx_scene_t *scene, gfx_rect_t area, int scale, int z);
-void office_button_show(office_button_t *b, bool visible);
-bool office_button_hit(const office_button_t *b, int x, int y);
+// The moon on a round plate: Office Mode's symbol in pictures of DeskBuddy (the companion's Office tile).
+// NULL if the built-in art is malformed (a programming error, caught by the host tests).
+const gfx_image_t *office_moon_image(const gfx_palette_t **palette);
 
 #ifdef __cplusplus
 }

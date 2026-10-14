@@ -9,8 +9,9 @@ All numbers come from the device's own `PERF` logs (5-second windows). The bring
 |---|---|---|
 | `components/gfx` | Rectangles, dirty-rectangle set, indexed sprites with transparency, integer scaling and horizontal flip, frame animation, scene compositor, double-buffer repair | No (host-tested) |
 | `components/buddy` | Placeholder robot: behavior state machine and events (`buddy_brain`), the Monster Energy sequence (`buddy_monster`), ASCII programmer art (`buddy_art`), pose-to-sprite mapping including the procedural arm and cable (`buddy_view`) | No (host-tested) |
-| `components/layout` | Character stage (default 65 % of the width, rounded to 672 px) and the reserved control-panel area; background painting | No (host-tested) |
-| `components/office` | Office Mode: antialiased stroke font rasterized into indexed images, the desk-clock face, the moon button, and the scene switch (`office_switch`) | No (host-tested) |
+| `components/layout` | Character stage (default 65 % of the width, rounded to 672 px) and the control panel (352 px); background painting | No (host-tested) |
+| `components/menu` | The touchscreen menu in the control panel: item table, navigation and touch rules (`menu`), and its view: one sprite per button at 2x, redrawn in place only when it changes, tiles flipping in one by one on a page change (`menu_view`) | No (host-tested) |
+| `components/office` | Office Mode: antialiased stroke font rasterized into indexed images, the desk-clock face, the moon art, and the scene switch (`office_switch`) | No (host-tested) |
 | `components/display` | Application-owned frame buffers, the scanout fill, and the buffer-swap proof | Yes |
 | `deskbuddy/main` | Touch task (GT911 → events), serial link to the Windows companion (commands → events, replies), render loop, Office Mode switching, backlight at boot, wall-clock time with the companion's time zone, layout configuration (Kconfig), performance log, verify mode | Yes |
 

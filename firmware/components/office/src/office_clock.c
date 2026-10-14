@@ -189,12 +189,12 @@ uint32_t office_clock_apply(office_clock_t *c, const struct tm *tm, uint32_t ms)
     return ms < 500 ? 500 - ms : 1000 - ms;
 }
 
-// --- Moon button ------------------------------------------------------------------------------------------------
+// --- The moon ---------------------------------------------------------------------------------------------------
 
 static const char k_moon_keys[] = ".pPYy";
 static gfx_color_t s_moon_colors[] = {
     0,
-    GFX_RGB(64, 74, 108),   // p plate edge (as the Monster plate)
+    GFX_RGB(64, 74, 108),   // p plate edge (as the menu's buttons)
     GFX_RGB(32, 37, 58),    // P plate
     GFX_RGB(226, 222, 186), // Y moon
     GFX_RGB(150, 148, 128), // y moon shade
@@ -219,36 +219,12 @@ static uint8_t s_moon_px[MOON_N * 13];
 static gfx_image_t s_moon_img;
 static const gfx_palette_t k_moon_pal = {s_moon_colors, sizeof(s_moon_colors) / sizeof(s_moon_colors[0])};
 
-bool office_button_init(office_button_t *b, gfx_scene_t *scene, gfx_rect_t area, int scale, int z)
+const gfx_image_t *office_moon_image(const gfx_palette_t **palette)
 {
-    memset(b, 0, sizeof(*b));
     if (!s_moon_img.px &&
         !gfx_image_from_ascii(&s_moon_img, s_moon_px, sizeof(s_moon_px), k_moon, (int)MOON_N, k_moon_keys)) {
-        return false;
+        return NULL;
     }
-    const int fit = area.h * 80 / 100 / s_moon_img.h;
-    scale = scale < fit ? scale : fit;
-    if (scale < 1 || scale > 255 || s_moon_img.w * scale > area.w) {
-        return false;
-    }
-    b->sprite = (gfx_sprite_t){.image = &s_moon_img, .palette = &k_moon_pal, .scale = (uint8_t)scale};
-    b->sprite.x = area.x + (area.w - s_moon_img.w * scale) / 2;
-    b->sprite.y = area.y + (area.h - s_moon_img.h * scale) / 2;
-    return gfx_scene_add(scene, &b->sprite, z);
-}
-
-void office_button_show(office_button_t *b, bool visible)
-{
-    set_hidden(&b->sprite, !visible);
-}
-
-bool office_button_hit(const office_button_t *b, int x, int y)
-{
-    gfx_rect_t r = gfx_sprite_bounds(&b->sprite);
-    const int margin = r.w / 4; // a small target: be generous with fingers
-    r.x -= margin;
-    r.y -= margin;
-    r.w += 2 * margin;
-    r.h += 2 * margin;
-    return gfx_rect_contains_point(r, x, y);
+    *palette = &k_moon_pal;
+    return &s_moon_img;
 }

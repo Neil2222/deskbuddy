@@ -27,6 +27,21 @@ bool buddy_mood_parse(const char *name, buddy_mood_t *out)
     return false;
 }
 
+static const buddy_face_t k_faces[BUDDY_MOOD_COUNT] = {
+    [BUDDY_MOOD_IDLE] = {BUDDY_EYES_OPEN, BUDDY_MOUTH_NEUTRAL, true, false},
+    [BUDDY_MOOD_RELAXED] = {BUDDY_EYES_LIDDED, BUDDY_MOUTH_SMILE, true, false},
+    [BUDDY_MOOD_PEUKIE] = {BUDDY_EYES_LIDDED, BUDDY_MOUTH_SMIRK, true, true},
+    [BUDDY_MOOD_ANGRY] = {BUDDY_EYES_ANGRY, BUDDY_MOUTH_FROWN, true, false},
+    [BUDDY_MOOD_SLEEPY] = {BUDDY_EYES_CLOSED, BUDDY_MOUTH_NEUTRAL, false, false},
+    [BUDDY_MOOD_WORKING] = {BUDDY_EYES_FOCUS, BUDDY_MOUTH_TONGUE, true, false},
+    [BUDDY_MOOD_HAPPY] = {BUDDY_EYES_HAPPY, BUDDY_MOUTH_SMILE, true, false},
+};
+
+buddy_face_t buddy_mood_face(buddy_mood_t mood)
+{
+    return k_faces[mood < BUDDY_MOOD_COUNT ? mood : BUDDY_MOOD_IDLE];
+}
+
 static uint32_t mix(uint32_t x)
 {
     x ^= x >> 16;

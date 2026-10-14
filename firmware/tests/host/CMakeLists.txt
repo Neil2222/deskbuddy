@@ -1,4 +1,4 @@
-# Host-side unit tests for the hardware-independent components (gfx, buddy, layout). No ESP32 or ESP-IDF needed.
+# Host-side unit tests for the hardware-independent components (gfx, buddy, layout, menu...). No ESP32 or ESP-IDF.
 # Windows: tools/host-test.ps1 (MSVC). Linux/macOS: cmake -S firmware/tests/host -B build && cmake --build build
 #                                                    && ctest --test-dir build --output-on-failure
 cmake_minimum_required(VERSION 3.16)
@@ -16,7 +16,8 @@ file(GLOB CORE_SRCS CONFIGURE_DEPENDS
      ${COMPONENTS_DIR}/layout/src/*.c
      ${COMPONENTS_DIR}/office/src/*.c
      ${COMPONENTS_DIR}/link/src/*.c
-     ${COMPONENTS_DIR}/marquee/src/*.c)
+     ${COMPONENTS_DIR}/marquee/src/*.c
+     ${COMPONENTS_DIR}/menu/src/*.c)
 
 if(MSVC)
     set(WARNINGS /W4 /WX)
@@ -39,14 +40,15 @@ target_include_directories(deskbuddy_core PUBLIC
     ${COMPONENTS_DIR}/layout/include
     ${COMPONENTS_DIR}/office/include
     ${COMPONENTS_DIR}/link/include
-    ${COMPONENTS_DIR}/marquee/include)
+    ${COMPONENTS_DIR}/marquee/include
+    ${COMPONENTS_DIR}/menu/include)
 target_compile_options(deskbuddy_core PRIVATE ${WARNINGS})
 if(NOT MSVC)
     target_link_libraries(deskbuddy_core PUBLIC m)
 endif()
 
 add_executable(host_tests main.c test_util.c test_dirty.c test_scene.c test_repair.c test_anim.c test_buddy.c
-               test_monster.c test_mood.c test_office.c test_link.c test_marquee.c)
+               test_monster.c test_mood.c test_office.c test_link.c test_marquee.c test_menu.c)
 target_link_libraries(host_tests PRIVATE deskbuddy_core)
 target_compile_options(host_tests PRIVATE ${WARNINGS})
 

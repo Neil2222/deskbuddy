@@ -5,10 +5,9 @@
 //   buddy_icons <output_dir>          (tools/host-test.ps1 -Icons writes assets/buddy)
 //
 // Writes:
-//   face-<expression>.png, @8x     Buddy's head: antenna, head, eyes, mouth (24x21 at 1x). The expressions are
-//                                  eye/mouth pairs the firmware itself shows: neutral (idle), happy (happy hops),
-//                                  surprised (a tap), sleepy (mid-blink, antenna light off), and the moods
-//                                  relaxed, peukie (with the cigarette at his mouth), angry and working.
+//   face-<expression>.png, @8x     Buddy's head: antenna, head, eyes, mouth (24x21 at 1x). Every mood's face as the
+//                                  touchscreen menu shows it (buddy_mood_face(); idle's is "neutral"), and
+//                                  "surprised" (a tap).
 //   buddy.png, buddy@8x.png        the whole robot, standing
 //   can.png, moon.png              the Monster can and the Office Mode moon, as on the device
 //   icon-<size>.png, buddy.ico     the application icon in 16..256 px. From 24 px up: the whole head at the largest
@@ -20,7 +19,7 @@
 #include <string.h>
 
 #include "buddy_art.h"
-#include "gfx_scene.h"
+#include "buddy_mood.h"
 #include "office_clock.h"
 #include "png.h"
 
@@ -212,12 +211,6 @@ static void save_ico(const char *dir, const canvas_t *img, int n)
     printf("%s (%d sizes)\n", path, n);
 }
 
-static void background(void *ctx, gfx_color_t *dst, int x, int y, int w)
-{
-    (void)ctx, (void)x, (void)y;
-    memset(dst, 0, (size_t)w * sizeof(*dst));
-}
-
 int main(int argc, char **argv)
 {
     const char *dir = argc > 1 ? argv[1] : ".";
@@ -227,26 +220,22 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    // Faces.
-    static const struct {
-        const char *name;
-        buddy_eyes_t eyes;
-        buddy_mouth_t mouth;
-        bool lit, cig;
-    } faces[] = {
-        {"neutral", BUDDY_EYES_OPEN, BUDDY_MOUTH_NEUTRAL, true, false},
-        {"happy", BUDDY_EYES_HAPPY, BUDDY_MOUTH_SMILE, true, false},
-        {"surprised", BUDDY_EYES_WIDE, BUDDY_MOUTH_OPEN, true, false},
-        {"sleepy", BUDDY_EYES_CLOSED, BUDDY_MOUTH_NEUTRAL, false, false},
-        {"relaxed", BUDDY_EYES_LIDDED, BUDDY_MOUTH_SMILE, true, false},
-        {"peukie", BUDDY_EYES_LIDDED, BUDDY_MOUTH_SMIRK, true, true},
-        {"angry", BUDDY_EYES_ANGRY, BUDDY_MOUTH_FROWN, true, false},
-        {"working", BUDDY_EYES_FOCUS, BUDDY_MOUTH_TONGUE, true, false},
-    };
+    // Faces: every mood's (as the touchscreen menu shows them; idle's is "neutral"), and a tap's surprise.
+    struct {
+        char name[16];
+        buddy_face_t face;
+    } faces[BUDDY_MOOD_COUNT + 1];
+    for (int m = 0; m < BUDDY_MOOD_COUNT; m++) {
+        snprintf(faces[m].name, sizeof(faces[m].name), "%s", m == BUDDY_MOOD_IDLE ? "neutral" : buddy_mood_name(m));
+        faces[m].face = buddy_mood_face((buddy_mood_t)m);
+    }
+    snprintf(faces[BUDDY_MOOD_COUNT].name, sizeof(faces[0].name), "surprised");
+    faces[BUDDY_MOOD_COUNT].face = (buddy_face_t){BUDDY_EYES_WIDE, BUDDY_MOUTH_OPEN, true, false};
     canvas_t neutral = {0};
-    for (size_t i = 0; i < sizeof(faces) / sizeof(faces[0]); i++) {
-        canvas_t full = head(a, faces[i].eyes, faces[i].mouth, faces[i].lit ? &a->antenna_on : &a->antenna_off);
-        if (faces[i].cig) { // in the corner of his mouth, glowing, all within the face screen
+    for (int i = 0; i <= BUDDY_MOOD_COUNT; i++) {
+        const buddy_face_t *f = &faces[i].face;
+        canvas_t full = head(a, f->eyes, f->mouth, f->lit ? &a->antenna_on : &a->antenna_off);
+        if (f->cig) { // in the corner of his mouth, glowing, all within the face screen
             const buddy_point_t m = a->props.hand_mouth;
             blit(&full, &a->props.cig[1][1], &a->palette, m.x - BUDDY_CIG_GRIP, m.y - 1);
         }
@@ -259,7 +248,7 @@ int main(int argc, char **argv)
         save(dir, name, &big);
         free(big.px);
         free(face.px);
-        if (i == 0) {
+        if (i == BUDDY_MOOD_IDLE) {
             neutral = full;
         } else {
             free(full.px);
@@ -277,20 +266,18 @@ int main(int argc, char **argv)
     canvas_t robot_big = place(&robot_trim, 8, 0);
     save(dir, "buddy@8x", &robot_big);
 
-    // Props from the control panel: the Monster can and the Office Mode moon.
+    // Props: the Monster can and the Office Mode moon, as on the device.
     canvas_t can = make(a->props.can[BUDDY_CAN_LEVELS - 1].w, a->props.can[BUDDY_CAN_LEVELS - 1].h);
     blit(&can, &a->props.can[BUDDY_CAN_LEVELS - 1], &a->palette, 0, 0);
     save(dir, "can", &can);
-    static gfx_color_t strip[64];
-    static gfx_scene_t scene;
-    static office_button_t moon_button;
-    if (!gfx_scene_init(&scene, 64, 64, background, NULL, strip, 64, 1) ||
-        !office_button_init(&moon_button, &scene, (gfx_rect_t){0, 0, 64, 64}, 1, 0)) {
-        fprintf(stderr, "moon setup failed\n");
+    const gfx_palette_t *moon_pal;
+    const gfx_image_t *moon_img = office_moon_image(&moon_pal);
+    if (!moon_img) {
+        fprintf(stderr, "moon art failed to load\n");
         return 1;
     }
-    canvas_t moon = make(moon_button.sprite.image->w, moon_button.sprite.image->h);
-    blit(&moon, moon_button.sprite.image, moon_button.sprite.palette, 0, 0);
+    canvas_t moon = make(moon_img->w, moon_img->h);
+    blit(&moon, moon_img, moon_pal, 0, 0);
     save(dir, "moon", &moon);
 
     // Application icon. Head rows/columns below are in the head image; the head starts at head_at in the canvas.

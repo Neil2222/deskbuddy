@@ -20,7 +20,7 @@ void test_buddy_art_decodes_within_palette(void)
     int n = 0;
     const gfx_image_t *singles[] = {&a->head, &a->torso, &a->antenna_on, &a->antenna_off, &a->antenna_green,
                                     &a->antenna_white, &a->shadow, &a->shadow_small, &p->can_crushed,
-                                    &p->can_shadow, &p->port, &p->plug, &p->coil, &p->hand, &p->alert, &p->plate};
+                                    &p->can_shadow, &p->port, &p->plug, &p->coil, &p->hand, &p->alert};
     for (unsigned i = 0; i < sizeof(singles) / sizeof(singles[0]); i++) {
         all[n++] = singles[i];
     }

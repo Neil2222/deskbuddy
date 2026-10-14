@@ -1,5 +1,5 @@
-// DeskBuddy: placeholder character on the rendering engine, the Office Mode desk clock, and the serial link to the
-// Windows companion.
+// DeskBuddy: placeholder character on the rendering engine, the touchscreen menu in the control panel, the Office
+// Mode desk clock, and the serial link to the Windows companion.
 //
 // Tasks:  touch  (core 1, prio 10)  GT911 interrupt -> input events
 //         render (core 1, prio 5)   events + time -> character pose or clock -> dirty rectangles -> back buffer
@@ -29,6 +29,8 @@
 #include "input.h"
 #include "layout.h"
 #include "marquee.h"
+#include "menu.h"
+#include "menu_view.h"
 #include "office_clock.h"
 #include "office_switch.h"
 #include "serial_link.h"
@@ -43,7 +45,6 @@ static const char *TAG = "deskbuddy";
 #define MAX_SLEEP_MS 1000    // wake at least this often (performance log)
 #define RENDER_PRIO 5
 #define RENDER_CORE 1
-#define MOON_SCALE 5         // the Office Mode button: a small moon, 65 px
 
 #ifdef CONFIG_DESKBUDDY_PANEL_LEFT
 #define PANEL_LEFT true
@@ -145,19 +146,36 @@ static void perf_log(const perf_t *p, int64_t window_us)
 #endif
 }
 
-// Turns a touch-down into a character event: the Monster button in the control panel, or a poke on the robot.
-static bool touch_event(const buddy_view_t *view, const buddy_button_t *button, bool has_button,
-                        const input_event_t *ev, buddy_event_t *out)
+// What the menu shows depends on Buddy; the brain owns his state (reading the mood also ends a timed one).
+static menu_status_t menu_status(buddy_brain_t *brain, bool has_office, uint32_t now)
 {
-    if (has_button && buddy_button_hit(button, ev->x, ev->y)) {
-        *out = BUDDY_EVENT_DRINK_MONSTER;
-        return true;
+    return (menu_status_t){buddy_brain_mood(brain, now), brain->state == BUDDY_STATE_MONSTER, has_office};
+}
+
+// Carries out what a tap in the menu asks for, the way the companion's commands do (so `evt mood` and `evt mode`
+// tell the companion, whichever side changed it).
+static void run_menu_action(const menu_result_t *r, buddy_brain_t *brain, office_switch_t *screen, uint32_t now)
+{
+    switch (r->action) {
+    case MENU_DO_OPEN:
+        ESP_LOGI(TAG, "menu: %s", r->item->id);
+        break;
+    case MENU_DO_MOOD:
+        buddy_brain_set_mood(brain, (buddy_mood_t)r->arg, 0, now);
+        ESP_LOGI(TAG, "mood %s (touch)", buddy_mood_name((buddy_mood_t)r->arg));
+        break;
+    case MENU_DO_EVENT:
+        if (buddy_brain_event(brain, (buddy_event_t)r->arg, now)) {
+            ESP_LOGI(TAG, "%s (touch)", r->item->id);
+        }
+        break;
+    case MENU_DO_OFFICE:
+        office_switch_request(screen, true);
+        ESP_LOGI(TAG, "Office Mode on");
+        break;
+    default:
+        break;
     }
-    if (buddy_view_hit(view, ev->x, ev->y)) {
-        *out = BUDDY_EVENT_POKE;
-        return true;
-    }
-    return false;
 }
 
 // The time zone arrives with the time (the companion's time.set); until then the clock counts as not set.
@@ -340,9 +358,9 @@ static void render_task(void *arg)
     static gfx_repair_t repair;
     static buddy_brain_t brain;
     static buddy_view_t view;
-    static buddy_button_t button;
+    static menu_t menu;
+    static menu_view_t menu_view;
     static office_clock_t clock;
-    static office_button_t moon;
     static office_switch_t screen;
     gfx_dirty_init(&changes, W, H, X_ALIGN);
     gfx_dirty_init(&redraw, W, H, X_ALIGN);
@@ -354,22 +372,21 @@ static void render_task(void *arg)
         vTaskDelete(NULL);
         return;
     }
-    const bool has_button = buddy_button_init(&button, &s_scene, s_layout.panel, view.scale, 10);
-    if (!has_button) {
-        ESP_LOGW(TAG, "no room for the Monster button in the control panel");
+    // The menu's pixels are read by the compositor whenever a button redraws: internal RAM if there is room.
+    uint8_t *menu_mem = heap_caps_malloc(MENU_VIEW_MEMORY, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (!menu_mem) {
+        menu_mem = heap_caps_malloc(MENU_VIEW_MEMORY, MALLOC_CAP_SPIRAM);
     }
-    // The moon sits at the bottom of the control panel, below the Monster can.
-    const int moon_top = s_layout.panel.h * 78 / 100;
-    const gfx_rect_t moon_area = {s_layout.panel.x, s_layout.panel.y + moon_top, s_layout.panel.w,
-                                  s_layout.panel.h - moon_top};
-    const bool has_moon = office_button_init(&moon, &s_scene, moon_area, MOON_SCALE, 10);
+    const bool has_menu = menu_init(&menu, &menu_default, layout_panel_content(&s_layout), t_start) &&
+                          menu_view_init(&menu_view, &s_scene, &menu, menu_mem, MENU_VIEW_MEMORY, 10);
+    if (!has_menu) {
+        ESP_LOGW(TAG, "no touchscreen menu (the panel is too small, or no memory)");
+    }
     // The glyph cache is only read when the clock redraws (rarely): PSRAM.
     uint8_t *clock_mem = heap_caps_malloc(OFFICE_CLOCK_MEMORY, MALLOC_CAP_SPIRAM);
-    const bool has_office =
-        has_moon && office_clock_init(&clock, &s_scene, s_layout.screen, clock_mem, OFFICE_CLOCK_MEMORY, 20);
+    const bool has_office = office_clock_init(&clock, &s_scene, s_layout.screen, clock_mem, OFFICE_CLOCK_MEMORY, 20);
     if (!has_office) {
-        ESP_LOGW(TAG, "Office Mode unavailable (no room for the moon button, or no memory for the clock)");
-        office_button_show(&moon, false);
+        ESP_LOGW(TAG, "Office Mode unavailable (no memory for the clock)");
     }
     office_switch_init(&screen);
     s_msg.ready = marquee_init(&s_msg.sign, &s_scene, 30); // above everything
@@ -413,27 +430,33 @@ static void render_task(void *arg)
                 if (presented < 2 || office_switch_busy(&screen) || screen.want_office != screen.office) {
                     continue;
                 }
-                // Office Mode toggles on release (finger lifted off the moon or the clock); the robot and the can
-                // react on touch-down.
-                buddy_event_t be;
+                // In Office Mode any tap (on release) brings DeskBuddy back. Otherwise the menu takes the touches in
+                // the control panel (it acts on release, see menu.h), and a touch-down on the robot pokes him.
+                const uint32_t t = now_ms();
                 if (screen.office) {
                     if (ev.type == INPUT_UP) {
-                        office_switch_request(&screen, false); // any tap brings DeskBuddy back
+                        office_switch_request(&screen, false);
                         ESP_LOGI(TAG, "Office Mode off");
                     }
-                } else if (ev.type == INPUT_UP) {
-                    if (has_office && office_button_hit(&moon, ev.x, ev.y)) {
-                        office_switch_request(&screen, true);
-                        ESP_LOGI(TAG, "Office Mode on");
+                    continue;
+                }
+                if (has_menu) {
+                    const menu_status_t st = menu_status(&brain, has_office, t);
+                    const menu_touch_t type = ev.type == INPUT_DOWN ? MENU_TOUCH_DOWN
+                                              : ev.type == INPUT_MOVE ? MENU_TOUCH_MOVE
+                                                                      : MENU_TOUCH_UP;
+                    const menu_result_t r = menu_touch(&menu, type, ev.x, ev.y, &st, t);
+                    run_menu_action(&r, &brain, &screen, t);
+                    if (menu.down) {
+                        if (ev.type == INPUT_DOWN && !pending_touch_us) {
+                            pending_touch_us = ev.irq_us; // the button sinks in: the reaction to measure
+                        }
+                        continue;
                     }
-                } else if (ev.type == INPUT_DOWN && touch_event(&view, &button, has_button, &ev, &be) &&
-                           buddy_brain_event(&brain, be, now_ms())) {
-                    if (be == BUDDY_EVENT_DRINK_MONSTER) {
-                        ESP_LOGI(TAG, "Monster time (touch)");
-                    }
-                    if (!pending_touch_us) {
-                        pending_touch_us = ev.irq_us;
-                    }
+                }
+                if (ev.type == INPUT_DOWN && buddy_view_hit(&view, ev.x, ev.y) &&
+                    buddy_brain_event(&brain, BUDDY_EVENT_POKE, t) && !pending_touch_us) {
+                    pending_touch_us = ev.irq_us;
                 }
             } while (xQueueReceive(events, &ev, 0) == pdTRUE);
         }
@@ -467,14 +490,14 @@ static void render_task(void *arg)
         if (step.swap) {
             if (screen.office) {
                 buddy_view_hide(&view); // the character pauses; a running Monster sequence is dropped on return
-                buddy_button_apply(&button, false, false);
-                office_button_show(&moon, false);
+                menu_cancel(&menu);
+                menu_view_show(&menu_view, false);
                 office_clock_show(&clock, true);
                 s_scene.background = office_background;
                 s_scene.background_ctx = NULL;
             } else {
                 office_clock_show(&clock, false);
-                office_button_show(&moon, true);
+                menu_view_show(&menu_view, has_menu);
                 s_scene.background = layout_background;
                 s_scene.background_ctx = &s_layout;
                 buddy_brain_rest(&brain, now);
@@ -506,8 +529,10 @@ static void render_task(void *arg)
             next = buddy_brain_tick(&brain, now, &pose);
             const uint32_t view_next = buddy_view_apply(&view, &pose, now);
             next = view_next < next ? view_next : next;
-            if (has_button) {
-                buddy_button_apply(&button, true, pose.state != BUDDY_STATE_MONSTER);
+            if (has_menu) {
+                const menu_status_t st = menu_status(&brain, has_office, now);
+                const uint32_t menu_next = menu_view_apply(&menu_view, &menu, &st, now);
+                next = menu_next < next ? menu_next : next;
             }
         }
         next = step.next_ms < next ? step.next_ms : next;

@@ -68,7 +68,6 @@ extern int g_test_failed;
     X(office_clock_shows_time_date_and_fallback)     \
     X(office_clock_redraws_match_full_redraw)        \
     X(office_pauses_character_mid_monster)           \
-    X(office_moon_button)                            \
     X(office_switch_redraws_fully_only_while_switching) \
     X(layout_splits_screen)                          \
     X(link_crc_matches_ccitt_false)                  \
@@ -83,7 +82,15 @@ extern int g_test_failed;
     X(marquee_text_policy)                           \
     X(marquee_stays_long_enough_then_hides)          \
     X(marquee_shows_the_text_scrolling_left)         \
-    X(marquee_redraws_only_the_sign)
+    X(marquee_redraws_only_the_sign)                 \
+    X(menu_definitions_fit_and_connect)              \
+    X(menu_navigates_and_goes_back)                  \
+    X(menu_selects_every_mood)                       \
+    X(menu_activities_and_availability)              \
+    X(menu_touch_needs_a_clean_tap)                  \
+    X(menu_pages_and_swipes)                         \
+    X(menu_view_follows_the_state)                   \
+    X(menu_redraws_match_full_redraw)
 
 #define X(name) void test_##name(void);
 TEST_LIST

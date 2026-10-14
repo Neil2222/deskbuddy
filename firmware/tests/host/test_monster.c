@@ -181,15 +181,12 @@ void test_monster_redraws_match_full_redraw(void)
 {
     static gfx_scene_t scene;
     static buddy_view_t view;
-    static buddy_button_t button;
     static gfx_dirty_t changes, redraw;
     static gfx_repair_t repair;
     static layout_t layout;
     layout = layout_compute(W, H, 65, false, ALIGN);
     CHECK(gfx_scene_init(&scene, W, H, layout_background, &layout, s_strip, 16 * 1024, ALIGN));
     CHECK(buddy_view_init(&view, &scene, layout.stage, 10, 0));
-    CHECK(buddy_button_init(&button, &scene, layout.panel, view.scale, 10));
-    CHECK(gfx_rect_contains_rect(layout.panel, gfx_sprite_bounds(&button.plate)));
     gfx_dirty_init(&changes, W, H, ALIGN);
     gfx_dirty_init(&redraw, W, H, ALIGN);
     gfx_repair_init(&repair, W, H, ALIGN);
@@ -205,15 +202,12 @@ void test_monster_redraws_match_full_redraw(void)
     buddy_brain_init(&brain, 0, 3);
     render_stats_t st = {0};
     int back = 0, drinks = 0;
-    bool started = false, button_hidden = false;
+    bool started = false;
     uint32_t began = 0; // when the sequence actually started (the first frame at or after `start`)
     const uint32_t start = 1500, end = start + BUDDY_MONSTER_MS + 1500;
     for (uint32_t t = 0, k = 0; t < end; k++) {
         if (!started && t >= start) {
-            // A tap on the plate starts it; the robot itself still gets poked.
-            const gfx_rect_t plate = gfx_sprite_bounds(&button.plate);
-            CHECK(buddy_button_hit(&button, plate.x + plate.w / 2, plate.y + plate.h / 2));
-            CHECK(!buddy_button_hit(&button, layout.stage.x + 5, layout.stage.y + 5));
+            // Started from the menu or the companion; the robot itself still gets poked.
             CHECK(buddy_brain_event(&brain, BUDDY_EVENT_DRINK_MONSTER, t));
             started = true;
             began = t;
@@ -225,8 +219,6 @@ void test_monster_redraws_match_full_redraw(void)
         uint32_t next = buddy_brain_tick(&brain, t, &pose);
         const uint32_t view_next = buddy_view_apply(&view, &pose, t);
         next = view_next < next ? view_next : next;
-        buddy_button_apply(&button, true, pose.state != BUDDY_STATE_MONSTER);
-        button_hidden |= (button.can.flags & GFX_SPRITE_HIDDEN) != 0;
 
         gfx_dirty_clear(&changes);
         gfx_scene_collect(&scene, &changes);
@@ -250,7 +242,7 @@ void test_monster_redraws_match_full_redraw(void)
         }
         t += next + (k % 5 == 0 ? 7 : 0); // rendering takes time too
     }
-    CHECK(started && button_hidden);
+    CHECK(started);
     CHECK_EQ(drinks, 0);
     CHECK(st.frames > 100);
     CHECK_EQ(st.bad_frames, 0);

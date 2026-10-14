@@ -5,8 +5,9 @@ menu "DeskBuddy"
         range 40 100
         default 65
         help
-            The rest of the width is reserved for the touchscreen control panel. The boundary is rounded to
-            32 pixels so stage and panel redraws never share a dirty-rectangle column.
+            The rest of the width is the touchscreen control panel (its menu needs at least 352 x 600 pixels, the
+            default). The boundary is rounded to 32 pixels so stage and panel redraws never share a dirty-rectangle
+            column.
 
     config DESKBUDDY_PANEL_LEFT
         bool "Put the control-panel area on the left"
@@ -35,7 +36,7 @@ menu "DeskBuddy"
         default 0
         help
             Plays the Monster charging sequence without touching the screen, for hands-off measurements.
-            Normally it is started by tapping the Monster can in the control panel.
+            Normally it is started from the menu (Food & Drink) or by the companion.
 
     config DESKBUDDY_DEMO_OFFICE_S
         int "Toggle Office Mode automatically every N seconds (0 = off)"
@@ -43,7 +44,7 @@ menu "DeskBuddy"
         default 0
         help
             Switches between DeskBuddy and the Office Mode clock without touching the screen, for hands-off
-            tests of the scene switch. Normally it is toggled with the moon button and a tap on the clock.
+            tests of the scene switch. Normally it is switched on in the menu (Activities) and off with a tap.
 
     config DESKBUDDY_GFX_VERIFY
         bool "Verify every presented frame against a full redraw (debug, slow)"

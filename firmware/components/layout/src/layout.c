@@ -29,6 +29,19 @@ layout_t layout_compute(int screen_w, int screen_h, int stage_percent, bool pane
     return l;
 }
 
+gfx_rect_t layout_panel_content(const layout_t *l)
+{
+    gfx_rect_t r = l->panel;
+    if (gfx_rect_is_empty(r)) {
+        return r;
+    }
+    r.w -= DIVIDER_PX; // the divider sits on the panel side of the boundary (see layout_background)
+    if (r.x >= l->stage.x) {
+        r.x += DIVIDER_PX;
+    }
+    return r;
+}
+
 #define STAGE_BANDS 8
 
 // Stage background: flat horizontal bands from (30, 36, 62) at the top to (54, 64, 100) at the bottom. Bands

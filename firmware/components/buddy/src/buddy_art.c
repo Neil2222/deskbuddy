@@ -27,8 +27,8 @@ static gfx_color_t s_colors[] = {
     GFX_RGB(204, 210, 220), // L silver
     GFX_RGB(128, 134, 148), // l silver shade
     GFX_RGB(64, 184, 72),   // c cable
-    GFX_RGB(32, 37, 58),    // P button plate
-    GFX_RGB(64, 74, 108),   // p button edge
+    GFX_RGB(32, 37, 58),    // P panel plate (the touchscreen menu's buttons)
+    GFX_RGB(64, 74, 108),   // p panel edge
     GFX_RGB(226, 150, 70),  // O cigarette filter
     GFX_RGB(255, 140, 40),  // F ember, glowing
 };
@@ -226,10 +226,6 @@ static const char *const k_anger[2][7] = {
 // The cigarette: filter, paper (shorter as it burns down) and the tip, by ember (see buddy_props_t.ember).
 static const char *const k_cig_tip[BUDDY_EMBERS] = {"lr", "lR", "FY"};
 
-static const char k_plate_edge[] = ".pppppppppppppp.";
-static const char k_plate_row[] = "pPPPPPPPPPPPPPPp";
-#define PLATE_H 24
-
 static uint8_t s_pool[7168]; // decoded pixels, internal RAM
 static size_t s_used;
 static buddy_art_t s_art;
@@ -326,14 +322,6 @@ static bool load_props(buddy_props_art_t *p)
                     a ? 'N' : 'W');
             recolor(px, w, 0, 0, w, empty.h, 'L', a ? 'W' : 'Y');
         }
-    }
-
-    const char *plate[PLATE_H];
-    for (int y = 0; y < PLATE_H; y++) {
-        plate[y] = y == 0 || y == PLATE_H - 1 ? k_plate_edge : k_plate_row;
-    }
-    if (!decode(&p->plate, plate, PLATE_H)) {
-        return false;
     }
 
     // Particles.

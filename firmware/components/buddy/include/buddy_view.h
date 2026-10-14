@@ -62,20 +62,6 @@ void buddy_view_hide(buddy_view_t *v);
 // True when (x, y) touches the character as currently drawn.
 bool buddy_view_hit(const buddy_view_t *v, int x, int y);
 
-// A Monster can on a plate in the control panel: tap it to give DeskBuddy a drink.
-typedef struct {
-    gfx_sprite_t plate, can;
-} buddy_button_t;
-
-// Centres the button in `area` at the given scale (reduced if it does not fit), sprites at z and z+1.
-bool buddy_button_init(buddy_button_t *b, gfx_scene_t *scene, gfx_rect_t area, int scale, int z);
-
-// The plate shows while `visible`; the can on it while it is also available (it is gone while DeskBuddy is
-// drinking it). Hidden buttons cannot be hit.
-void buddy_button_apply(buddy_button_t *b, bool visible, bool available);
-
-bool buddy_button_hit(const buddy_button_t *b, int x, int y);
-
 #ifdef __cplusplus
 }
 #endif
