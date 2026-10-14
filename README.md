@@ -2,27 +2,31 @@
 
 A standalone desk gadget with animated pixel-art characters, built on the Waveshare ESP32-S3-Touch-LCD-7B.
 
-Status: board bring-up done; rendering engine and a placeholder robot character running on the device, including its first personality animation (drinking a can of Monster Energy through a charging cable) and an Office Mode desk clock. No Windows bridge, workplace integrations, wall-clock time source or persistent state yet.
+Status: board bring-up done; rendering engine and a placeholder robot character running on the device, including its first personality animation (drinking a can of Monster Energy through a charging cable) and an Office Mode desk clock. A Windows companion app connects over USB: it sets the clock and triggers actions. No workplace integrations or persistent state yet.
 See [HANDOVER.md](HANDOVER.md) for project state and next steps. Measurements: [docs/bringup-results.md](docs/bringup-results.md) and [docs/rendering-results.md](docs/rendering-results.md).
 
 ## Layout
 
 ```
-firmware/deskbuddy/           Application: render loop, touch task, layout options (menuconfig "DeskBuddy")
+firmware/deskbuddy/           Application: render loop, touch task, serial link to the companion, options (menuconfig "DeskBuddy")
 firmware/components/gfx/      Hardware-independent renderer: dirty rectangles, sprites, compositor, double-buffer repair
 firmware/components/buddy/    Placeholder character: behavior, Monster sequence, ASCII programmer art, pose-to-sprite view
 firmware/components/layout/   Screen split: character stage + reserved control-panel area
+firmware/components/link/     Serial protocol to the Windows companion: frame parsing and formatting (docs/protocol.md)
 firmware/components/office/   Office Mode: antialiased stroke font, desk-clock face, moon button, dark scene switch
 firmware/components/display/  Application-owned frame buffers, scanout fill, buffer-swap proof
 firmware/components/board/    Board support: I2C, IO expander, RGB panel, GT911 touch, backlight
 firmware/bringup/             Bring-up firmware: test pattern, touch dot, performance benchmarks (hardware regression)
 firmware/tests/host/          Host-side unit tests and PNG snapshot tool (no ESP32 needed)
-tools/common.ps1              Pinned ESP-IDF version, IDF path and serial-port resolution
+companion/                    Windows companion app (C#, .NET 10, WinForms): connection, clock sync, actions, device log
+tools/common.ps1              Pinned ESP-IDF and .NET versions, tool paths and serial-port resolution
 tools/setup-idf.ps1           One-time ESP-IDF install
+tools/setup-dotnet.ps1        One-time per-user .NET SDK install (no administrator rights)
 tools/idf.ps1                 Runs idf.py in the pinned environment (auto-detects the port)
+tools/companion.ps1           Builds and starts the companion app
 tools/host-test.ps1           Builds and runs the host tests with MSVC
 tools/flash-backup.ps1        Full 16 MB flash backup / verify / restore
-docs/                         Hardware findings and measured results
+docs/                         Hardware findings, measured results, serial protocol
 ```
 
 ## Fresh Windows setup
@@ -55,11 +59,10 @@ tools\idf.ps1 -C firmware\bringup -p COM7 flash       # bring-up regression firm
 - **Touch:** tap the robot for a surprise and happy hops. Tap the Monster can in the control panel and he drinks it through a cable plugged into his head (about 7 s; taps during the show are ignored).
 - **Office Mode:** tap the moon at the bottom of the control panel. The screen shows a desk clock (24-hour time and date), and the character is paused; a running Monster sequence is dropped. Tap anywhere to bring DeskBuddy back. The backlight keeps its brightness: the board's backlight controller did not apply brightness changes reliably.
   - **If the screen stays dark or very dim** (seen after plugging in and after flashing): unplug the board for about 10 s. If it is dark right after plugging in, pressing RESET also helps.
-  - **The clock has no time source yet.** The board has no RTC (only the IO expander and touch answer on I2C) and nothing sets the ESP32 clock, which restarts at 1970 on every power-up. Until something sets it, the clock shows `--:--` and *CLOCK NOT SET* rather than a guessed time. Options are listed in [HANDOVER.md](HANDOVER.md#known-issues-and-caveats).
+  - **The clock is set by the Windows companion.** The board has no RTC and the ESP32 clock restarts at 1970 on every power-up, so until the companion has connected the clock shows `--:--` and *CLOCK NOT SET* rather than a guessed time. The time zone comes from Windows.
 - **Options** (`tools\idf.ps1 -C firmware\deskbuddy menuconfig` → *DeskBuddy*):
   - stage width (default 65 %) and panel side;
   - backlight brightness;
-  - time zone for the clock (POSIX TZ string; default Central European Time with daylight saving);
   - performance-log interval;
   - automatic demo pokes, Monster animations and Office Mode toggles (hands-off measurements);
   - `GFX_VERIFY` debug mode.
@@ -75,10 +78,24 @@ tools\idf.ps1 -C firmware\bringup -p COM7 flash       # bring-up regression firm
   - Managed components are pinned in `firmware/*/dependencies.lock`.
   - Build settings are in `sdkconfig.defaults`. `sdkconfig` is generated and not committed.
 
+## Windows companion
+
+```powershell
+tools\setup-dotnet.ps1    # once: .NET 10 SDK -> %LOCALAPPDATA%\Microsoft\dotnet (no administrator rights)
+tools\companion.ps1       # build and start
+```
+
+- **Connection:** finds DeskBuddy's UART port (CH343, USB `1A86:55D3`) by itself and reconnects after unplugging. Opening the port does not reset the board. *Disconnect* keeps it disconnected until *Connect*.
+- **Clock:** synced on connect, when the board restarts, every hour, and when Windows' time or time zone changes or the laptop wakes up. Daylight-saving switches happen on time even while the companion is not running.
+- **Actions:** Surprise, Monster, Office Mode, Buddy Mode, Sync clock. Mode and connection state are shown, plus a log of commands, replies and the board's own log output (so a separate serial monitor is not needed).
+- **Flashing while it runs:** `tools\idf.ps1 ... flash` / `monitor` signals the companion to let go of the port and reconnects it afterwards. Other serial tools (for example PuTTY) need *Disconnect* first: Windows lets only one program open a COM port.
+- **Without the companion** DeskBuddy works as before; only the clock stays *CLOCK NOT SET* after a power-up until the companion connects.
+- Protocol: [docs/protocol.md](docs/protocol.md).
+
 ## Host tests (no hardware)
 
 ```powershell
-tools\host-test.ps1              # gfx, buddy, office and layout unit tests (MSVC, AddressSanitizer)
+tools\host-test.ps1              # gfx, buddy, office, layout and link (protocol) unit tests (MSVC, AddressSanitizer)
 tools\host-test.ps1 -Snapshot    # also renders poses, Monster key frames, a Monster contact sheet and the Office Mode clock to firmware\tests\host\build\snapshots\*.png
 ```
 

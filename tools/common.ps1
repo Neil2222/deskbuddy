@@ -1,6 +1,24 @@
 # Shared helpers dot-sourced by the other scripts. Single source of truth for the pinned toolchain.
 
 $script:IdfVersion = 'v5.5.5'
+$script:DotnetChannel = '10.0' # Windows companion (companion/): latest .NET 10 SDK patch
+
+# Per-user .NET SDK (no admin): $env:DESKBUDDY_DOTNET_PATH, else %LOCALAPPDATA%\Microsoft\dotnet.
+function Get-DotnetPath {
+    if ($env:DESKBUDDY_DOTNET_PATH) { return $env:DESKBUDDY_DOTNET_PATH }
+    return Join-Path $env:LOCALAPPDATA 'Microsoft\dotnet'
+}
+
+function Enter-Dotnet {
+    $root = Get-DotnetPath
+    if (-not (Test-Path (Join-Path $root 'dotnet.exe'))) {
+        throw ".NET SDK not found at $root. Run tools/setup-dotnet.ps1 (or set DESKBUDDY_DOTNET_PATH)."
+    }
+    $env:DOTNET_ROOT = $root
+    $env:PATH = "$root;$env:PATH"
+    $env:DOTNET_CLI_TELEMETRY_OPTOUT = '1'
+    $env:DOTNET_NOLOGO = '1'
+}
 
 # ESP-IDF checkout location: $env:DESKBUDDY_IDF_PATH, else %USERPROFILE%\esp\<version>\esp-idf.
 function Get-IdfPath {

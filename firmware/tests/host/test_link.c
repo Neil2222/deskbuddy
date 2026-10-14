@@ -1,0 +1,134 @@
+// Serial protocol to the Windows companion: what is accepted, what is rejected, and how.
+#include <stdio.h>
+#include <string.h>
+
+#include "link.h"
+#include "test.h"
+
+// Appends " #XXXX" to a command line, like the companion does.
+static const char *frame(const char *content)
+{
+    static char buf[LINK_LINE_MAX];
+    snprintf(buf, sizeof(buf), "%s #%04X", content, link_crc16(content, strlen(content)));
+    return buf;
+}
+
+static link_result_t parse(const char *line, link_command_t *c)
+{
+    return link_parse_command(line, strlen(line), c);
+}
+
+void test_link_crc_matches_ccitt_false(void)
+{
+    CHECK_EQ(link_crc16("123456789", 9), 0x29B1);
+}
+
+void test_link_parses_commands(void)
+{
+    link_command_t c;
+    CHECK_EQ(parse(frame(">DB1 7 monster"), &c), LINK_OK);
+    CHECK_EQ(c.cmd, LINK_CMD_MONSTER);
+    CHECK_EQ(c.seq, 7);
+
+    CHECK_EQ(parse(frame(">DB1 4294967295 mode.set mode=office"), &c), LINK_OK);
+    CHECK(c.cmd == LINK_CMD_MODE_SET && c.u.office && c.seq == 4294967295u);
+    CHECK_EQ(parse(frame(">DB1 1 mode.set mode=normal"), &c), LINK_OK);
+    CHECK(!c.u.office);
+
+    // Arguments in any order; unknown keys are ignored (newer companions may send more).
+    CHECK_EQ(parse(frame(">DB1 9 time.set off=120 utc=1792000000 ms=250 next=1792800000 next_off=60 x=1"), &c),
+             LINK_OK);
+    CHECK_EQ(c.cmd, LINK_CMD_TIME_SET);
+    CHECK_EQ(c.u.time.utc, 1792000000LL);
+    CHECK_EQ(c.u.time.ms, 250);
+    CHECK_EQ(c.u.time.tz.offset_min, 120);
+    CHECK_EQ(c.u.time.tz.next_utc, 1792800000LL);
+    CHECK_EQ(c.u.time.tz.next_offset_min, 60);
+    CHECK_EQ(parse(frame(">DB1 10 time.set utc=1792000000 off=-300"), &c), LINK_OK); // no DST, no ms
+    CHECK(c.u.time.tz.next_utc == 0 && c.u.time.tz.offset_min == -300 && c.u.time.ms == 0);
+
+    // A Windows line ending, and lower-case checksum digits.
+    char line[LINK_LINE_MAX];
+    snprintf(line, sizeof(line), "%s\r", frame(">DB1 3 poke"));
+    CHECK_EQ(parse(line, &c), LINK_OK);
+    CHECK_EQ(c.cmd, LINK_CMD_POKE);
+    snprintf(line, sizeof(line), ">DB1 2 ping #%04x", link_crc16(">DB1 2 ping", 11));
+    CHECK_EQ(parse(line, &c), LINK_OK);
+}
+
+// Nothing but a well-formed command with a matching checksum may do anything: log output, typing in a serial
+// monitor and corrupted lines must not trigger actions.
+void test_link_rejects_noise_and_corruption(void)
+{
+    link_command_t c;
+    CHECK_EQ(parse("I (1234) deskbuddy: Office Mode on", &c), LINK_NOT_A_FRAME);
+    CHECK_EQ(parse("monster", &c), LINK_NOT_A_FRAME);
+    CHECK_EQ(parse("", &c), LINK_NOT_A_FRAME);
+    CHECK_EQ(parse(frame("<DB1 7 monster"), &c), LINK_NOT_A_FRAME); // the device's own output echoed back
+
+    char line[LINK_LINE_MAX];
+    strcpy(line, frame(">DB1 7 monster"));
+    line[8] = 'n'; // "monster" -> "nonster"
+    CHECK_EQ(parse(line, &c), LINK_ERR_CRC);
+    CHECK_EQ(c.seq, 0);
+    strcpy(line, frame(">DB1 7 monster"));
+    char *last = &line[strlen(line) - 1];
+    *last = *last == '0' ? '1' : '0'; // a different, still valid, checksum digit
+    CHECK_EQ(parse(line, &c), LINK_ERR_CRC);
+
+    CHECK_EQ(parse(">DB1 7 monster", &c), LINK_ERR_SYNTAX);        // no checksum
+    CHECK_EQ(parse(">DB1 7 monster #12G4", &c), LINK_ERR_SYNTAX);  // not hex
+    CHECK_EQ(parse(frame(">DB1 7"), &c), LINK_ERR_SYNTAX);         // no command
+    CHECK_EQ(parse(frame(">DB1  7 poke"), &c), LINK_ERR_SYNTAX);   // empty token
+    CHECK_EQ(parse(frame(">DB1 x7 poke"), &c), LINK_ERR_SYNTAX);   // sequence not a number
+    CHECK_EQ(parse(frame(">DB1 4294967296 poke"), &c), LINK_ERR_SYNTAX); // beyond 32 bits
+    CHECK_EQ(parse(frame(">DB1 7 Poke"), &c), LINK_ERR_SYNTAX);    // names are lower case
+    CHECK_EQ(parse(frame(">DB 7 poke"), &c), LINK_ERR_SYNTAX);     // no version
+    CHECK_EQ(parse(frame(">DB2 7 poke"), &c), LINK_ERR_VERSION);
+    CHECK_EQ(parse(">DB2 7 a different layout", &c), LINK_ERR_VERSION); // judged before the checksum
+}
+
+void test_link_rejects_unknown_commands_and_bad_arguments(void)
+{
+    link_command_t c;
+    CHECK_EQ(parse(frame(">DB1 12 dance"), &c), LINK_ERR_UNKNOWN_CMD);
+    CHECK_EQ(c.seq, 12); // the reply goes to this command
+    CHECK_EQ(parse(frame(">DB1 13 mode.set"), &c), LINK_ERR_ARGS);
+    CHECK_EQ(c.seq, 13);
+    CHECK_EQ(parse(frame(">DB1 13 mode.set mode=sideways"), &c), LINK_ERR_ARGS);
+    CHECK_EQ(parse(frame(">DB1 13 mode.set mode"), &c), LINK_ERR_ARGS);
+    CHECK_EQ(parse(frame(">DB1 13 mode.set mode=office!"), &c), LINK_ERR_ARGS);
+    CHECK_EQ(parse(frame(">DB1 14 time.set utc=1792000000"), &c), LINK_ERR_ARGS);            // no offset
+    CHECK_EQ(parse(frame(">DB1 14 time.set utc=1792000000 off=120 ms=1000"), &c), LINK_ERR_ARGS);
+    CHECK_EQ(parse(frame(">DB1 14 time.set utc=-5 off=120"), &c), LINK_ERR_ARGS);
+    CHECK_EQ(parse(frame(">DB1 14 time.set utc=1792000000 off=901"), &c), LINK_ERR_ARGS);
+    CHECK_EQ(parse(frame(">DB1 14 time.set utc=1792000000 off=120 next=1792800000"), &c), LINK_ERR_ARGS);
+    CHECK_EQ(parse(frame(">DB1 14 time.set utc=99999999999999999999 off=120"), &c), LINK_ERR_ARGS);
+    CHECK_EQ(parse(frame(">DB1 15 ping a=1 b=2 c=3 d=4 e=5 f=6 g=7 h=8 i=9"), &c), LINK_ERR_ARGS);
+}
+
+void test_link_formats_replies_the_companion_can_check(void)
+{
+    char buf[LINK_LINE_MAX];
+    const size_t n = link_format(buf, sizeof(buf), 42, "ok mode=office");
+    CHECK_EQ(n, strlen(buf));
+    const char *expect = "<DB1 42 ok mode=office";
+    CHECK(strncmp(buf, expect, strlen(expect)) == 0);
+    CHECK(buf[n - 1] == '\n');
+    unsigned crc = 0;
+    CHECK(sscanf(buf + strlen(expect), " #%4X", &crc) == 1);
+    CHECK_EQ(crc, link_crc16(buf, strlen(expect)));
+
+    char small[24];
+    CHECK_EQ(link_format(small, sizeof(small), 42, "ok mode=office"), 0); // never truncated
+}
+
+void test_link_time_zone_switches_at_the_announced_moment(void)
+{
+    const link_tz_t cest = {.offset_min = 120, .next_utc = 1792803600, .next_offset_min = 60};
+    CHECK_EQ(link_tz_offset_min(&cest, 1792803599), 120);
+    CHECK_EQ(link_tz_offset_min(&cest, 1792803600), 60);
+    CHECK_EQ(link_tz_offset_min(&cest, 1800000000), 60);
+    const link_tz_t fixed = {.offset_min = -300};
+    CHECK_EQ(link_tz_offset_min(&fixed, 1800000000), -300);
+}

@@ -12,7 +12,7 @@ All numbers come from the device's own `PERF` logs (5-second windows). The bring
 | `components/layout` | Character stage (default 65 % of the width, rounded to 672 px) and the reserved control-panel area; background painting | No (host-tested) |
 | `components/office` | Office Mode: antialiased stroke font rasterized into indexed images, the desk-clock face, the moon button, and the scene switch (`office_switch`) | No (host-tested) |
 | `components/display` | Application-owned frame buffers, the scanout fill, and the buffer-swap proof | Yes |
-| `deskbuddy/main` | Touch task (GT911 → events), render loop, Office Mode switching, backlight at boot, wall-clock time and time zone, layout configuration (Kconfig), performance log, verify mode | Yes |
+| `deskbuddy/main` | Touch task (GT911 → events), serial link to the Windows companion (commands → events, replies), render loop, Office Mode switching, backlight at boot, wall-clock time with the companion's time zone, layout configuration (Kconfig), performance log, verify mode | Yes |
 
 Behavior, artwork, layout and rendering only meet in the render loop. Behavior produces a *pose*; the view maps it to sprites; the compositor only sees sprites and a background callback.
 

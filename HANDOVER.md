@@ -30,15 +30,16 @@ Connect through the **UART** Type-C port (CH343) with DIP switch #16 on the ESP3
 
 | Area | State |
 |---|---|
-| Toolchain | ESP-IDF v5.5.5, pinned and installed with `tools/setup-idf.ps1`. Managed components are locked in `dependencies.lock`. |
+| Toolchain | ESP-IDF v5.5.5, pinned and installed with `tools/setup-idf.ps1`. Managed components are locked in `dependencies.lock`. Companion: .NET 10 SDK per user via `tools/setup-dotnet.ps1` (no admin). |
 | Board support (`firmware/components/board`) | Done: I2C bus, IO expander (native USB kept connected), RGB panel with bounce buffers (driver-owned frame buffers, or app-owned via `on_bounce_fill`), GT911 with interrupt, backlight brightness |
 | Bring-up firmware (`firmware/bringup`) | Done, kept as the hardware regression test. Re-run after the board change: benchmarks unchanged. |
 | Rendering engine (`gfx`, `display`, `layout`) | Done: dirty rectangles, indexed sprites with transparency, integer scaling, flip, frame animation, tear-free double buffering with a proven swap. 26 host unit tests. See [docs/rendering-results.md](docs/rendering-results.md). |
 | Placeholder character (`buddy`, `firmware/deskbuddy`) | Done: idle breathing, blinking, antenna light, tap reaction, happy hops. |
-| Monster Energy animation (`buddy_monster`) | Done on branch `monster-charging`, awaiting review: ~7 s sequence started from the Monster can in the control panel; `BUDDY_EVENT_DRINK_MONSTER` for future triggers. Open: longest bounce fill 433–638 µs during the sequence vs 362–394 µs for the tap reaction (see the results doc). |
-| Office Mode (`office`) | Done on branch `monster-charging`, awaiting review: moon button, 24-hour desk clock, character paused. No dimming: the backlight controller did not apply brightness changes reliably. **No wall-clock time source yet**: shows *CLOCK NOT SET*. **Currently flashed on the dev board.** |
+| Monster Energy animation (`buddy_monster`) | Done, committed on `monster-charging` (`ee425b9`): ~7 s sequence started from the Monster can in the control panel; `BUDDY_EVENT_DRINK_MONSTER` for future triggers. Open: longest bounce fill 433–638 µs during the sequence vs 362–394 µs for the tap reaction (see the results doc). |
+| Office Mode (`office`) | Done, committed on `monster-charging` (`ee425b9`): moon button, 24-hour desk clock, character paused. No dimming: the backlight controller did not apply brightness changes reliably. The clock is set by the companion. |
+| Windows companion (`companion/`, `link`, `serial_link.c`) | Done, verified on the device by the user, on branch `companion`: serial protocol v1 ([docs/protocol.md](docs/protocol.md)) with checksums, replies and events; WinForms app (C#, .NET 10) with auto-detect and reconnect, clock sync including the next DST switch, Surprise/Monster/Office/Buddy actions, mode display, device log; steps aside while `tools/idf.ps1` flashes. **Currently flashed on the dev board.** |
 | Factory restore round-trip | Done and verified (restore, then factory boot and touch, then reflash bring-up) |
-| Windows bridge, workplace integrations, control panel, needs/moods, persistence, asset pipeline, Wi-Fi | **Not started** (intentionally) |
+| Workplace integrations, control panel, needs/moods, persistence, asset pipeline, Wi-Fi | **Not started** (intentionally) |
 
 ## Completed work
 1. **Research:** hardware discovery from the Waveshare wiki and docs, schematic and example repo. Mistakes found in their docs: "ST7701" is wrong (Waveshare lists an ST7262), and the expander is a programmed MCU, not a CH422G.
@@ -79,16 +80,17 @@ Connect through the **UART** Type-C port (CH343) with DIP switch #16 on the ESP3
 | Layout in its own component, configured via Kconfig (stage 65 %, panel side) | Keeps the screen split out of the engine. The 35 % control-panel area is reserved and empty. |
 | Host tests with MSVC (Visual Studio Build Tools) and plain CMake | No ESP32 needed. Linux/CI can build the same tests with gcc. The snapshot tool is the seed of a desktop simulator. |
 | Console on UART0, mirrored to USB-Serial/JTAG | Logs available on either port |
+| Companion protocol: text lines on the console UART, `>DB1 … #crc` / `<DB1 … #crc` | Readable in any serial monitor and coexists with the log on the only connected port. CRC-16 plus a strict format means log text, typing and esptool traffic can never trigger an action. Capabilities in `hello` let firmware and companion grow independently. |
+| Companion in C# / .NET 10 WinForms | Built-in serial port access, easy HTTP/JSON/Graph later; per-user SDK install, no admin. One NuGet package (`System.IO.Ports`); `companion/nuget.config` names nuget.org because the machine's NuGet config lists no sources. |
+| Time zone from Windows, not Kconfig | `time.set` carries the UTC offset and the next DST switch, so any Windows zone works and the clock switches on time while the companion is closed. |
 
 ## Known issues and caveats
 - **Full-screen redraws starve the scanout of PSRAM bandwidth.** They take 43 ms, and bounce fills then exceed their 449 µs budget, causing a one-frame resync glitch. Boot redraws happen before the backlight comes on. Office Mode switches redraw the whole screen with the light on (2–4 resyncs per switch); the user saw nothing wrong. See the results doc.
 - **Backlight brightness cannot be changed reliably at run time.** The IO expander (a CH32V003 microcontroller with Waveshare firmware) acknowledges every write, but brightness changes came out random (levels never requested), sometimes stuck until the board lost power, and writing only the PWM register changed nothing. ESPHome users report the same. The firmware now sets the brightness once at boot. See the results doc.
 - **Black screen: two different failures, neither fixed.** (1) *Dark after power-up, board running:* COM5 present, firmware renders, the screen stays black until RESET. Seen after plugging in and after the laptop's battery shutdown; not reproduced by a sleep test or an unplug/replug test. Suspected: the backlight command at power-up arrives before the IO expander MCU is ready, or a supply dip resets only the expander. If it becomes frequent, read the uptime from the log without resetting before choosing a fix. (2) *Board lost USB power or connection:* on 2026-10-14 at 10:51:14 Windows logged the board's USB-serial chip as removed while it was plugged in; afterwards RESET, BOOT and taps did nothing. Not a firmware issue: check the cable and port, or power the board from a charger or a powered hub. Details in the results doc.
-- **No wall-clock time source.** The board has no RTC: an I2C scan on the device finds only the IO expander (0x24) and the touch controller (0x5D). The ESP32 clock restarts at 1970 on every power-up, so Office Mode shows *CLOCK NOT SET* until something sets it. Options, cheapest first:
-  1. **The Windows companion over USB (recommended):** send UTC on connect and every few hours, plus the time zone. It fits the planned bridge, needs no extra hardware or network, and the laptop's clock is already synced by the company.
-  2. **A one-line serial command now** (`time <unix seconds>` on the UART console, sent by a small `tools/set-time.ps1`): a stopgap until the bridge, same accuracy, but lost on every power cycle.
-  3. **An RTC module with a coin cell** (DS3231 or PCF85063) on the HY2.0 I2C header: keeps time through power loss; still needs to be set once and drifts (DS3231: about 1 min/year).
-  4. **SNTP over Wi-Fi:** most accurate, but needs network credentials and access, which the architecture deliberately avoids at work.
+- **The clock needs the companion after every power-up.** The board has no RTC (an I2C scan finds only the IO expander at 0x24 and the touch controller at 0x5D), so the ESP32 clock restarts at 1970 and Office Mode shows *CLOCK NOT SET* until the companion connects. An RTC module with a coin cell (DS3231 or PCF85063) on the HY2.0 I2C header would keep time through power loss, if that ever matters.
+- **Windows lets one program open a COM port at a time.** `tools/idf.ps1` (flash, monitor) makes the companion let go automatically (named mutex `Local\DeskBuddy.PortHold`); other serial tools need the companion's *Disconnect* first.
+- **The companion runs on the per-user .NET runtime** through `tools/companion.ps1` (it sets `DOTNET_ROOT`). Starting the exe directly needs the .NET 10 Desktop Runtime installed machine-wide (administrator), or a self-contained publish.
 - **The board stays at work while development happens mostly at home.** Future firmware and asset updates must therefore be deployable without physical access: build and publish via GitHub, deliver through the Windows companion app over USB, with a recovery path (OTA slots) if an update fails. Until then, flashing needs someone at the board.
 - **The UART path depends on DIP switch #16.** In the wrong position the CH343 enumerates but esptool reports "No serial data received".
 - **Native USB disappears whenever any firmware sets EXIO5 high,** for example the factory image or Waveshare's examples. Use the UART port in that case.
@@ -126,8 +128,8 @@ tools\flash-backup.ps1 -Action restore -Image <dump>.bin   # writes 16 MB (~1 mi
 
 **If auto-reset fails:** hold BOOT, tap RESET, release BOOT, then retry.
 
-## Next steps (not started; to be approved one at a time)
-1. **Windows companion bridge (USB serial):** framed, versioned protocol between device and companion service. Events in (notifications); validated, preconfigured action IDs out. Keep it in its own component, independent of rendering and behavior.
+## Next steps (to be approved one at a time)
+1. **Companion, next rounds:** tray icon and autostart, notifications/events from the laptop to DeskBuddy, firmware updates over USB. The protocol is ready for new commands and events ([docs/protocol.md](docs/protocol.md#adding-a-command)).
 2. **Control panel UI** in the reserved 35 % area: configurable buttons whose actions are IDs validated by the companion service, never URLs. Decide whether LVGL or our own widgets render it; either way it presents through `display`.
 3. **Character life:** needs, moods, personality and time-based behavior in `buddy_brain`, with persistence (NVS) designed together with the flash layout.
 4. **Asset pipeline and real character art:**

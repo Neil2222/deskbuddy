@@ -17,13 +17,6 @@ menu "DeskBuddy"
         range 3 100
         default 80
 
-    config DESKBUDDY_TIMEZONE
-        string "Time zone (POSIX TZ string)"
-        default "CET-1CEST,M3.5.0,M10.5.0/3"
-        help
-            Local time zone for the Office Mode clock, including daylight saving rules. The default is
-            Central European Time (Amsterdam, Brussels, Berlin). The clock itself is kept in UTC.
-
     config DESKBUDDY_PERF_LOG_S
         int "Performance log interval in seconds (0 = off)"
         range 0 3600

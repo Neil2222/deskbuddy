@@ -63,7 +63,13 @@ extern int g_test_failed;
     X(office_pauses_character_mid_monster)           \
     X(office_moon_button)                            \
     X(office_switch_redraws_fully_only_while_switching) \
-    X(layout_splits_screen)
+    X(layout_splits_screen)                          \
+    X(link_crc_matches_ccitt_false)                  \
+    X(link_parses_commands)                          \
+    X(link_rejects_noise_and_corruption)             \
+    X(link_rejects_unknown_commands_and_bad_arguments) \
+    X(link_formats_replies_the_companion_can_check)  \
+    X(link_time_zone_switches_at_the_announced_moment)
 
 #define X(name) void test_##name(void);
 TEST_LIST

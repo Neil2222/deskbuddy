@@ -16,5 +16,11 @@ if ($needsPort -and -not $hasPort) {
     Write-Host "Using port $env:ESPPORT"
 }
 
-idf.py @args
+# While this mutex exists, the Windows companion lets go of the board's port and does not reconnect.
+$portHold = if ($needsPort) { New-Object System.Threading.Mutex($true, 'Local\DeskBuddy.PortHold') }
+try {
+    idf.py @args
+} finally {
+    if ($portHold) { $portHold.ReleaseMutex(); $portHold.Dispose() }
+}
 exit $LASTEXITCODE

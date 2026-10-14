@@ -14,7 +14,8 @@ file(GLOB CORE_SRCS CONFIGURE_DEPENDS
      ${COMPONENTS_DIR}/gfx/src/*.c
      ${COMPONENTS_DIR}/buddy/src/*.c
      ${COMPONENTS_DIR}/layout/src/*.c
-     ${COMPONENTS_DIR}/office/src/*.c)
+     ${COMPONENTS_DIR}/office/src/*.c
+     ${COMPONENTS_DIR}/link/src/*.c)
 
 if(MSVC)
     set(WARNINGS /W4 /WX)
@@ -35,14 +36,15 @@ target_include_directories(deskbuddy_core PUBLIC
     ${COMPONENTS_DIR}/gfx/include
     ${COMPONENTS_DIR}/buddy/include
     ${COMPONENTS_DIR}/layout/include
-    ${COMPONENTS_DIR}/office/include)
+    ${COMPONENTS_DIR}/office/include
+    ${COMPONENTS_DIR}/link/include)
 target_compile_options(deskbuddy_core PRIVATE ${WARNINGS})
 if(NOT MSVC)
     target_link_libraries(deskbuddy_core PUBLIC m)
 endif()
 
 add_executable(host_tests main.c test_util.c test_dirty.c test_scene.c test_repair.c test_anim.c test_buddy.c
-               test_monster.c test_office.c)
+               test_monster.c test_office.c test_link.c)
 target_link_libraries(host_tests PRIVATE deskbuddy_core)
 target_compile_options(host_tests PRIVATE ${WARNINGS})
 

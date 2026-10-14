@@ -14,6 +14,10 @@ managed_components/
 sdkconfig
 sdkconfig.old
 
+# --- .NET build outputs (companion/) ---
+bin/
+obj/
+
 # --- Credentials and secrets ---
 .env
 .env.*

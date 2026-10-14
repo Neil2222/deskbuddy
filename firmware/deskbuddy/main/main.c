@@ -1,10 +1,13 @@
-// DeskBuddy: placeholder character on the rendering engine, and the Office Mode desk clock.
+// DeskBuddy: placeholder character on the rendering engine, the Office Mode desk clock, and the serial link to the
+// Windows companion.
 //
 // Tasks:  touch  (core 1, prio 10)  GT911 interrupt -> input events
 //         render (core 1, prio 5)   events + time -> character pose or clock -> dirty rectangles -> back buffer
-//                                   -> present
+//                                   -> present; runs companion commands and replies
+//         link   (core 0, prio 4)   console UART -> companion commands -> input events
 // The LCD scanout interrupts run on core 0 (board_init is called from app_main there).
 #include <inttypes.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/time.h>
@@ -26,6 +29,7 @@
 #include "layout.h"
 #include "office_clock.h"
 #include "office_switch.h"
+#include "serial_link.h"
 #include "sdkconfig.h"
 
 static const char *TAG = "deskbuddy";
@@ -140,17 +144,87 @@ static bool touch_event(const buddy_view_t *view, const buddy_button_t *button, 
     return false;
 }
 
-// Local wall-clock time, if anything has set the clock (see office_time_valid()). ms: into the current second.
+// The time zone arrives with the time (the companion's time.set); until then the clock counts as not set.
+static link_tz_t s_tz;
+static bool s_tz_known;
+
+// Local wall-clock time, if the companion has set the clock (see office_time_valid()). ms: into the current second.
 static bool wall_clock(struct tm *tm, uint32_t *ms)
 {
     struct timeval tv;
     gettimeofday(&tv, NULL);
-    if (!office_time_valid(tv.tv_sec)) {
+    if (!s_tz_known || !office_time_valid(tv.tv_sec)) {
         return false;
     }
-    localtime_r(&tv.tv_sec, tm);
+    const time_t local = tv.tv_sec + (time_t)link_tz_offset_min(&s_tz, tv.tv_sec) * 60;
+    gmtime_r(&local, tm);
     *ms = (uint32_t)(tv.tv_usec / 1000);
     return true;
+}
+
+// What the companion shows as the device mode.
+static const char *mode_name(const office_switch_t *screen, const buddy_brain_t *brain)
+{
+    if (screen->office) {
+        return "office";
+    }
+    return brain->state == BUDDY_STATE_MONSTER ? "monster" : "normal";
+}
+
+// Runs a companion command (on the render task, which owns the character and the scene) and replies.
+// lit: the screen is up (touches are only taken from then on, too).
+static void run_command(const link_command_t *c, buddy_brain_t *brain, office_switch_t *screen, bool has_office,
+                        bool lit, uint32_t now)
+{
+    char body[96] = "ok";
+    switch (c->cmd) {
+    case LINK_CMD_STATUS: {
+        struct tm tm;
+        uint32_t ms;
+        snprintf(body, sizeof(body), "ok mode=%s time=%s uptime=%" PRIu32, mode_name(screen, brain),
+                 wall_clock(&tm, &ms) ? "set" : "unset", now / 1000);
+        break;
+    }
+    case LINK_CMD_POKE:
+    case LINK_CMD_MONSTER: {
+        const buddy_event_t be = c->cmd == LINK_CMD_POKE ? BUDDY_EVENT_POKE : BUDDY_EVENT_DRINK_MONSTER;
+        const bool switching = office_switch_busy(screen) || screen->want_office != screen->office;
+        if (!lit || screen->office || switching || !buddy_brain_event(brain, be, now)) {
+            snprintf(body, sizeof(body), "err busy mode=%s", mode_name(screen, brain));
+        } else {
+            ESP_LOGI(TAG, "%s (companion)", c->cmd == LINK_CMD_POKE ? "Poke" : "Monster time");
+        }
+        break;
+    }
+    case LINK_CMD_MODE_SET:
+        if (!has_office) {
+            strcpy(body, "err unavailable");
+        } else if (!lit) {
+            snprintf(body, sizeof(body), "err busy mode=%s", mode_name(screen, brain));
+        } else {
+            office_switch_request(screen, c->u.office);
+            ESP_LOGI(TAG, "Office Mode %s (companion)", c->u.office ? "on" : "off");
+        }
+        break;
+    case LINK_CMD_TIME_SET: {
+        const struct timeval tv = {.tv_sec = (time_t)c->u.time.utc, .tv_usec = c->u.time.ms * 1000};
+        settimeofday(&tv, NULL);
+        s_tz = c->u.time.tz;
+        s_tz_known = true;
+        struct tm tm;
+        uint32_t ms;
+        if (wall_clock(&tm, &ms)) {
+            ESP_LOGI(TAG, "clock set by the companion: %04d-%02d-%02d %02d:%02d:%02d (UTC%+" PRId32 " min)",
+                     tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec,
+                     link_tz_offset_min(&s_tz, tv.tv_sec));
+        }
+        break;
+    }
+    default: // hello and ping are answered by the serial task
+        strcpy(body, "err unknown_cmd");
+        break;
+    }
+    serial_link_send(c->seq, body);
 }
 
 #define BACKLIGHT_RETRY_MS 20
@@ -225,6 +299,7 @@ static void render_task(void *arg)
     uint32_t presented = 0;
     bool backlight = false; // board_init leaves the backlight off
     uint32_t wait_ms = 0;
+    const char *mode = NULL; // last mode reported to the companion
 #if CONFIG_DESKBUDDY_DEMO_POKE_S > 0
     uint32_t next_demo = t_start + CONFIG_DESKBUDDY_DEMO_POKE_S * 1000u;
 #endif
@@ -239,6 +314,10 @@ static void render_task(void *arg)
         input_event_t ev;
         if (xQueueReceive(events, &ev, pdMS_TO_TICKS(wait_ms)) == pdTRUE) {
             do {
+                if (ev.type == INPUT_COMMAND) {
+                    run_command(&ev.command, &brain, &screen, has_office, presented >= 2, now_ms());
+                    continue;
+                }
                 // Touches count once the screen is lit and no scene switch is under way or requested.
                 if (presented < 2 || office_switch_busy(&screen) || screen.want_office != screen.office) {
                     continue;
@@ -343,6 +422,16 @@ static void render_task(void *arg)
         next = step.next_ms < next ? step.next_ms : next;
         next = !light_ok && next > BACKLIGHT_RETRY_MS ? BACKLIGHT_RETRY_MS : next;
 
+        const char *new_mode = mode_name(&screen, &brain);
+        if (new_mode != mode) {
+            if (mode) {
+                char body[32];
+                snprintf(body, sizeof(body), "evt mode mode=%s", new_mode);
+                serial_link_send(0, body);
+            }
+            mode = new_mode;
+        }
+
         gfx_dirty_clear(&changes);
         gfx_scene_collect(&s_scene, &changes);
         if (changes.count > 0) {
@@ -415,10 +504,8 @@ static void render_task(void *arg)
 void app_main(void)
 {
     const int64_t t_boot = esp_timer_get_time();
-    // Wall-clock time is kept in UTC and shown in this zone. Nothing sets the clock yet (no RTC on this board);
-    // until something does, Office Mode says "CLOCK NOT SET" instead of showing a made-up time.
-    setenv("TZ", CONFIG_DESKBUDDY_TIMEZONE, 1);
-    tzset();
+    // Wall-clock time is kept in UTC; the companion sets it and the local offset (time.set). The board has no RTC:
+    // until the companion has sent the time, Office Mode says "CLOCK NOT SET" instead of showing a made-up time.
     s_layout = layout_compute(W, H, CONFIG_DESKBUDDY_STAGE_PERCENT, PANEL_LEFT, X_ALIGN);
 
     gfx_color_t *strip = heap_caps_malloc(STRIP_PX * sizeof(gfx_color_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
@@ -441,6 +528,7 @@ void app_main(void)
 
     QueueHandle_t events;
     ESP_ERROR_CHECK(input_start(s_board.touch, &events));
+    ESP_ERROR_CHECK(serial_link_start(events));
     if (xTaskCreatePinnedToCore(render_task, "render", 6144, events, RENDER_PRIO, NULL, RENDER_CORE) != pdPASS) {
         ESP_LOGE(TAG, "cannot start the render task");
         abort();
