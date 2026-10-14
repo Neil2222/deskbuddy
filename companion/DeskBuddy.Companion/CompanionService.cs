@@ -41,6 +41,10 @@ public sealed class CompanionService : IDisposable
     /// <summary>The port of the current connection; null while not connected.</summary>
     public string? PortName => IsConnected ? _link?.PortName : null;
     public string Mode { get; private set; } = "unknown";
+    /// <summary>Buddy's mood (status / evt mood); independent from <see cref="Mode"/>.</summary>
+    public string Mood { get; private set; } = DeviceMood.Idle;
+    /// <summary>The moods the firmware supports (hello moods=), in display order; empty: none.</summary>
+    public IReadOnlyList<string> Moods { get; private set; } = [];
     public string ClockText { get; private set; } = "not synced";
     public IReadOnlySet<string> Caps { get; private set; } = new HashSet<string>();
 
@@ -160,6 +164,21 @@ public sealed class CompanionService : IDisposable
         return _messageId;
     }
 
+    /// <summary>Sets Buddy's mood (until changed again). True when DeskBuddy took it.</summary>
+    public async Task<bool> SetMoodAsync(string label, string mood)
+    {
+        if (!await RunAsync(label, DeviceMood.Command(mood)))
+        {
+            return false;
+        }
+        if (IsConnected && Mood != mood)
+        {
+            Mood = mood; // evt mood follows; showing it now keeps the tile from flickering back
+            Changed?.Invoke();
+        }
+        return true;
+    }
+
     public Task SyncClockAsync() => SyncClockAsync("manual");
 
     private void Tick()
@@ -265,6 +284,8 @@ public sealed class CompanionService : IDisposable
             Firmware = hello.Arg("fw");
             Protocol = hello.Arg("proto");
             Caps = (hello.Arg("caps") ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries).ToHashSet();
+            Moods = DeviceMood.ParseList(hello.Arg("moods"));
+            Mood = DeviceMood.Idle; // until status says otherwise
             IsConnected = true;
             _missedPings = 0;
             _nextPing = DateTime.UtcNow + PingInterval;
@@ -306,6 +327,10 @@ public sealed class CompanionService : IDisposable
         {
         case "mode":
             Mode = frame.Arg("mode") ?? Mode;
+            Changed?.Invoke();
+            break;
+        case "mood":
+            Mood = DeviceMood.From(frame, Mood);
             Changed?.Invoke();
             break;
         case "msg":
@@ -376,6 +401,7 @@ public sealed class CompanionService : IDisposable
             if (reply.IsOk)
             {
                 Mode = reply.Arg("mode") ?? Mode;
+                Mood = DeviceMood.From(reply, Mood);
                 Changed?.Invoke();
             }
         }
@@ -415,6 +441,7 @@ public sealed class CompanionService : IDisposable
         _link = null;
         IsConnected = false;
         Mode = "unknown";
+        Mood = DeviceMood.Idle;
         link?.Dispose();
         if (link is not null)
         {

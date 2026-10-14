@@ -231,7 +231,8 @@ static void run_command(const link_command_t *c, buddy_brain_t *brain, office_sw
     case LINK_CMD_STATUS: {
         struct tm tm;
         uint32_t ms;
-        snprintf(body, sizeof(body), "ok mode=%s time=%s msg=%s queued=%d uptime=%" PRIu32, mode_name(screen, brain),
+        snprintf(body, sizeof(body), "ok mode=%s mood=%s time=%s msg=%s queued=%d uptime=%" PRIu32,
+                 mode_name(screen, brain), buddy_mood_name(buddy_brain_mood(brain, now)),
                  wall_clock(&tm, &ms) ? "set" : "unset", marquee_active(&s_msg.sign) ? "showing" : "idle",
                  s_msg.queued, now / 1000);
         break;
@@ -290,6 +291,18 @@ static void run_command(const link_command_t *c, buddy_brain_t *brain, office_sw
             strcpy(s_msg.queued_text, c->u.msg.text);
             strcpy(body, "ok queued=1");
             ESP_LOGI(TAG, "message %" PRIu32 " waits for the sign", id);
+        }
+        break;
+    }
+    case LINK_CMD_MOOD_SET: {
+        // Always accepted: in Office Mode, or while a reaction plays, the new mood shows as soon as he is back.
+        buddy_mood_t mood;
+        if (!buddy_mood_parse(c->u.mood.name, &mood)) {
+            strcpy(body, "err unsupported");
+        } else {
+            buddy_brain_set_mood(brain, mood, c->u.mood.secs * 1000u, now);
+            ESP_LOGI(TAG, "mood %s for %" PRIu32 " s (0: until changed) (companion)", buddy_mood_name(mood),
+                     c->u.mood.secs);
         }
         break;
     }
@@ -377,6 +390,7 @@ static void render_task(void *arg)
     bool backlight = false; // board_init leaves the backlight off
     uint32_t wait_ms = 0;
     const char *mode = NULL; // last mode reported to the companion
+    buddy_mood_t mood = buddy_brain_mood(&brain, t_start); // last mood reported
 #if CONFIG_DESKBUDDY_DEMO_POKE_S > 0
     uint32_t next_demo = t_start + CONFIG_DESKBUDDY_DEMO_POKE_S * 1000u;
 #endif
@@ -528,6 +542,13 @@ static void render_task(void *arg)
                 serial_link_send(0, body);
             }
             mode = new_mode;
+        }
+        const buddy_mood_t new_mood = buddy_brain_mood(&brain, now); // also ends a timed mood, in Office Mode too
+        if (new_mood != mood) {
+            char body[32];
+            snprintf(body, sizeof(body), "evt mood mood=%s", buddy_mood_name(new_mood));
+            serial_link_send(0, body);
+            mood = new_mood;
         }
 
         gfx_dirty_clear(&changes);

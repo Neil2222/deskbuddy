@@ -24,6 +24,9 @@ enum {
     BUDDY_PX_CABLE = 18,
 };
 
+#define BUDDY_PART_FRAMES 3 // most frames any particle kind has
+#define BUDDY_EMBERS 3      // buddy_props_t.ember values
+
 #define BUDDY_BOLT_SHAPES 2
 #define BUDDY_BOLT_SLOTS 6
 
@@ -32,7 +35,7 @@ typedef struct {
 } buddy_point_t;
 
 // Props for the Monster sequence and the trigger button. Points marked "body" move with the robot (lift, shake),
-// "head" ones also with the head (wobble); the others stand on the ground.
+// "head" ones also with the head (wobble, nod); the others stand on the ground.
 typedef struct {
     gfx_image_t can[BUDDY_CAN_LEVELS], can_crushed, can_shadow;
     gfx_image_t port, plug, coil, hand, alert;
@@ -40,6 +43,11 @@ typedef struct {
     gfx_image_t spark[BUDDY_SPARK_FRAMES], poof[BUDDY_POOF_FRAMES];
     gfx_image_t battery[BUDDY_BATTERY_FRAMES]; // indexed by buddy_props_t.battery - 1
     gfx_image_t plate;                         // button background
+
+    // Mood props: the cigarette by length and ember, and the particle kinds (part_frames[kind] frames each).
+    gfx_image_t cig[BUDDY_CIG_LENGTHS][BUDDY_EMBERS];
+    gfx_image_t part[BUDDY_PART_COUNT][BUDDY_PART_FRAMES];
+    uint8_t part_frames[BUDDY_PART_COUNT];
 
     buddy_point_t can_at;     // top-left of the full can
     buddy_point_t plug_can;   // top-left of the plug standing in the can
@@ -49,6 +57,9 @@ typedef struct {
     buddy_point_t arm_root;   // body: where the telescopic arm comes out
     buddy_point_t hand_show;  // body
     buddy_point_t hand_port;  // head: hand position that holds a plug just beside plug_port
+    buddy_point_t hand_mouth; // head: hand position that holds the cigarette's filter in the mouth
+    buddy_point_t hand_rest;  // body: the hand lowered beside the head
+    buddy_point_t from[BUDDY_FROM_COUNT]; // particle start points (BUDDY_FROM_EMBER is worked out from hand_rest)
     buddy_point_t battery_at;
     buddy_point_t alert_at;   // body
     buddy_point_t bolt_at[BUDDY_BOLT_SLOTS]; // body
@@ -56,9 +67,14 @@ typedef struct {
     int cable_len; // art pixels
 } buddy_props_art_t;
 
+// A cigarette is held this many art pixels right of its filter end, one row above the hand point (between the
+// claw's prongs); its glowing tip is the rightmost pixel.
+#define BUDDY_CIG_GRIP 2
+
 typedef struct {
     gfx_image_t head, torso, antenna_on, antenna_off, antenna_green, antenna_white, shadow, shadow_small;
     gfx_image_t eyes[BUDDY_EYES_COUNT];
+    bool eye_mirror[BUDDY_EYES_COUNT]; // the right eye shows the image flipped (asymmetric expressions)
     gfx_image_t mouth[BUDDY_MOUTH_COUNT];
     gfx_palette_t palette;               // props and everything else
     gfx_palette_t tint[BUDDY_TINT_COUNT]; // the robot's own parts, by buddy_tint_t

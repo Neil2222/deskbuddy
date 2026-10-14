@@ -198,3 +198,30 @@ void test_link_rejects_bad_messages(void)
     CHECK_EQ(c.seq, 10);
     CHECK(strcmp(link_error_code(LINK_ERR_UNSUPPORTED), "unsupported") == 0);
 }
+
+// mood.set: the parser checks the shape of the name and the duration; whether the mood exists is the device's
+// answer (err unsupported), so newer companions can ask for moods an older firmware does not have.
+void test_link_parses_moods(void)
+{
+    link_command_t c;
+    CHECK_EQ(parse(frame(">DB1 5 mood.set name=working"), &c), LINK_OK);
+    CHECK(c.cmd == LINK_CMD_MOOD_SET && c.seq == 5 && strcmp(c.u.mood.name, "working") == 0 && c.u.mood.secs == 0);
+    CHECK_EQ(parse(frame(">DB1 6 mood.set secs=90 name=relaxed"), &c), LINK_OK);
+    CHECK(strcmp(c.u.mood.name, "relaxed") == 0 && c.u.mood.secs == 90);
+    CHECK_EQ(parse(frame(">DB1 7 mood.set name=build_failed secs=86400"), &c), LINK_OK); // shape only
+    CHECK_EQ(c.u.mood.secs, LINK_MOOD_SECS_MAX);
+    CHECK_EQ(parse(frame(">DB1 8 mood.set name=abcdefghijklmno"), &c), LINK_OK); // 15 letters: the longest
+
+    CHECK_EQ(parse(frame(">DB1 9 mood.set"), &c), LINK_ERR_ARGS);
+    CHECK_EQ(c.seq, 9); // still answerable
+    CHECK_EQ(parse(frame(">DB1 9 mood.set name="), &c), LINK_ERR_ARGS);
+    CHECK_EQ(parse(frame(">DB1 9 mood.set name=Working"), &c), LINK_ERR_ARGS);
+    CHECK_EQ(parse(frame(">DB1 9 mood.set name=work1ng"), &c), LINK_ERR_ARGS);
+    CHECK_EQ(parse(frame(">DB1 9 mood.set name=work%69ng"), &c), LINK_ERR_ARGS);
+    CHECK_EQ(parse(frame(">DB1 9 mood.set name=abcdefghijklmnop"), &c), LINK_ERR_ARGS); // 16
+    CHECK_EQ(parse(frame(">DB1 9 mood.set name=happy secs=0"), &c), LINK_ERR_ARGS);
+    CHECK_EQ(parse(frame(">DB1 9 mood.set name=happy secs=86401"), &c), LINK_ERR_ARGS);
+    CHECK_EQ(parse(frame(">DB1 9 mood.set name=happy secs=-5"), &c), LINK_ERR_ARGS);
+    CHECK_EQ(parse(frame(">DB1 9 mood.set name=happy secs="), &c), LINK_ERR_ARGS);
+    CHECK_EQ(parse(frame(">DB1 9 mood.set name=happy secs=ten"), &c), LINK_ERR_ARGS);
+}

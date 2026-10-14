@@ -100,6 +100,9 @@ bool buddy_view_init(buddy_view_t *v, gfx_scene_t *scene, gfx_rect_t stage, int 
     for (int i = 0; i < BUDDY_FX_COUNT; i++) {
         init_sprite(v, &v->fx[i], &p->spark[0]);
     }
+    for (int i = 0; i < BUDDY_PARTICLES; i++) {
+        init_sprite(v, &v->part[i], NULL);
+    }
     const buddy_pose_t rest = {.eyes = BUDDY_EYES_OPEN, .mouth = BUDDY_MOUTH_NEUTRAL, .antenna = BUDDY_ANTENNA_CALM};
     buddy_view_apply(v, &rest, now_ms);
 
@@ -116,6 +119,9 @@ bool buddy_view_init(buddy_view_t *v, gfx_scene_t *scene, gfx_rect_t stage, int 
     }
     for (int i = 0; ok && i < BUDDY_FX_COUNT; i++) {
         ok = gfx_scene_add(scene, &v->fx[i], z + 4);
+    }
+    for (int i = 0; ok && i < BUDDY_PARTICLES; i++) {
+        ok = gfx_scene_add(scene, &v->part[i], z + 4);
     }
     return ok;
 }
@@ -216,8 +222,8 @@ static buddy_point_t offset(buddy_point_t p, int dx, int dy)
     return (buddy_point_t){p.x + dx, p.y + dy};
 }
 
-// Hand position in art pixels; bx/by is the body offset (shake, lift), hx the head's x offset (shake + wobble).
-static fpoint_t hand_spot(const buddy_props_art_t *p, buddy_hand_t h, int bx, int by, int hx)
+// Hand position in art pixels; bx/by is the body offset (shake, lift), hx/hy the head's (plus wobble and nod).
+static fpoint_t hand_spot(const buddy_props_art_t *p, buddy_hand_t h, int bx, int by, int hx, int hy)
 {
     buddy_point_t s;
     switch (h) {
@@ -228,7 +234,13 @@ static fpoint_t hand_spot(const buddy_props_art_t *p, buddy_hand_t h, int bx, in
         s = p->hand_can;
         break;
     case BUDDY_HAND_PORT:
-        s = offset(p->hand_port, hx, by);
+        s = offset(p->hand_port, hx, hy);
+        break;
+    case BUDDY_HAND_MOUTH:
+        s = offset(p->hand_mouth, hx, hy);
+        break;
+    case BUDDY_HAND_REST:
+        s = offset(p->hand_rest, bx, by);
         break;
     case BUDDY_HAND_HOME:
     default:
@@ -245,23 +257,23 @@ static bool hand_out(const buddy_props_t *pr)
              (pr->hand_to == BUDDY_HAND_HOME && at_to));
 }
 
-static buddy_point_t hand_now(const buddy_props_art_t *p, const buddy_props_t *pr, int bx, int by, int hx)
+static buddy_point_t hand_now(const buddy_props_art_t *p, const buddy_props_t *pr, int bx, int by, int hx, int hy)
 {
-    const fpoint_t a = hand_spot(p, pr->hand_from, bx, by, hx), b = hand_spot(p, pr->hand_to, bx, by, hx);
+    const fpoint_t a = hand_spot(p, pr->hand_from, bx, by, hx, hy), b = hand_spot(p, pr->hand_to, bx, by, hx, hy);
     const float m = pr->hand_mix / 255.0f;
     return (buddy_point_t){round_i(a.x + (b.x - a.x) * m), round_i(a.y + (b.y - a.y) * m)};
 }
 
-static void draw_rig(buddy_view_t *v, const buddy_props_t *pr, int bx, int by, int hx)
+static void draw_rig(buddy_view_t *v, const buddy_props_t *pr, int bx, int by, int hx, int hy)
 {
     const buddy_props_art_t *p = &v->art->props;
     buddy_rig_t *r = &v->rig_px;
     memset(r->work, 0, sizeof(r->work));
 
     const bool out = hand_out(pr);
-    const buddy_point_t h = hand_now(p, pr, bx, by, hx);
+    const buddy_point_t h = hand_now(p, pr, bx, by, hx, hy);
     const buddy_point_t held_plug = {h.x, h.y - p->plug.h}; // the plug sits in the claw
-    const buddy_point_t port_plug = offset(p->plug_port, hx, by);
+    const buddy_point_t port_plug = offset(p->plug_port, hx, hy);
     const buddy_point_t ground_plug = {p->can_at.x - 3, p->ground_y + 1 - p->plug.h};
     // The plug stays in the can's lid, which sinks when the can is crushed.
     const int sink = pr->can == BUDDY_CAN_CRUSHED ? p->can[0].h - p->can_crushed.h : 0;
@@ -294,6 +306,10 @@ static void draw_rig(buddy_view_t *v, const buddy_props_t *pr, int bx, int by, i
 
     if (out) {
         draw_rod(r, p->arm_root.x + bx + 1, p->arm_root.y + by, h.x, h.y + 1);
+        if (pr->cig) { // between the claw's prongs, drawn over by them
+            stamp(r, &p->cig[pr->cig_left % BUDDY_CIG_LENGTHS][pr->ember % BUDDY_EMBERS], h.x - BUDDY_CIG_GRIP,
+                  h.y - 1);
+        }
         stamp(r, &p->hand, h.x - 1, h.y - 1);
     }
     switch (pr->cable) {
@@ -443,7 +459,32 @@ static void apply_fx(buddy_view_t *v, const buddy_props_t *pr, int hx, int by, b
     }
 }
 
-static void apply_props(buddy_view_t *v, const buddy_props_t *pr, int bx, int by, int hx)
+// Floating effects. Head start points follow the head; the cigarette's tip follows the resting hand.
+static void apply_particles(buddy_view_t *v, const buddy_props_t *pr, int bx, int by, int hx, int hy)
+{
+    const buddy_props_art_t *p = &v->art->props;
+    for (int i = 0; i < BUDDY_PARTICLES; i++) {
+        const buddy_particle_t *q = &pr->particle[i];
+        gfx_sprite_t *sp = &v->part[i];
+        if (q->kind == BUDDY_PART_NONE || q->kind >= BUDDY_PART_COUNT || q->from >= BUDDY_FROM_COUNT) {
+            hide(sp);
+            continue;
+        }
+        buddy_point_t c;
+        if (q->from == BUDDY_FROM_EMBER) {
+            const gfx_image_t *cig = &p->cig[pr->cig_left % BUDDY_CIG_LENGTHS][0];
+            c = offset(p->hand_rest, bx - BUDDY_CIG_GRIP + cig->w - 1, by - 1);
+        } else {
+            c = offset(p->from[q->from], hx, hy);
+        }
+        const gfx_image_t *img = &p->part[q->kind][q->frame % p->part_frames[q->kind]];
+        show(sp, img);
+        sp->x = v->x0 + (c.x + q->dx) * v->scale + v->scale / 2 - img->w * v->scale / 2;
+        sp->y = v->y0 + (c.y + q->dy) * v->scale + v->scale / 2 - img->h * v->scale / 2;
+    }
+}
+
+static void apply_props(buddy_view_t *v, const buddy_props_t *pr, int bx, int by, int hx, int hy)
 {
     const buddy_props_art_t *p = &v->art->props;
     const int dx_px = bx * v->scale, dy_px = by * v->scale;
@@ -484,9 +525,10 @@ static void apply_props(buddy_view_t *v, const buddy_props_t *pr, int bx, int by
     }
     apply_bolts(v, pr, dx_px, dy_px);
 
-    draw_rig(v, pr, bx, by, hx);
+    draw_rig(v, pr, bx, by, hx, hy);
     commit_rig(v);
-    apply_fx(v, pr, hx, by, hand_now(p, pr, bx, by, hx));
+    apply_fx(v, pr, hx, hy, hand_now(p, pr, bx, by, hx, hy));
+    apply_particles(v, pr, bx, by, hx, hy);
 }
 
 uint32_t buddy_view_apply(buddy_view_t *v, const buddy_pose_t *pose, uint32_t now_ms)
@@ -497,6 +539,7 @@ uint32_t buddy_view_apply(buddy_view_t *v, const buddy_pose_t *pose, uint32_t no
     const int wobble = pose->wobble < -1 ? -1 : pose->wobble > 1 ? 1 : pose->wobble;
     const int look = pose->look < -1 ? -1 : pose->look > 1 ? 1 : pose->look;
     const int dx = shake * v->scale, dy = -lift * v->scale, head_dx = (shake + wobble) * v->scale;
+    const int nod = pose->nod > 1 ? 1 : pose->nod, head_dy = dy + nod * v->scale;
     const gfx_palette_t *tint = &a->tint[pose->tint < BUDDY_TINT_COUNT ? pose->tint : BUDDY_TINT_NORMAL];
     uint32_t next = UINT32_MAX;
 
@@ -510,19 +553,21 @@ uint32_t buddy_view_apply(buddy_view_t *v, const buddy_pose_t *pose, uint32_t no
     const buddy_antenna_t ant = pose->antenna < BUDDY_ANTENNA_COUNT ? pose->antenna : BUDDY_ANTENNA_CALM;
     v->antenna.image = gfx_anim_image(&a->antenna[ant], now_ms - v->anim_start, &next);
     v->eye[0].image = v->eye[1].image = &a->eyes[pose->eyes];
+    const uint8_t mirror = a->eye_mirror[pose->eyes] ? GFX_SPRITE_FLIP_X : 0; // asymmetric expressions
+    v->eye[1].flags = (uint8_t)((v->eye[1].flags & ~GFX_SPRITE_FLIP_X) | mirror);
     v->mouth.image = &a->mouth[pose->mouth];
     v->shadow.image = lift >= 2 ? &a->shadow_small : &a->shadow;
     v->head.palette = v->torso.palette = v->antenna.palette = tint;
     v->eye[0].palette = v->eye[1].palette = v->mouth.palette = tint;
 
     place(v, &v->torso, a->torso_at, dx, dy);
-    place(v, &v->head, a->head_at, head_dx, dy);
-    place(v, &v->antenna, a->antenna_at, head_dx, dy);
-    place(v, &v->eye[0], a->eye_at[0], head_dx + look * v->scale, dy);
-    place(v, &v->eye[1], a->eye_at[1], head_dx + look * v->scale, dy);
-    place(v, &v->mouth, a->mouth_at, head_dx, dy);
+    place(v, &v->head, a->head_at, head_dx, head_dy);
+    place(v, &v->antenna, a->antenna_at, head_dx, head_dy);
+    place(v, &v->eye[0], a->eye_at[0], head_dx + look * v->scale, head_dy);
+    place(v, &v->eye[1], a->eye_at[1], head_dx + look * v->scale, head_dy);
+    place(v, &v->mouth, a->mouth_at, head_dx, head_dy);
     place(v, &v->shadow, a->shadow_at, 0, 0);
-    apply_props(v, &pose->props, shake, -lift, shake + wobble);
+    apply_props(v, &pose->props, shake, -lift, shake + wobble, nod - lift);
     return next;
 }
 
@@ -530,8 +575,10 @@ void buddy_view_hide(buddy_view_t *v)
 {
     gfx_sprite_t *all[] = {&v->shadow, &v->torso, &v->head, &v->antenna, &v->eye[0], &v->eye[1], &v->mouth,
                            &v->can_shadow, &v->can, &v->port, &v->rig[0], &v->rig[1], &v->battery, &v->alert,
-                           &v->bolt[0], &v->bolt[1], &v->bolt[2], &v->bolt[3], &v->fx[0], &v->fx[1]};
-    _Static_assert(BUDDY_MAX_BOLTS == 4 && BUDDY_FX_COUNT == 2, "list every bolt and effect sprite above");
+                           &v->bolt[0], &v->bolt[1], &v->bolt[2], &v->bolt[3], &v->fx[0], &v->fx[1],
+                           &v->part[0], &v->part[1], &v->part[2], &v->part[3], &v->part[4]};
+    _Static_assert(BUDDY_MAX_BOLTS == 4 && BUDDY_FX_COUNT == 2 && BUDDY_PARTICLES == 5,
+                   "list every bolt, effect and particle sprite above");
     for (unsigned i = 0; i < sizeof(all) / sizeof(all[0]); i++) {
         hide(all[i]);
     }

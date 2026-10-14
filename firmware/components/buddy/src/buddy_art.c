@@ -4,7 +4,7 @@
 #include <string.h>
 
 // Palette keys: a character's position is its palette index ('.' = transparent). Must match BUDDY_PX_*.
-static const char k_keys[] = ".KBbWSEGYRrkNnDgLlcPp";
+static const char k_keys[] = ".KBbWSEGYRrkNnDgLlcPpOF";
 
 // Not const: keeps the palettes in internal RAM (read-only data is executed/mapped from PSRAM on this board).
 static gfx_color_t s_colors[] = {
@@ -29,9 +29,11 @@ static gfx_color_t s_colors[] = {
     GFX_RGB(64, 184, 72),   // c cable
     GFX_RGB(32, 37, 58),    // P button plate
     GFX_RGB(64, 74, 108),   // p button edge
+    GFX_RGB(226, 150, 70),  // O cigarette filter
+    GFX_RGB(255, 140, 40),  // F ember, glowing
 };
 #define N_COLORS (sizeof(s_colors) / sizeof(s_colors[0]))
-static gfx_color_t s_glow[N_COLORS], s_zap[N_COLORS];
+static gfx_color_t s_glow[N_COLORS], s_zap[N_COLORS], s_fury[N_COLORS], s_drowsy[N_COLORS];
 
 // The body in two parts that normally move together; the head can also wobble on its own.
 static const char *const k_head[] = {
@@ -93,6 +95,10 @@ static const char *const k_eyes[BUDDY_EYES_COUNT][4] = {
     [BUDDY_EYES_HAPPY] = {".EE.", "E..E", "....", "...."},
     [BUDDY_EYES_WIDE] = {"EEEE", "EWWE", "EWWE", "EEEE"},
     [BUDDY_EYES_BOLT] = {".YYY", ".YY.", "YYY.", ".Y.."},
+    [BUDDY_EYES_LIDDED] = {"....", "EEEE", "EEEE", ".EE."},
+    [BUDDY_EYES_ANGRY] = {"E...", "EEE.", "EEEE", ".EE."}, // left eye; the right one is mirrored
+    [BUDDY_EYES_SQUEEZE] = {"EE..", "..EE", "EE..", "...."}, // left: >, right: <
+    [BUDDY_EYES_FOCUS] = {"....", "EEEE", "EEEE", "...."},
 };
 
 static const char *const k_mouth[BUDDY_MOUTH_COUNT][3] = {
@@ -101,6 +107,11 @@ static const char *const k_mouth[BUDDY_MOUTH_COUNT][3] = {
     [BUDDY_MOUTH_OPEN] = {"..EE..", ".E..E.", "..EE.."},
     [BUDDY_MOUTH_ZAP] = {".E..E.", "E.EE.E", "......"},
     [BUDDY_MOUTH_GRIN] = {"E....E", "EEEEEE", ".EEEE."},
+    [BUDDY_MOUTH_SMIRK] = {"......", ".....E", ".EEEE."},
+    [BUDDY_MOUTH_FROWN] = {"......", ".EEEE.", "E....E"},
+    [BUDDY_MOUTH_GRIT] = {".EEEE.", "EWWWWE", ".EEEE."},
+    [BUDDY_MOUTH_TONGUE] = {"......", ".EEEE.", "...RR."},
+    [BUDDY_MOUTH_PUFF] = {"......", "..EE..", "..EE.."},
 };
 
 // --- Monster props ---
@@ -188,11 +199,38 @@ static const char *const k_battery[] = {
 #define BATTERY_SEG_W 2
 #define BATTERY_SEG_H 3
 
+// --- Mood props: particles and the cigarette ---
+
+static const char *const k_smoke[3][4] = {
+    {".L..", "LWL.", ".L..", "...."},
+    {".LL.", "LWWL", "LWWL", ".LL."},
+    {".l..", "l.l.", ".l.l", "..l."},
+};
+static const char *const k_z[2][5] = {
+    {"WWWW.", "..W..", ".W...", "WWWW.", "....."},
+    {"WWWWW", "...W.", "..W..", ".W...", "WWWWW"},
+};
+static const char *const k_steam[2][4] = {
+    {".WW.", "WWWW", "WWWW", ".WW."},
+    {".LL.", "L..L", "L..L", ".LL."},
+};
+static const char *const k_sweat[] = {"..K..", ".KEK.", "KEWEK", "KEEEK", ".KKK."};
+static const char *const k_sparkle[2][5] = {
+    {".....", "..Y..", ".YWY.", "..Y..", "....."},
+    {"..Y..", "..Y..", "YYWYY", "..Y..", "..Y.."},
+};
+static const char *const k_anger[2][7] = {
+    {".......", "..R.R..", ".RR.RR.", ".......", ".RR.RR.", "..R.R..", "......."},
+    {"..R.R..", ".RR.RR.", "RR...RR", ".......", "RR...RR", ".RR.RR.", "..R.R.."},
+};
+// The cigarette: filter, paper (shorter as it burns down) and the tip, by ember (see buddy_props_t.ember).
+static const char *const k_cig_tip[BUDDY_EMBERS] = {"lr", "lR", "FY"};
+
 static const char k_plate_edge[] = ".pppppppppppppp.";
 static const char k_plate_row[] = "pPPPPPPPPPPPPPPp";
 #define PLATE_H 24
 
-static uint8_t s_pool[6144]; // decoded pixels, internal RAM
+static uint8_t s_pool[7168]; // decoded pixels, internal RAM
 static size_t s_used;
 static buddy_art_t s_art;
 static gfx_anim_frame_t s_antenna_frames[BUDDY_ANTENNA_COUNT][3];
@@ -298,6 +336,38 @@ static bool load_props(buddy_props_art_t *p)
         return false;
     }
 
+    // Particles.
+    static const uint8_t k_frames[BUDDY_PART_COUNT] = {
+        [BUDDY_PART_SMOKE] = 3, [BUDDY_PART_STEAM] = 2,   [BUDDY_PART_Z] = 2,
+        [BUDDY_PART_SWEAT] = 1, [BUDDY_PART_SPARKLE] = 2, [BUDDY_PART_ANGER] = 2,
+    };
+    memcpy(p->part_frames, k_frames, sizeof(k_frames));
+    for (int i = 0; i < 3; i++) {
+        ok = ok && decode(&p->part[BUDDY_PART_SMOKE][i], k_smoke[i], 4);
+    }
+    for (int i = 0; i < 2; i++) {
+        ok = ok && decode(&p->part[BUDDY_PART_STEAM][i], k_steam[i], 4) &&
+             decode(&p->part[BUDDY_PART_Z][i], k_z[i], 5) &&
+             decode(&p->part[BUDDY_PART_SPARKLE][i], k_sparkle[i], 5) &&
+             decode(&p->part[BUDDY_PART_ANGER][i], k_anger[i], 7);
+    }
+    ok = ok && DECODE(p->part[BUDDY_PART_SWEAT][0], k_sweat);
+    // Cigarettes: two filter pixels, paper, then the tip; each length shorter by a pixel of paper.
+    for (int len = 0; ok && len < BUDDY_CIG_LENGTHS; len++) {
+        for (int e = 0; ok && e < BUDDY_EMBERS; e++) {
+            char row[16];
+            const int paper = 2 + len;
+            memcpy(row, "OO", 2);
+            memset(row + 2, 'W', (size_t)paper);
+            memcpy(row + 2 + paper, k_cig_tip[e], 3); // two tip pixels and the NUL
+            const char *rows[] = {row};
+            ok = decode(&p->cig[len][e], rows, 1);
+        }
+    }
+    if (!ok) {
+        return false;
+    }
+
     // Layout. The can stands on the ground to the robot's right; the port sits on the right side of the head.
     p->ground_y = 34;
     p->can_at = (buddy_point_t){36, p->ground_y + 1 - full->h};
@@ -308,6 +378,15 @@ static bool load_props(buddy_props_art_t *p)
     p->hand_port = (buddy_point_t){p->plug_port.x + 1, p->plug_port.y + p->plug.h};
     p->arm_root = (buddy_point_t){26, 26};
     p->hand_show = (buddy_point_t){31, 19};
+    // The cigarette's filter sits in the right corner of the mouth (mouth row 16); at rest it is held out beside
+    // the head, its tip pointing away from him.
+    p->hand_mouth = (buddy_point_t){15 + BUDDY_CIG_GRIP, 17};
+    p->hand_rest = (buddy_point_t){29, 23};
+    p->from[BUDDY_FROM_MOUTH] = (buddy_point_t){13, 16};
+    p->from[BUDDY_FROM_HEAD_L] = (buddy_point_t){0, 6};
+    p->from[BUDDY_FROM_HEAD_R] = (buddy_point_t){27, 6};
+    p->from[BUDDY_FROM_ABOVE] = (buddy_point_t){21, 1};
+    p->from[BUDDY_FROM_BROW] = (buddy_point_t){1, 10};
     p->battery_at = (buddy_point_t){-17, 9};
     p->alert_at = (buddy_point_t){22, -10};
     // Bolts crackle along the sides of the head and torso: inside the columns the trembling robot redraws anyway and
@@ -337,6 +416,17 @@ static void make_palettes(buddy_art_t *a)
     a->tint[BUDDY_TINT_NORMAL] = a->palette;
     a->tint[BUDDY_TINT_GLOW] = (gfx_palette_t){s_glow, (uint16_t)N_COLORS};
     a->tint[BUDDY_TINT_ZAP] = (gfx_palette_t){s_zap, (uint16_t)N_COLORS};
+
+    // Fury: the face screen flushes red and the eyes burn orange.
+    memcpy(s_fury, s_colors, sizeof(s_colors));
+    s_fury[key('S')] = GFX_RGB(74, 10, 16);
+    s_fury[key('E')] = GFX_RGB(255, 120, 72);
+    a->tint[BUDDY_TINT_FURY] = (gfx_palette_t){s_fury, (uint16_t)N_COLORS};
+
+    // Drowsy: the eye glow turned down.
+    memcpy(s_drowsy, s_colors, sizeof(s_colors));
+    s_drowsy[key('E')] = GFX_RGB(52, 140, 166);
+    a->tint[BUDDY_TINT_DROWSY] = (gfx_palette_t){s_drowsy, (uint16_t)N_COLORS};
 }
 
 static void make_antenna(buddy_art_t *a, buddy_antenna_t which, const gfx_image_t *const *images, uint16_t ms, int n)
@@ -371,6 +461,11 @@ static bool load(void)
     make_antenna(a, BUDDY_ANTENNA_CALM, blink, 900, 2);
     make_antenna(a, BUDDY_ANTENNA_EXCITED, blink, 120, 2);
     make_antenna(a, BUDDY_ANTENNA_OVERLOAD, strobe, 50, 3);
+    // Dim: mostly dark, a short faint blink every few seconds.
+    s_antenna_frames[BUDDY_ANTENNA_DIM][0] = (gfx_anim_frame_t){&a->antenna_off, 2600};
+    s_antenna_frames[BUDDY_ANTENNA_DIM][1] = (gfx_anim_frame_t){&a->antenna_on, 180};
+    a->antenna[BUDDY_ANTENNA_DIM] = (gfx_anim_t){s_antenna_frames[BUDDY_ANTENNA_DIM], 2, true};
+    a->eye_mirror[BUDDY_EYES_ANGRY] = a->eye_mirror[BUDDY_EYES_SQUEEZE] = true;
 
     // Layout in art pixels: antenna ball on top of the stem, face screen at rows 10..17, shadow under the feet.
     a->antenna_at = (buddy_point_t){11, 0};

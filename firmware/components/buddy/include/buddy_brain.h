@@ -1,12 +1,14 @@
 // Character behavior: a small time-driven state machine that produces a pose.
 //
 // Pure logic: no rendering, no hardware, no clock of its own. Time is passed in as a free-running millisecond
-// counter (wrap-around safe). Future behavior (needs, moods, external events) plugs in here, not in the renderer.
+// counter (wrap-around safe). Two layers: the mood (buddy_mood.h) is how he is, and stays until it is changed or
+// its duration runs out; reactions (a tap, a Monster sequence) play on top of it and then hand back to the mood.
 #pragma once
 
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "buddy_mood.h"
 #include "buddy_pose.h"
 
 #ifdef __cplusplus
@@ -34,6 +36,11 @@ typedef struct {
     uint32_t state_start;
     uint32_t next_blink; // idle: when the next blink starts
     uint32_t rng;
+    buddy_mood_t mood;
+    uint32_t mood_start;
+    uint32_t mood_end; // when a timed mood returns to idle (mood_timed)
+    bool mood_timed;
+    uint32_t cycle_start, cycle_len, cycle_n, cycle_seed; // where the mood's loop is
 } buddy_brain_t;
 
 void buddy_brain_init(buddy_brain_t *b, uint32_t now_ms, uint32_t seed);
@@ -45,6 +52,14 @@ bool buddy_brain_event(buddy_brain_t *b, buddy_event_t ev, uint32_t now_ms);
 // Drops whatever the character is doing, including a running Monster sequence, and idles from now_ms on (used
 // when he comes back from being paused, e.g. after Office Mode).
 void buddy_brain_rest(buddy_brain_t *b, uint32_t now_ms);
+
+// Sets the mood. duration_ms > 0: back to idle after that long; 0: until changed. Choosing a different mood
+// starts its animation from the beginning; choosing the current one only changes its duration. A reaction that is
+// playing finishes first (the new mood shows right after it).
+void buddy_brain_set_mood(buddy_brain_t *b, buddy_mood_t mood, uint32_t duration_ms, uint32_t now_ms);
+
+// The current mood at now_ms (a timed mood that has run out is idle again).
+buddy_mood_t buddy_brain_mood(buddy_brain_t *b, uint32_t now_ms);
 
 // Advances to now_ms and writes the pose to show. Returns how many ms until the pose may change next (>= 1).
 uint32_t buddy_brain_tick(buddy_brain_t *b, uint32_t now_ms, buddy_pose_t *pose);

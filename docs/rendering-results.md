@@ -140,6 +140,21 @@ Before the cache fix below, lowering the update rate only made the artifacts rar
 
 **Rule:** every write into a PSRAM frame buffer goes through a surface with `flush`, so no drawn pixels are left for the scanout to evict.
 
+### Moods (2026-10-15)
+Looping animations (`components/buddy/src/buddy_mood.c`). They use the same path as everything else: sprites in the scene (5 particle sprites added, so the scene limit went from 32 to 40), dirty rectangles, double-buffer repair and the per-row writeback. Measured on the device through the companion (each mood 12–22 s, then Surprise during Working, Monster during the smoke break, a message during Sleepy, a mood change in Office Mode, rapid changes). The smoke break was first called Relaxed; Relaxed is now a calm, smiling mood that redraws less than idle (not measured separately).
+
+| | Frames/s | Redraw avg / max | Longest bounce fill | Resyncs |
+|---|---|---|---|---|
+| Idle (for comparison) | 3.1–3.9 | 41–54 k / 64.5 k px | 131–237 µs | 0 |
+| Peukie (smoke break) | 11.5–13.1 | 15–21 k / 92 k px | 132–236 µs | 0 |
+| Angry | 13.0–17.2 | 21–62 k / 106 k px | 155–236 µs | 0 |
+| Sleepy | 2.2–8.0 | 23–44 k / 84 k px | 96–235 µs | 0 |
+| Working | 12.9–15.2 | 42–56 k / 82 k px | 142–236 µs | 0 |
+| Happy | 16.3–18.2 | 47–53 k / 91 k px | 150–236 µs | 0 |
+| A message scrolling during Sleepy | 26.9–27.6 | 68–82 k / 284 k px | 290–306 µs | 0 |
+
+Slow swaps stayed at 0 throughout. The one large redraw (284 k px, 30.7 ms to render) came when a message arrived during Sleepy: the sign appearing, Buddy jumping and three Zs vanishing in one frame, plus the previous frame's rectangles, probably overflowed the 16-entry dirty list, which then merges into larger boxes [INFERENCE]. It costs one late frame, not a glitch, and is not chased further. Host test `mood_redraws_match_full_redraw`: 2,338 frames over every mood with rapid switching, taps and a Monster sequence, all equal to a full redraw, largest redraw 107,520 px (17 % of the screen).
+
 ## Touch
 
 Measured over 15 taps on the robot by the user, during a 10-minute run that had 0 resyncs and 0 slow swaps:

@@ -39,7 +39,7 @@ public sealed class MainForm : Form
     private readonly Card _activitiesCard;
     private readonly Panel _activitiesGap = Gap();
     private readonly FlowLayoutPanel _activityFlow = new() { Dock = DockStyle.Fill, WrapContents = true };
-    private readonly List<(Panel Group, FlowLayoutPanel Tiles, int Count)> _activityGroups = [];
+    private readonly List<(Panel Group, FlowLayoutPanel Tiles, int Count, Size Tile)> _activityGroups = [];
     private readonly List<(FlatButton Tile, Activity Activity)> _tiles = [];
 
     // Messages. The recent list takes room only once something was sent.
@@ -238,28 +238,36 @@ public sealed class MainForm : Form
     };
 
     private const int TileWidth = 96, TileHeight = 80, TileGap = 8, GroupGap = 16, GroupCaption = 22;
+    // Mood tiles are smaller (six of them): the 21 px faces still fit whole at 2x above the label.
+    private const int MoodTileWidth = 80, MoodTileHeight = 76;
 
-    // One group per kind (Mode, Actions), each a caption over its tiles. Groups sit side by side and wrap.
+    // One group per kind (Mode, Actions, Mood), each a caption over its tiles. Groups sit side by side and wrap.
     private void BuildActivities()
     {
-        foreach (var kind in new[] { ActivityKind.Mode, ActivityKind.Action })
+        foreach (var kind in new[] { ActivityKind.Mode, ActivityKind.Action, ActivityKind.Mood })
         {
             var group = new Panel { Margin = new Padding(0, 0, GroupGap, 0) };
-            var caption = Caption(kind == ActivityKind.Mode ? "Mode" : "Actions", 120);
+            var caption = Caption(kind switch { ActivityKind.Mode => "Mode", ActivityKind.Mood => "Mood", _ => "Actions" }, 120);
             caption.Dock = DockStyle.Top;
             caption.Height = GroupCaption;
             caption.TextAlign = ContentAlignment.TopLeft;
             var tiles = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = true };
+            var size = kind == ActivityKind.Mood ? new Size(MoodTileWidth, MoodTileHeight) : new Size(TileWidth, TileHeight);
             var count = 0;
             foreach (var activity in Activities.All.Where(a => a.Kind == kind))
             {
                 var tile = new FlatButton(_theme, ButtonLook.Tile)
                 {
-                    Text = activity.Label, Icon = _art[activity.Icon], Size = new Size(TileWidth, TileHeight),
+                    Text = activity.Label, Icon = _art[activity.Icon], Size = size,
                     Margin = new Padding(0, 0, TileGap, TileGap), AccessibleName = activity.Label,
                 };
                 tile.Click += async (_, _) => await RunActivityAsync(tile, activity);
-                _tips.SetToolTip(tile, kind == ActivityKind.Mode ? $"Switch Buddy to {activity.Label} mode" : activity.Label);
+                _tips.SetToolTip(tile, kind switch
+                {
+                    ActivityKind.Mode => $"Switch Buddy to {activity.Label} mode",
+                    ActivityKind.Mood => $"Make Buddy {activity.Label.ToLowerInvariant()}",
+                    _ => activity.Label,
+                });
                 _tiles.Add((tile, activity));
                 tiles.Controls.Add(tile);
                 count++;
@@ -267,7 +275,7 @@ public sealed class MainForm : Form
             group.Controls.Add(tiles);
             group.Controls.Add(caption);
             _activityFlow.Controls.Add(group);
-            _activityGroups.Add((group, tiles, count));
+            _activityGroups.Add((group, tiles, count, size));
         }
         _activitiesCard.Controls.Add(_activityFlow);
         _activitiesCard.Resize += (_, _) => ReflowActivities();
@@ -278,9 +286,9 @@ public sealed class MainForm : Form
     private void ReflowActivities()
     {
         var inner = _activitiesCard.ClientSize.Width - _activitiesCard.Padding.Horizontal;
-        int tileW = LogicalToDeviceUnits(TileWidth + TileGap), tileH = LogicalToDeviceUnits(TileHeight + TileGap);
-        foreach (var (group, _, count) in _activityGroups)
+        foreach (var (group, _, count, tile) in _activityGroups)
         {
+            int tileW = LogicalToDeviceUnits(tile.Width + TileGap), tileH = LogicalToDeviceUnits(tile.Height + TileGap);
             var cols = Math.Clamp(inner / tileW, 1, Math.Max(1, count));
             var rows = (count + cols - 1) / cols;
             group.Size = new Size(cols * tileW, LogicalToDeviceUnits(GroupCaption) + rows * tileH);
@@ -443,7 +451,10 @@ public sealed class MainForm : Form
         tile.Enabled = false;
         try
         {
-            if (await _service.RunAsync(activity.Label, activity.Command) && activity.Reaction is { } reaction)
+            var done = activity is { Kind: ActivityKind.Mood, Mood: { } mood }
+                ? await _service.SetMoodAsync(activity.Label, mood)
+                : await _service.RunAsync(activity.Label, activity.Command);
+            if (done && activity.Reaction is { } reaction)
             {
                 React(reaction);
             }
@@ -511,7 +522,11 @@ public sealed class MainForm : Form
         _status.DotColor = dot;
         _status.Invalidate();
         _tips.SetToolTip(_status, _service.ConnectionText);
-        _face.Face = _art[$"face-{(connected ? _reaction ?? "neutral" : "sleepy")}"];
+        // Disconnected Buddy sleeps; connected, a short reaction shows over the device's current mood.
+        var face = !connected ? "face-sleepy"
+                   : _reaction is { } reaction ? $"face-{reaction}"
+                   : Activities.FaceFor(_service.Mood);
+        _face.Face = _art[face];
 
         _detailFirmware.Text = connected ? $"firmware {_service.Firmware} · protocol {_service.Protocol}" : "–";
         _detailClock.Text = _service.ClockText;
@@ -521,8 +536,8 @@ public sealed class MainForm : Form
 
         foreach (var (tile, activity) in _tiles)
         {
-            tile.Enabled = connected && _service.Caps.Contains(activity.Cap);
-            tile.Selected = connected && Activities.IsOn(activity, _service.Mode);
+            tile.Enabled = connected && Activities.IsAvailable(activity, _service.Caps, _service.Moods);
+            tile.Selected = connected && Activities.IsOn(activity, _service.Mode, _service.Mood);
         }
 
         var text = MessageText.Clean(_message.Text);

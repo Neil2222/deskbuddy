@@ -55,6 +55,13 @@ extern int g_test_failed;
     X(monster_ignores_events_until_finished)         \
     X(monster_tells_the_story)                       \
     X(monster_redraws_match_full_redraw)             \
+    X(mood_names_round_trip)                         \
+    X(mood_switches_cleanly)                         \
+    X(mood_resumes_after_reactions)                  \
+    X(mood_timed_returns_to_idle)                    \
+    X(mood_survives_a_pause)                         \
+    X(mood_loops_show_their_character)               \
+    X(mood_redraws_match_full_redraw)                \
     X(office_switch_finishes_a_transition_before_the_next) \
     X(office_time_validity)                          \
     X(office_font_covers_every_text)                 \
@@ -72,6 +79,7 @@ extern int g_test_failed;
     X(link_time_zone_switches_at_the_announced_moment) \
     X(link_parses_messages)                          \
     X(link_rejects_bad_messages)                     \
+    X(link_parses_moods)                             \
     X(marquee_text_policy)                           \
     X(marquee_stays_long_enough_then_hides)          \
     X(marquee_shows_the_text_scrolling_left)         \

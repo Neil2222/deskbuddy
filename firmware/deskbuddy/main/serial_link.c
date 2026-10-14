@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "buddy_mood.h"
 #include "driver/uart.h"
 #include "esp_app_desc.h"
 #include "esp_log.h"
@@ -17,7 +18,7 @@ static const char *TAG = "link";
 #define TASK_PRIO 4 // below rendering: commands are rare and never urgent
 #define TASK_CORE 0
 #define QUEUE_WAIT_MS 100
-#define CAPS "poke,monster,mode,time,status,msg"
+#define CAPS "poke,monster,mode,time,status,msg,mood"
 #define STYLES "marquee" // msg.show styles this firmware draws
 
 static QueueHandle_t s_events;
@@ -56,9 +57,12 @@ static void handle_line(const char *line, size_t len)
         return;
     }
     if (cmd.cmd == LINK_CMD_HELLO) {
-        char body[128];
-        snprintf(body, sizeof(body), "ok proto=%d fw=%s caps=" CAPS " styles=" STYLES, LINK_PROTO,
-                 esp_app_get_description()->version);
+        char body[LINK_REPLY_MAX];
+        int n = snprintf(body, sizeof(body), "ok proto=%d fw=%s caps=" CAPS " styles=" STYLES " moods=", LINK_PROTO,
+                         esp_app_get_description()->version);
+        for (int m = 0; m < BUDDY_MOOD_COUNT && n > 0 && (size_t)n < sizeof(body); m++) {
+            n += snprintf(body + n, sizeof(body) - (size_t)n, "%s%s", m ? "," : "", buddy_mood_name((buddy_mood_t)m));
+        }
         serial_link_send(cmd.seq, body);
         return;
     }

@@ -7,7 +7,8 @@
 // Writes:
 //   face-<expression>.png, @8x     Buddy's head: antenna, head, eyes, mouth (24x21 at 1x). The expressions are
 //                                  eye/mouth pairs the firmware itself shows: neutral (idle), happy (happy hops),
-//                                  surprised (a tap), sleepy (mid-blink, antenna light off).
+//                                  surprised (a tap), sleepy (mid-blink, antenna light off), and the moods
+//                                  relaxed, peukie (with the cigarette at his mouth), angry and working.
 //   buddy.png, buddy@8x.png        the whole robot, standing
 //   can.png, moon.png              the Monster can and the Office Mode moon, as on the device
 //   icon-<size>.png, buddy.ico     the application icon in 16..256 px. From 24 px up: the whole head at the largest
@@ -38,12 +39,12 @@ static canvas_t make(int w, int h)
     return c;
 }
 
-// Draws an indexed image (index 0 transparent) with its palette, as the compositor does, at 1x.
-static void blit(canvas_t *c, const gfx_image_t *img, const gfx_palette_t *pal, int x0, int y0)
+// Draws an indexed image (index 0 transparent) with its palette, as the compositor does, at 1x; mirrored if flip.
+static void blit_flip(canvas_t *c, const gfx_image_t *img, const gfx_palette_t *pal, int x0, int y0, bool flip)
 {
     for (int y = 0; y < img->h; y++) {
         for (int x = 0; x < img->w; x++) {
-            const uint8_t i = img->px[y * img->w + x];
+            const uint8_t i = img->px[y * img->w + (flip ? img->w - 1 - x : x)];
             const int cx = x0 + x, cy = y0 + y;
             if (!i || cx < 0 || cy < 0 || cx >= c->w || cy >= c->h) {
                 continue;
@@ -57,6 +58,11 @@ static void blit(canvas_t *c, const gfx_image_t *img, const gfx_palette_t *pal, 
             p[3] = 255;
         }
     }
+}
+
+static void blit(canvas_t *c, const gfx_image_t *img, const gfx_palette_t *pal, int x0, int y0)
+{
+    blit_flip(c, img, pal, x0, y0, false);
 }
 
 static canvas_t crop(const canvas_t *s, int x0, int y0, int w, int h)
@@ -113,8 +119,8 @@ static canvas_t head(const buddy_art_t *a, buddy_eyes_t eyes, buddy_mouth_t mout
     canvas_t c = make(a->w, a->head_at.y + a->head.h);
     blit(&c, antenna, &a->palette, a->antenna_at.x, a->antenna_at.y);
     blit(&c, &a->head, &a->palette, a->head_at.x, a->head_at.y);
-    for (int i = 0; i < 2; i++) {
-        blit(&c, &a->eyes[eyes], &a->palette, a->eye_at[i].x, a->eye_at[i].y);
+    for (int i = 0; i < 2; i++) { // the right eye mirrored for asymmetric expressions, as the view does
+        blit_flip(&c, &a->eyes[eyes], &a->palette, a->eye_at[i].x, a->eye_at[i].y, i == 1 && a->eye_mirror[eyes]);
     }
     blit(&c, &a->mouth[mouth], &a->palette, a->mouth_at.x, a->mouth_at.y);
     return c;
@@ -226,16 +232,24 @@ int main(int argc, char **argv)
         const char *name;
         buddy_eyes_t eyes;
         buddy_mouth_t mouth;
-        bool lit;
+        bool lit, cig;
     } faces[] = {
-        {"neutral", BUDDY_EYES_OPEN, BUDDY_MOUTH_NEUTRAL, true},
-        {"happy", BUDDY_EYES_HAPPY, BUDDY_MOUTH_SMILE, true},
-        {"surprised", BUDDY_EYES_WIDE, BUDDY_MOUTH_OPEN, true},
-        {"sleepy", BUDDY_EYES_CLOSED, BUDDY_MOUTH_NEUTRAL, false},
+        {"neutral", BUDDY_EYES_OPEN, BUDDY_MOUTH_NEUTRAL, true, false},
+        {"happy", BUDDY_EYES_HAPPY, BUDDY_MOUTH_SMILE, true, false},
+        {"surprised", BUDDY_EYES_WIDE, BUDDY_MOUTH_OPEN, true, false},
+        {"sleepy", BUDDY_EYES_CLOSED, BUDDY_MOUTH_NEUTRAL, false, false},
+        {"relaxed", BUDDY_EYES_LIDDED, BUDDY_MOUTH_SMILE, true, false},
+        {"peukie", BUDDY_EYES_LIDDED, BUDDY_MOUTH_SMIRK, true, true},
+        {"angry", BUDDY_EYES_ANGRY, BUDDY_MOUTH_FROWN, true, false},
+        {"working", BUDDY_EYES_FOCUS, BUDDY_MOUTH_TONGUE, true, false},
     };
     canvas_t neutral = {0};
     for (size_t i = 0; i < sizeof(faces) / sizeof(faces[0]); i++) {
         canvas_t full = head(a, faces[i].eyes, faces[i].mouth, faces[i].lit ? &a->antenna_on : &a->antenna_off);
+        if (faces[i].cig) { // in the corner of his mouth, glowing, all within the face screen
+            const buddy_point_t m = a->props.hand_mouth;
+            blit(&full, &a->props.cig[1][1], &a->palette, m.x - BUDDY_CIG_GRIP, m.y - 1);
+        }
         canvas_t face = trim(&full);
         char name[64];
         snprintf(name, sizeof(name), "face-%s", faces[i].name);

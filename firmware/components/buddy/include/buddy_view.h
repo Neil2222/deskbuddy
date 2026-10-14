@@ -8,10 +8,11 @@
 extern "C" {
 #endif
 
-// The telescopic arm and the cable are drawn procedurally into an indexed image covering this art-pixel area.
-#define BUDDY_RIG_X 22
+// The telescopic arm and the cable are drawn procedurally into an indexed image covering this art-pixel area (from
+// the mouth, where the hand brings a cigarette, out to the can).
+#define BUDDY_RIG_X 14
 #define BUDDY_RIG_Y 4
-#define BUDDY_RIG_W 28
+#define BUDDY_RIG_W 36
 #define BUDDY_RIG_H 32
 // The drawing is published as two sprites, cut at this art column: the part next to the robot and the part out
 // towards the can. The cut lies just right of the trembling robot, so the dirty rectangle of the far part stays
@@ -36,6 +37,8 @@ typedef struct {
     gfx_sprite_t shadow, torso, head, antenna, eye[2], mouth;
     // Monster props.
     gfx_sprite_t can_shadow, can, port, rig[2], battery, alert, bolt[BUDDY_MAX_BOLTS], fx[BUDDY_FX_COUNT];
+    // Mood effects.
+    gfx_sprite_t part[BUDDY_PARTICLES];
     const buddy_art_t *art;
     int scale;
     int x0, y0; // screen position of the art origin at lift 0

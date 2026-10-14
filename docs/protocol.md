@@ -26,16 +26,17 @@ DeskBuddy and the Windows companion (`companion/`) talk over the board's **UART*
 
 | Command | Arguments | Reply |
 |---|---|---|
-| `hello` | | `ok proto=1 fw=<version> caps=<list> styles=<list>` |
+| `hello` | | `ok proto=1 fw=<version> caps=<list> styles=<list> moods=<list>` |
 | `ping` | | `ok` |
-| `status` | | `ok mode=<normal\|office\|monster> time=<set\|unset> msg=<showing\|idle> queued=<0\|1> uptime=<s>` |
+| `status` | | `ok mode=<normal\|office\|monster> mood=<mood> time=<set\|unset> msg=<showing\|idle> queued=<0\|1> uptime=<s>` |
 | `poke` | | `ok`, or `err busy mode=<mode>` (Office Mode, Monster running, screen not up yet) |
 | `monster` | | `ok`, or `err busy mode=<mode>` |
 | `mode.set` | `mode=office\|normal` | `ok` (switches like the moon button / a tap), or `err unavailable` |
 | `time.set` | `utc=<s> [ms=<0-999>] off=<min> [next=<utc s> next_off=<min>]` | `ok` |
 | `msg.show` | `id=<1-4294967295> [style=marquee] text=<percent-encoded UTF-8>` | `ok` (on the sign now), `ok queued=1` (waits its turn), `ok dup=1` (this id was already taken), `err busy mode=<mode>` (one is already waiting), `err unsupported` (unknown style), `err bad_args` |
+| `mood.set` | `name=<mood> [secs=<1-86400>]` | `ok`, `err unsupported` (a mood this firmware does not have), `err bad_args` |
 
-**Capabilities:** `hello` lists what the firmware supports (`poke,monster,mode,time,status,msg`) and which message styles it draws (`styles=marquee`). The companion only enables the matching buttons, so new commands and styles can be added without breaking older companions or firmware.
+**Capabilities:** `hello` lists what the firmware supports (`poke,monster,mode,time,status,msg,mood`), which message styles it draws (`styles=marquee`) and which moods it has (`moods=idle,relaxed,peukie,angry,sleepy,working,happy`, in display order). The companion only enables the matching buttons, so new commands, styles and moods can be added without breaking older companions or firmware.
 
 **Unknown arguments are ignored**, so newer companions can send more. Unknown commands get `err unknown_cmd`; missing or invalid arguments get `err bad_args`.
 
@@ -49,12 +50,20 @@ DeskBuddy and the Windows companion (`companion/`) talk over the board's **UART*
 - **Office Mode** stays on: the sign appears below the clock, without the robot's reaction.
 - **`style`:** how to present it; only `marquee` exists. Later styles (speech bubble, notification) get their own names here and in `hello`'s `styles` list; the command stays the same.
 
+**Moods (`mood.set`)** say how Buddy is; activities (`poke`, `monster`) are things he does, on top of his mood:
+- **The moods:** `idle` (the default, after every start), `relaxed` (calm and content), `peukie` (a smoke break), `angry`, `sleepy`, `working`, `happy`. Names are lower-case letters and `_`, at most 15; a well-formed name the firmware does not know gets `err unsupported`, so integrations can ask for newer moods safely.
+- **Exactly one at a time:** a new mood replaces the current one and starts its animation from the beginning; the same mood again keeps running (only its duration changes).
+- **`secs`:** back to `idle` after that many seconds (`evt mood` reports it); without it the mood stays until changed. Useful for events: `mood.set name=happy secs=30` after a successful build.
+- **Always accepted,** also in Office Mode and during a Monster sequence or a tap reaction: those play to their end, then the new mood shows. Messages, taps and Monster still interrupt any mood, which then resumes.
+- **For integrations:** an AI agent working, a build or a download in progress → `working`; done → `happy secs=…`; failed → `angry secs=…`; a coffee or smoke break → `peukie`; quiet, nothing going on → `relaxed`; an idle computer → `sleepy`; back → `idle`.
+
 ## Events
 
 | Event | When |
 |---|---|
 | `evt boot proto=1 fw=<version>` | the firmware started (the companion re-sends the time) |
 | `evt mode mode=<normal\|office\|monster>` | the mode changed, by touch or by command |
+| `evt mood mood=<mood>` | the mood changed: by `mood.set`, or a timed mood ran out |
 | `evt msg id=<id> state=<showing\|done>` | a message went up on the sign / finished |
 
 ## Errors
@@ -75,4 +84,10 @@ DeskBuddy and the Windows companion (`companion/`) talk over the board's **UART*
 
 1. Firmware: add it to `link_cmd_t` and `COMMANDS` in `components/link`, decode its arguments in `decode_args()`, run it in `run_command()` (`main.c`), add its capability to `CAPS` in `serial_link.c`, and add host tests (`firmware/tests/host/test_link.c`).
 2. Companion: add a button (`MainForm.cs`) that sends it when the capability is present.
+3. Document it here.
+
+## Adding a mood
+
+1. Firmware: add it to `buddy_mood_t` and its name in `components/buddy/src/buddy_mood.c` (the name list feeds `hello`'s `moods=` and `mood.set`), and write its loop there from the shared pieces (expressions, the hand, particles in `buddy_pose.h`); extend the host tests (`test_mood.c`).
+2. Companion: add an entry to `Activities.cs` with its face (`tools/host-test.ps1 -Icons` exports `face-<mood>.png` from the firmware's art; add the expression to `firmware/tests/host/icons.c`).
 3. Document it here.

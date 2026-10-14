@@ -12,7 +12,7 @@ extern "C" {
 #endif
 
 typedef enum {
-    BUDDY_STATE_IDLE,
+    BUDDY_STATE_IDLE,      // no reaction running: the current mood plays (see buddy_mood.h)
     BUDDY_STATE_SURPRISED, // short reaction right after a touch
     BUDDY_STATE_HAPPY,     // follows the surprise, then back to idle
     BUDDY_STATE_MONSTER,   // drinking a Monster Energy can through a cable (see buddy_monster.h)
@@ -24,7 +24,11 @@ typedef enum {
     BUDDY_EYES_CLOSED,
     BUDDY_EYES_HAPPY,
     BUDDY_EYES_WIDE,
-    BUDDY_EYES_BOLT, // lightning symbols (overcharged)
+    BUDDY_EYES_BOLT,    // lightning symbols (overcharged)
+    BUDDY_EYES_LIDDED,  // heavy upper lids: relaxed, content
+    BUDDY_EYES_ANGRY,   // brows slanting down towards the nose (the right eye is mirrored)
+    BUDDY_EYES_SQUEEZE, // squeezed shut: > < (mirrored)
+    BUDDY_EYES_FOCUS,   // narrowed, concentrating
     BUDDY_EYES_COUNT,
 } buddy_eyes_t;
 
@@ -32,8 +36,13 @@ typedef enum {
     BUDDY_MOUTH_NEUTRAL,
     BUDDY_MOUTH_SMILE,
     BUDDY_MOUTH_OPEN,
-    BUDDY_MOUTH_ZAP,  // jittery squiggle while being charged
-    BUDDY_MOUTH_GRIN, // huge energized grin
+    BUDDY_MOUTH_ZAP,    // jittery squiggle while being charged
+    BUDDY_MOUTH_GRIN,   // huge energized grin
+    BUDDY_MOUTH_SMIRK,  // lopsided, satisfied
+    BUDDY_MOUTH_FROWN,
+    BUDDY_MOUTH_GRIT,   // clenched teeth
+    BUDDY_MOUTH_TONGUE, // tongue out in concentration
+    BUDDY_MOUTH_PUFF,   // small "o": blowing out smoke
     BUDDY_MOUTH_COUNT,
 } buddy_mouth_t;
 
@@ -41,14 +50,17 @@ typedef enum {
     BUDDY_ANTENNA_CALM,
     BUDDY_ANTENNA_EXCITED,
     BUDDY_ANTENNA_OVERLOAD, // rapid red/green/white strobe
+    BUDDY_ANTENNA_DIM,      // a short faint blink now and then (sleepy)
     BUDDY_ANTENNA_COUNT,
 } buddy_antenna_t;
 
 // Color scheme of the robot itself.
 typedef enum {
     BUDDY_TINT_NORMAL,
-    BUDDY_TINT_GLOW, // face glows neon green
-    BUDDY_TINT_ZAP,  // electrocuted negative flash
+    BUDDY_TINT_GLOW,   // face glows neon green
+    BUDDY_TINT_ZAP,    // electrocuted negative flash
+    BUDDY_TINT_FURY,   // face screen flushes red
+    BUDDY_TINT_DROWSY, // face glow turned down
     BUDDY_TINT_COUNT,
 } buddy_tint_t;
 
@@ -77,10 +89,12 @@ typedef enum {
 
 // Where the telescopic hand is.
 typedef enum {
-    BUDDY_HAND_HOME, // retracted into the arm (not drawn)
-    BUDDY_HAND_SHOW, // raised in front of him
-    BUDDY_HAND_CAN,  // at the top of the can
-    BUDDY_HAND_PORT, // at the charging port on the side of his head
+    BUDDY_HAND_HOME,  // retracted into the arm (not drawn)
+    BUDDY_HAND_SHOW,  // raised in front of him
+    BUDDY_HAND_CAN,   // at the top of the can
+    BUDDY_HAND_PORT,  // at the charging port on the side of his head
+    BUDDY_HAND_MOUTH, // holding something to his mouth
+    BUDDY_HAND_REST,  // lowered beside his head, holding something
 } buddy_hand_t;
 
 typedef enum {
@@ -121,6 +135,42 @@ typedef struct {
 #define BUDDY_BATTERY_OVER (BUDDY_BATTERY_SEGMENTS + 2) // battery value of the first overflow frame (two frames)
 #define BUDDY_BATTERY_FRAMES (BUDDY_BATTERY_OVER + 1)    // battery values 1..BUDDY_BATTERY_FRAMES
 
+// --- Mood props: reusable effects ------------------------------------------------------------------------------
+
+// Small floating effects. Any mood (and later any event) can use them; the view draws each kind the same way
+// wherever it appears.
+typedef enum {
+    BUDDY_PART_NONE,
+    BUDDY_PART_SMOKE,   // a curl of smoke: frames 0 (wisp) .. 2 (thinning out)
+    BUDDY_PART_STEAM,   // a puff of steam: frames 0 (puff), 1 (fading)
+    BUDDY_PART_Z,       // a floating Z: frames 0 (small), 1 (big)
+    BUDDY_PART_SWEAT,   // a drop of sweat
+    BUDDY_PART_SPARKLE, // a twinkling star: frames 0 (small), 1 (big)
+    BUDDY_PART_ANGER,   // the cartoon anger mark: frames 0 (small), 1 (big)
+    BUDDY_PART_COUNT,
+} buddy_part_kind_t;
+
+// Where a particle starts. Head points move with the head (shake, wobble, lift, nod), the others with the body.
+typedef enum {
+    BUDDY_FROM_EMBER,  // body: the tip of the cigarette in the resting hand
+    BUDDY_FROM_MOUTH,  // head
+    BUDDY_FROM_HEAD_L, // head: just outside the top left corner
+    BUDDY_FROM_HEAD_R, // head: just outside the top right corner
+    BUDDY_FROM_ABOVE,  // head: above, right of the antenna
+    BUDDY_FROM_BROW,   // head: the left edge of the head, at forehead height
+    BUDDY_FROM_COUNT,
+} buddy_from_t;
+
+typedef struct {
+    uint8_t kind;   // buddy_part_kind_t; BUDDY_PART_NONE = slot unused
+    uint8_t from;   // buddy_from_t
+    uint8_t frame;
+    int8_t dx, dy;  // art pixels from the start point (up is negative); the image is centred there
+} buddy_particle_t;
+
+#define BUDDY_PARTICLES 5
+#define BUDDY_CIG_LENGTHS 4
+
 typedef struct {
     buddy_phase_t phase;
     buddy_can_t can;
@@ -137,6 +187,11 @@ typedef struct {
     uint8_t bolts;    // lightning bolts around the head, 0..BUDDY_MAX_BOLTS
     uint16_t strike;  // changes whenever the bolts strike anew (selects their places and shapes)
     buddy_fx_t fx[BUDDY_FX_COUNT];
+    // Mood props.
+    bool cig;         // a cigarette in the hand (hand_from/hand_to/hand_mix say where the hand is)
+    uint8_t cig_left; // how much is left: 0 (nearly a butt) .. BUDDY_CIG_LENGTHS-1 (fresh)
+    uint8_t ember;    // 0 smouldering, 1 glowing, 2 lit up by a drag
+    buddy_particle_t particle[BUDDY_PARTICLES];
 } buddy_props_t;
 
 typedef struct {
@@ -148,6 +203,7 @@ typedef struct {
     int8_t shake;  // sideways offset of the whole robot in art pixels (-1..1)
     int8_t wobble; // extra sideways offset of the head alone (-1..1): trembling on the neck, cheap to redraw
     int8_t look;  // sideways eye offset within the face (-1..1)
+    uint8_t nod;  // the head sinks onto the neck by this many art pixels (0..1): drooping, dozing off
     buddy_tint_t tint;
     buddy_props_t props;
 } buddy_pose_t;

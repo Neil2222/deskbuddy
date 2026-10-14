@@ -4,11 +4,13 @@
 //   buddy_snapshot [output_dir]
 //
 // Writes buddy_<pose>.png, monster_<ms>.png at the key moments of the Monster sequence, monster_sheet.png (the
-// stage every 200 ms of the sequence, at half size, on one sheet), the message marquee (marquee_intro.png,
-// marquee.png, office_marquee.png) and the Office Mode clock: office_clock.png and office_not_set.png.
+// stage every 200 ms of the sequence, at half size, on one sheet), mood_sheet.png (one row per mood: the stage
+// every MOOD_STEP_MS of its loop, as the brain plays it), the message marquee (marquee_intro.png, marquee.png,
+// office_marquee.png) and the Office Mode clock: office_clock.png and office_not_set.png.
 #include <stdio.h>
 #include <string.h>
 
+#include "buddy_brain.h"
 #include "buddy_monster.h"
 #include "buddy_view.h"
 #include "layout.h"
@@ -22,9 +24,24 @@ enum { W = 1024, H = 600, ALIGN = 32, STAGE_PERCENT = 65 }; // firmware defaults
 enum { CROP_X = 64, CROP_Y = 32, CROP_W = 576, CROP_H = 480, COLS = 6, SHEET_STEP_MS = 200 };
 enum { TILE_W = CROP_W / 2, TILE_H = CROP_H / 2 };
 enum { TILES = (BUDDY_MONSTER_MS + SHEET_STEP_MS - 1) / SHEET_STEP_MS, ROWS = (TILES + COLS - 1) / COLS };
+enum { MOOD_COLS = 12, MOOD_STEP_MS = 700, MOOD_ROWS = BUDDY_MOOD_COUNT - 1 }; // every mood but idle
 
 static gfx_color_t s_px[W * H];
 static gfx_color_t s_sheet[COLS * TILE_W * ROWS * TILE_H];
+static gfx_color_t s_mood_sheet[MOOD_COLS * TILE_W * MOOD_ROWS * TILE_H];
+
+// Copies the stage crop of the last render, halved, into a sheet tile with a white top/left border.
+static void tile(gfx_color_t *sheet, int sheet_w, int col, int row)
+{
+    const int ox = col * TILE_W, oy = row * TILE_H;
+    for (int y = 0; y < TILE_H; y++) {
+        for (int x = 0; x < TILE_W; x++) {
+            const bool border = x == 0 || y == 0;
+            sheet[(size_t)(oy + y) * sheet_w + ox + x] =
+                border ? GFX_RGB(255, 255, 255) : s_px[(size_t)(CROP_Y + 2 * y) * W + CROP_X + 2 * x];
+        }
+    }
+}
 
 static bool write(const char *dir, const char *name, const gfx_surface_t *s)
 {
@@ -112,17 +129,33 @@ int main(int argc, char **argv)
         buddy_monster_pose(t, &pose);
         buddy_view_apply(&view, &pose, t);
         gfx_scene_render(&scene, &all, &dst);
-        const int ox = (i % COLS) * TILE_W, oy = (i / COLS) * TILE_H;
-        for (int y = 0; y < TILE_H; y++) {
-            for (int x = 0; x < TILE_W; x++) {
-                const bool border = x == 0 || y == 0;
-                s_sheet[(size_t)(oy + y) * sheet_w + ox + x] =
-                    border ? GFX_RGB(255, 255, 255) : s_px[(size_t)(CROP_Y + 2 * y) * W + CROP_X + 2 * x];
-            }
-        }
+        tile(s_sheet, sheet_w, i % COLS, i / COLS);
     }
     const gfx_surface_t sheet = {s_sheet, sheet_w, ROWS * TILE_H, sheet_w};
     if (!write(dir, "monster_sheet", &sheet)) {
+        return 1;
+    }
+
+    // The moods, each played by the brain from its start (ticked like the render loop, captured every step).
+    buddy_button_apply(&button, true, true);
+    const int mood_w = MOOD_COLS * TILE_W;
+    for (int m = 1; m < BUDDY_MOOD_COUNT; m++) {
+        buddy_brain_t brain;
+        buddy_brain_init(&brain, 0, 7);
+        buddy_brain_set_mood(&brain, (buddy_mood_t)m, 0, 0);
+        buddy_pose_t pose;
+        for (uint32_t t = 0, col = 0; col < MOOD_COLS; t += 10) {
+            buddy_brain_tick(&brain, t, &pose);
+            if (t == col * MOOD_STEP_MS) {
+                buddy_view_apply(&view, &pose, t);
+                gfx_scene_render(&scene, &all, &dst);
+                tile(s_mood_sheet, mood_w, (int)col, m - 1);
+                col++;
+            }
+        }
+    }
+    const gfx_surface_t mood_sheet = {s_mood_sheet, mood_w, MOOD_ROWS * TILE_H, mood_w};
+    if (!write(dir, "mood_sheet", &mood_sheet)) {
         return 1;
     }
     // The message marquee over the stage, as the firmware places it: its scanner sweep, then mid-scroll over the

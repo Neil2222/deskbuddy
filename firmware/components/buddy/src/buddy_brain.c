@@ -30,12 +30,25 @@ static uint32_t blink_delay(buddy_brain_t *b)
     return BUDDY_BLINK_MIN_MS + rng_next(b) % (BUDDY_BLINK_MAX_MS - BUDDY_BLINK_MIN_MS + 1);
 }
 
+// Starts the mood's loop over from a fresh cycle.
+static void start_cycle(buddy_brain_t *b, uint32_t now_ms)
+{
+    b->cycle_start = now_ms;
+    b->cycle_n = 0;
+    b->cycle_seed = rng_next(b);
+    b->cycle_len = buddy_mood_cycle_ms(b->mood, b->cycle_seed);
+}
+
 void buddy_brain_init(buddy_brain_t *b, uint32_t now_ms, uint32_t seed)
 {
     b->state = BUDDY_STATE_IDLE;
     b->state_start = now_ms;
     b->rng = seed ? seed : 0x9E3779B9u;
     b->next_blink = now_ms + blink_delay(b);
+    b->mood = BUDDY_MOOD_IDLE;
+    b->mood_start = now_ms;
+    b->mood_timed = false;
+    start_cycle(b, now_ms);
 }
 
 static void enter(buddy_brain_t *b, buddy_state_t state, uint32_t now_ms)
@@ -61,10 +74,65 @@ bool buddy_brain_event(buddy_brain_t *b, buddy_event_t ev, uint32_t now_ms)
     }
 }
 
+// No reaction: the mood plays from the start of a cycle, so he resumes it calmly (not halfway through a drag).
+static void resume_mood(buddy_brain_t *b, uint32_t now_ms)
+{
+    b->next_blink = now_ms + blink_delay(b);
+    start_cycle(b, now_ms);
+}
+
 void buddy_brain_rest(buddy_brain_t *b, uint32_t now_ms)
 {
     enter(b, BUDDY_STATE_IDLE, now_ms);
-    b->next_blink = now_ms + blink_delay(b);
+    resume_mood(b, now_ms);
+}
+
+void buddy_brain_set_mood(buddy_brain_t *b, buddy_mood_t mood, uint32_t duration_ms, uint32_t now_ms)
+{
+    if (mood >= BUDDY_MOOD_COUNT) {
+        return;
+    }
+    if (mood != buddy_brain_mood(b, now_ms)) {
+        b->mood = mood;
+        b->mood_start = now_ms;
+        resume_mood(b, now_ms);
+    }
+    b->mood_timed = duration_ms > 0 && mood != BUDDY_MOOD_IDLE;
+    b->mood_end = now_ms + duration_ms;
+}
+
+buddy_mood_t buddy_brain_mood(buddy_brain_t *b, uint32_t now_ms)
+{
+    if (b->mood_timed && buddy_reached(now_ms, b->mood_end)) {
+        b->mood_timed = false;
+        b->mood = BUDDY_MOOD_IDLE;
+        b->mood_start = b->mood_end;
+        resume_mood(b, now_ms);
+    }
+    return b->mood;
+}
+
+// The mood's pose. Cycles missed during a long pause are not replayed: the loop starts over.
+static uint32_t mood_tick(buddy_brain_t *b, uint32_t now_ms, buddy_pose_t *pose)
+{
+    for (int skipped = 0; now_ms - b->cycle_start >= b->cycle_len; skipped++) {
+        if (skipped == 4) {
+            start_cycle(b, now_ms);
+            break;
+        }
+        b->cycle_start += b->cycle_len;
+        b->cycle_n++;
+        b->cycle_seed = rng_next(b);
+        b->cycle_len = buddy_mood_cycle_ms(b->mood, b->cycle_seed);
+    }
+    const buddy_mood_clock_t clock = {now_ms - b->cycle_start, b->cycle_len, b->cycle_n, b->cycle_seed,
+                                      now_ms - b->mood_start};
+    uint32_t next = buddy_mood_pose(b->mood, &clock, pose);
+    next = buddy_min_u32(next, b->cycle_len - clock.t);
+    if (b->mood_timed) {
+        next = buddy_min_u32(next, b->mood_end - now_ms);
+    }
+    return next ? next : 1;
 }
 
 uint32_t buddy_brain_tick(buddy_brain_t *b, uint32_t now_ms, buddy_pose_t *pose)
@@ -81,7 +149,7 @@ uint32_t buddy_brain_tick(buddy_brain_t *b, uint32_t now_ms, buddy_pose_t *pose)
         b->state = BUDDY_STATE_IDLE;
         b->state_start += ms;
         t -= ms;
-        b->next_blink = now_ms + blink_delay(b);
+        resume_mood(b, now_ms);
     }
 
     *pose = (buddy_pose_t){.state = b->state};
@@ -107,8 +175,13 @@ uint32_t buddy_brain_tick(buddy_brain_t *b, uint32_t now_ms, buddy_pose_t *pose)
     default:
         break;
     }
+    if (buddy_brain_mood(b, now_ms) != BUDDY_MOOD_IDLE) {
+        return mood_tick(b, now_ms, pose);
+    }
 
-    // Idle: breathing bob plus random blinks. Blinks missed during a long gap are skipped, not replayed.
+    // The idle mood: breathing bob plus random blinks. Blinks missed during a long gap are skipped, not replayed.
+    // The bob runs on the mood's clock, so it starts afresh when he comes back from a reaction or another mood.
+    t = now_ms - b->cycle_start;
     if (buddy_reached(now_ms, b->next_blink + BLINK_MS)) {
         b->next_blink = now_ms + blink_delay(b);
     }

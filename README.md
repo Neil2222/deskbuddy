@@ -2,7 +2,7 @@
 
 A standalone desk gadget with animated pixel-art characters, built on the Waveshare ESP32-S3-Touch-LCD-7B.
 
-Status: board bring-up done; rendering engine and a placeholder robot character running on the device, including its first personality animation (drinking a can of Monster Energy through a charging cable) and an Office Mode desk clock. A Windows companion app connects over USB: it sets the clock, triggers actions and sends messages that scroll across a retro LED sign. No workplace integrations or persistent state yet.
+Status: board bring-up done; rendering engine and a placeholder robot character running on the device, with personality: seven moods (idle, relaxed, a smoke break, angry, sleepy, working, happy), a Monster Energy animation (drinking a can through a charging cable) and an Office Mode desk clock. A Windows companion app connects over USB: it sets the clock, chooses his mood, triggers actions and sends messages that scroll across a retro LED sign. No workplace integrations or persistent state yet.
 See [HANDOVER.md](HANDOVER.md) for project state and next steps. Measurements: [docs/bringup-results.md](docs/bringup-results.md) and [docs/rendering-results.md](docs/rendering-results.md).
 
 ## Layout
@@ -10,7 +10,7 @@ See [HANDOVER.md](HANDOVER.md) for project state and next steps. Measurements: [
 ```
 firmware/deskbuddy/           Application: render loop, touch task, serial link to the companion, options (menuconfig "DeskBuddy")
 firmware/components/gfx/      Hardware-independent renderer: dirty rectangles, sprites, compositor, double-buffer repair
-firmware/components/buddy/    Placeholder character: behavior, Monster sequence, ASCII programmer art, pose-to-sprite view
+firmware/components/buddy/    Placeholder character: behavior (moods, reactions, Monster sequence), ASCII programmer art, pose-to-sprite view
 firmware/components/layout/   Screen split: character stage + reserved control-panel area
 firmware/components/link/     Serial protocol to the Windows companion: frame parsing and formatting (docs/protocol.md)
 firmware/components/marquee/  LED marquee for messages: 5x7 dot-matrix font, text policy, scrolling sign sprite
@@ -59,6 +59,15 @@ tools\idf.ps1 -C firmware\bringup -p COM7 flash       # bring-up regression firm
 ```
 
 - **Touch:** tap the robot for a surprise and happy hops. Tap the Monster can in the control panel and he drinks it through a cable plugged into his head (about 7 s; taps during the show are ignored).
+- **Moods** (chosen in the companion, or by any program over USB: `mood.set`, see [docs/protocol.md](docs/protocol.md)): how Buddy is, as a looping animation; he starts in *idle* after every power-up.
+  - **Idle:** the original Buddy, breathing and blinking.
+  - **Relaxed:** calm and content: a broad smile, half-closed eyes, breathing at half idle's pace, a long contented blink now and then, sometimes an unhurried look aside.
+  - **Peukie:** a smoke break. He holds a cigarette in his telescopic hand, smoke curls up from the tip; now and then he brings it to his mouth for a long drag (the tip lights up, his eyes close), then blows the smoke out. It burns down over a few drags, and he lights a fresh one.
+  - **Angry:** slanted brows and a frown, steam puffing from his head; now and then a fit of fury: red face, clenched teeth, shaking, an anger mark.
+  - **Sleepy:** heavy lids and dimmed eyes, slow breathing; he nods off with floating Zs (and a little snore), jerks awake, and yawns.
+  - **Working:** focused eyes scanning back and forth, a busy little bob, tongue out in concentration, sweat running down his head, moments of real effort, short pauses to look up.
+  - **Happy:** bursts of hops with a big grin and sparkles, a happy dance in between.
+  - Taps, messages and Monster interrupt any mood; he goes back to it afterwards. Office Mode keeps it (a mood chosen meanwhile shows when he is back).
 - **Office Mode:** tap the moon at the bottom of the control panel. The screen shows a desk clock (24-hour time and date), and the character is paused; a running Monster sequence is dropped. Tap anywhere to bring DeskBuddy back. The backlight keeps its brightness: the board's backlight controller did not apply brightness changes reliably.
   - **If the screen stays dark or very dim** (seen after plugging in and after flashing): unplug the board for about 10 s. If it is dark right after plugging in, pressing RESET also helps.
   - **The clock is set by the Windows companion.** The board has no RTC and the ESP32 clock restarts at 1970 on every power-up, so until the companion has connected the clock shows `--:--` and *CLOCK NOT SET* rather than a guessed time. The time zone comes from Windows.
@@ -91,7 +100,7 @@ tools\companion.ps1 -Test # unit tests (message encoding, frames)
 - **Window:** Buddy's face in the header reacts (sleepy while disconnected, happy or surprised after an action); next to it a status pill. The pill or the gear opens the connection details (port, firmware, clock, *Sync clock*); *Diagnostics* at the bottom opens the log of commands, replies and the board's own log output (so a separate serial monitor is not needed). Both are folded away at start. All artwork is Buddy's own pixel art, scaled by whole numbers only.
 - **Connection:** finds DeskBuddy's UART port (CH343, USB `1A86:55D3`) by itself and reconnects after unplugging. Opening the port does not reset the board. *Disconnect* keeps it disconnected until *Connect*.
 - **Clock:** synced on connect, when the board restarts, every hour, and when Windows' time or time zone changes or the laptop wakes up. Daylight-saving switches happen on time even while the companion is not running.
-- **Activities:** tiles for modes (Buddy, Office; the one that is on is outlined) and actions (Surprise!, Monster). They come from the list in `companion/DeskBuddy.Companion/Activities.cs`: a new firmware command is one entry there, and its tile is enabled only when the board announces that capability.
+- **Activities:** tiles for modes (Buddy, Office; the one that is on is outlined), actions (Surprise!, Monster) and moods (Idle, Relaxed, Peukie, Angry, Sleepy, Working, Happy, with Buddy's face for each; the current one is outlined, and the header face shows it too). They come from the list in `companion/DeskBuddy.Companion/Activities.cs`: a new firmware command or mood is one entry there, and its tile is enabled only when the board announces it (`caps=`, `moods=`).
 - **Messages:** type up to 100 characters and press Enter or *Send*: he jumps and the text scrolls across an amber LED sign above him (below the clock in Office Mode, which stays on), one LED at a time, about 4 characters a second. Short messages repeat so they stay up at least 8 s; a full-length one takes about 28 s. A message sent during a Monster sequence or while another one is up waits its turn (one at a time). Accents show without accents, emoji as a box. The last 10 messages are listed under *Recent* (double-click or Enter to reuse); the list appears with the first message.
 - **Flashing while it runs:** `tools\idf.ps1 ... flash` / `monitor` signals the companion to let go of the port and reconnects it afterwards. Other serial tools (for example PuTTY) need *Disconnect* first: Windows lets only one program open a COM port.
 - **Without the companion** DeskBuddy works as before; only the clock stays *CLOCK NOT SET* after a power-up until the companion connects.
@@ -101,8 +110,8 @@ tools\companion.ps1 -Test # unit tests (message encoding, frames)
 
 ```powershell
 tools\host-test.ps1              # gfx, buddy, office, layout, link (protocol) and marquee unit tests (MSVC, AddressSanitizer)
-tools\host-test.ps1 -Snapshot    # also renders poses, Monster key frames, a Monster contact sheet, the LED marquee and the Office Mode clock to firmware\tests\host\build\snapshots\*.png
-tools\host-test.ps1 -Icons       # exports Buddy's art for the companion to assets\buddy\ (faces, can, moon, icon-16..256.png, buddy.ico)
+tools\host-test.ps1 -Snapshot    # also renders poses, Monster key frames, a Monster contact sheet, a mood contact sheet (mood_sheet.png), the LED marquee and the Office Mode clock to firmware\tests\host\build\snapshots\*.png
+tools\host-test.ps1 -Icons       # exports Buddy's art for the companion to assets\buddy\ (faces incl. the moods, can, moon, icon-16..256.png, buddy.ico)
 ```
 
 - **Requirements:** Visual Studio Build Tools with the C++ workload. On Linux/macOS, plain `cmake` + `ctest` in `firmware/tests/host` works too.

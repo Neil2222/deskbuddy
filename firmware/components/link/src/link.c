@@ -19,7 +19,7 @@ static const struct {
 } COMMANDS[] = {
     {"hello", LINK_CMD_HELLO},       {"ping", LINK_CMD_PING},       {"status", LINK_CMD_STATUS},
     {"poke", LINK_CMD_POKE},         {"monster", LINK_CMD_MONSTER}, {"mode.set", LINK_CMD_MODE_SET},
-    {"time.set", LINK_CMD_TIME_SET}, {"msg.show", LINK_CMD_MSG_SHOW},
+    {"time.set", LINK_CMD_TIME_SET}, {"msg.show", LINK_CMD_MSG_SHOW}, {"mood.set", LINK_CMD_MOOD_SET},
 };
 
 static const struct {
@@ -250,6 +250,17 @@ static link_result_t decode_args(link_command_t *c, const arg_t *args, int n)
                 return LINK_ERR_UNSUPPORTED;
             }
         }
+    } else if (c->cmd == LINK_CMD_MOOD_SET) {
+        // The name is only checked for shape here; which moods exist is the device's business (err unsupported).
+        const char *name = get_arg(args, n, "name", v[0]), *secs = get_arg(args, n, "secs", v[1]);
+        const size_t len = name ? strlen(name) : 0;
+        int64_t v_secs = 0;
+        if (len == 0 || len > LINK_MOOD_NAME_MAX || strspn(name, "abcdefghijklmnopqrstuvwxyz_") != len ||
+            (find_arg(args, n, "secs") && (!secs || !parse_int(secs, 1, LINK_MOOD_SECS_MAX, &v_secs)))) {
+            return LINK_ERR_ARGS;
+        }
+        memcpy(c->u.mood.name, name, len + 1);
+        c->u.mood.secs = (uint32_t)v_secs;
     }
     return LINK_OK;
 }
