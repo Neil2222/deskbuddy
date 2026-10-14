@@ -54,5 +54,10 @@ add_executable(buddy_snapshot snapshot.c png.c)
 target_link_libraries(buddy_snapshot PRIVATE deskbuddy_core)
 target_compile_options(buddy_snapshot PRIVATE ${WARNINGS})
 
+# Buddy's artwork as PNGs and a Windows icon for the companion and other apps (tools/host-test.ps1 -Icons).
+add_executable(buddy_icons icons.c png.c)
+target_link_libraries(buddy_icons PRIVATE deskbuddy_core)
+target_compile_options(buddy_icons PRIVATE ${WARNINGS})
+
 enable_testing()
 add_test(NAME host_tests COMMAND host_tests)

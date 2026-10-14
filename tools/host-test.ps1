@@ -2,7 +2,8 @@
 # (Build Tools with the "Desktop development with C++" workload, which includes the Windows SDK).
 #   tools/host-test.ps1              # build + run tests
 #   tools/host-test.ps1 -Snapshot    # also render the character poses to PNG (firmware/tests/host/build/snapshots)
-param([switch] $Snapshot)
+#   tools/host-test.ps1 -Icons       # also export Buddy's artwork and app icon to assets/buddy (committed)
+param([switch] $Snapshot, [switch] $Icons)
 $ErrorActionPreference = 'Stop'
 
 $src = Join-Path $PSScriptRoot '..\firmware\tests\host'
@@ -36,6 +37,11 @@ if ($Snapshot) {
     $out = Join-Path $build 'snapshots'
     New-Item -ItemType Directory -Force $out | Out-Null
     $steps += "`"$build\buddy_snapshot.exe`" `"$out`""
+}
+if ($Icons) {
+    $assets = Join-Path $PSScriptRoot '..\assets\buddy'
+    New-Item -ItemType Directory -Force $assets | Out-Null
+    $steps += "`"$build\buddy_icons.exe`" `"$assets`""
 }
 cmd /c "`"$devcmd`" -no_logo -arch=x64 -host_arch=x64 -winsdk=none && $($steps -join ' && ')"
 exit $LASTEXITCODE

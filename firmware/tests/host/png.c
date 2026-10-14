@@ -11,7 +11,7 @@ static uint32_t crc_update(uint32_t crc, const uint8_t *p, size_t n)
         for (uint32_t i = 0; i < 256; i++) {
             uint32_t c = i;
             for (int k = 0; k < 8; k++) {
-                c = (c & 1) ? 0xEDB88320u ^ (c >> 1) : c >> 1;
+                c = c & 1 ? 0xEDB88320u ^ (c >> 1) : c >> 1;
             }
             table[i] = c;
         }
@@ -31,43 +31,29 @@ static void put_be32(uint8_t *p, uint32_t v)
     p[3] = (uint8_t)v;
 }
 
-static bool write_chunk(FILE *f, const char *type, const uint8_t *data, size_t len)
+static uint8_t *put_chunk(uint8_t *o, const char *type, const uint8_t *data, size_t len)
 {
-    uint8_t head[8];
-    put_be32(head, (uint32_t)len);
-    memcpy(head + 4, type, 4);
-    uint32_t crc = crc_update(0, head + 4, 4);
-    crc = crc_update(crc, data, len);
-    uint8_t tail[4];
-    put_be32(tail, crc);
-    return fwrite(head, 1, 8, f) == 8 && (len == 0 || fwrite(data, 1, len, f) == len) && fwrite(tail, 1, 4, f) == 4;
+    put_be32(o, (uint32_t)len);
+    memcpy(o + 4, type, 4);
+    if (len) {
+        memcpy(o + 8, data, len);
+    }
+    put_be32(o + 8 + len, crc_update(0, o + 4, 4 + len));
+    return o + 12 + len;
 }
 
-bool png_write_rgb565(const char *path, const gfx_surface_t *s)
+// Encodes filtered rows (raw: a filter byte and the pixels per row) as a PNG with stored deflate blocks.
+static uint8_t *encode(const uint8_t *raw, size_t raw_len, int w, int h, uint8_t color_type, size_t *out_len)
 {
-    const size_t row_bytes = 1 + (size_t)s->w * 3; // filter byte + RGB
-    const size_t raw_len = row_bytes * (size_t)s->h;
     const size_t blocks = (raw_len + 65534) / 65535;
     const size_t z_len = 2 + raw_len + blocks * 5 + 4;
-    uint8_t *raw = malloc(raw_len);
     uint8_t *z = malloc(z_len);
-    if (!raw || !z) {
-        free(raw);
+    uint8_t *png = malloc(8 + 25 + 12 + z_len + 12);
+    if (!z || !png) {
         free(z);
-        return false;
+        free(png);
+        return NULL;
     }
-    for (int y = 0; y < s->h; y++) {
-        uint8_t *row = raw + (size_t)y * row_bytes;
-        row[0] = 0;
-        for (int x = 0; x < s->w; x++) {
-            const gfx_color_t c = s->px[(size_t)y * s->stride + x];
-            const unsigned r = (c >> 11) & 0x1F, g = (c >> 5) & 0x3F, b = c & 0x1F;
-            row[1 + x * 3] = (uint8_t)((r << 3) | (r >> 2));
-            row[2 + x * 3] = (uint8_t)((g << 2) | (g >> 4));
-            row[3 + x * 3] = (uint8_t)((b << 3) | (b >> 2));
-        }
-    }
-    // zlib stream with stored (uncompressed) deflate blocks.
     size_t o = 0;
     z[o++] = 0x78;
     z[o++] = 0x01;
@@ -91,21 +77,80 @@ bool png_write_rgb565(const char *path, const gfx_surface_t *s)
     o += 4;
 
     uint8_t ihdr[13];
-    put_be32(ihdr, (uint32_t)s->w);
-    put_be32(ihdr + 4, (uint32_t)s->h);
-    ihdr[8] = 8;  // bit depth
-    ihdr[9] = 2;  // RGB
-    ihdr[10] = 0; // deflate
-    ihdr[11] = 0; // adaptive filtering
-    ihdr[12] = 0; // no interlace
+    put_be32(ihdr, (uint32_t)w);
+    put_be32(ihdr + 4, (uint32_t)h);
+    ihdr[8] = 8;           // bit depth
+    ihdr[9] = color_type;  // 2: RGB, 6: RGBA
+    ihdr[10] = 0;          // deflate
+    ihdr[11] = 0;          // adaptive filtering
+    ihdr[12] = 0;          // no interlace
     static const uint8_t sig[8] = {0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n'};
+    memcpy(png, sig, 8);
+    uint8_t *p = put_chunk(png + 8, "IHDR", ihdr, 13);
+    p = put_chunk(p, "IDAT", z, o);
+    p = put_chunk(p, "IEND", NULL, 0);
+    free(z);
+    *out_len = (size_t)(p - png);
+    return png;
+}
+
+static bool write_file(const char *path, const uint8_t *data, size_t len)
+{
     FILE *f = fopen(path, "wb");
-    bool ok = f && fwrite(sig, 1, 8, f) == 8 && write_chunk(f, "IHDR", ihdr, 13) && write_chunk(f, "IDAT", z, o) &&
-              write_chunk(f, "IEND", NULL, 0);
+    bool ok = f && fwrite(data, 1, len, f) == len;
     if (f && fclose(f) != 0) {
         ok = false;
     }
+    return ok;
+}
+
+bool png_write_rgb565(const char *path, const gfx_surface_t *s)
+{
+    const size_t row_bytes = 1 + (size_t)s->w * 3; // filter byte + RGB
+    uint8_t *raw = malloc(row_bytes * (size_t)s->h);
+    if (!raw) {
+        return false;
+    }
+    for (int y = 0; y < s->h; y++) {
+        uint8_t *row = raw + (size_t)y * row_bytes;
+        row[0] = 0;
+        for (int x = 0; x < s->w; x++) {
+            const gfx_color_t c = s->px[(size_t)y * s->stride + x];
+            const unsigned r = (c >> 11) & 0x1F, g = (c >> 5) & 0x3F, b = c & 0x1F;
+            row[1 + x * 3] = (uint8_t)((r << 3) | (r >> 2));
+            row[2 + x * 3] = (uint8_t)((g << 2) | (g >> 4));
+            row[3 + x * 3] = (uint8_t)((b << 3) | (b >> 2));
+        }
+    }
+    size_t len = 0;
+    uint8_t *png = encode(raw, row_bytes * (size_t)s->h, s->w, s->h, 2, &len);
     free(raw);
-    free(z);
+    const bool ok = png && write_file(path, png, len);
+    free(png);
+    return ok;
+}
+
+uint8_t *png_encode_rgba(const uint8_t *rgba, int w, int h, size_t *len)
+{
+    const size_t row_bytes = 1 + (size_t)w * 4;
+    uint8_t *raw = malloc(row_bytes * (size_t)h);
+    if (!raw) {
+        return NULL;
+    }
+    for (int y = 0; y < h; y++) {
+        raw[(size_t)y * row_bytes] = 0;
+        memcpy(raw + (size_t)y * row_bytes + 1, rgba + (size_t)y * w * 4, (size_t)w * 4);
+    }
+    uint8_t *png = encode(raw, row_bytes * (size_t)h, w, h, 6, len);
+    free(raw);
+    return png;
+}
+
+bool png_write_rgba(const char *path, const uint8_t *rgba, int w, int h)
+{
+    size_t len = 0;
+    uint8_t *png = png_encode_rgba(rgba, w, h, &len);
+    const bool ok = png && write_file(path, png, len);
+    free(png);
     return ok;
 }

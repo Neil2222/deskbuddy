@@ -19,7 +19,8 @@ firmware/components/display/  Application-owned frame buffers, scanout fill, buf
 firmware/components/board/    Board support: I2C, IO expander, RGB panel, GT911 touch, backlight
 firmware/bringup/             Bring-up firmware: test pattern, touch dot, performance benchmarks (hardware regression)
 firmware/tests/host/          Host-side unit tests and PNG snapshot tool (no ESP32 needed)
-companion/                    Windows companion app (C#, .NET 10, WinForms): connection, clock sync, actions, device log
+companion/                    Windows companion app (C#, .NET 10, WinForms): DeskBuddy Control Center (activities, LED-sign messages, clock sync)
+assets/buddy/                 Buddy's real pixel art exported for the companion (faces, can, moon, app icons); made by host-test -Icons
 tools/common.ps1              Pinned ESP-IDF and .NET versions, tool paths and serial-port resolution
 tools/setup-idf.ps1           One-time ESP-IDF install
 tools/setup-dotnet.ps1        One-time per-user .NET SDK install (no administrator rights)
@@ -87,10 +88,11 @@ tools\companion.ps1       # build and start
 tools\companion.ps1 -Test # unit tests (message encoding, frames)
 ```
 
+- **Window:** Buddy's face in the header reacts (sleepy while disconnected, happy or surprised after an action); next to it a status pill. The pill or the gear opens the connection details (port, firmware, clock, *Sync clock*); *Diagnostics* at the bottom opens the log of commands, replies and the board's own log output (so a separate serial monitor is not needed). Both are folded away at start. All artwork is Buddy's own pixel art, scaled by whole numbers only.
 - **Connection:** finds DeskBuddy's UART port (CH343, USB `1A86:55D3`) by itself and reconnects after unplugging. Opening the port does not reset the board. *Disconnect* keeps it disconnected until *Connect*.
 - **Clock:** synced on connect, when the board restarts, every hour, and when Windows' time or time zone changes or the laptop wakes up. Daylight-saving switches happen on time even while the companion is not running.
-- **Actions:** Surprise, Monster, Office Mode, Buddy Mode, Sync clock. Mode and connection state are shown, plus a log of commands, replies and the board's own log output (so a separate serial monitor is not needed).
-- **Messages:** type up to 100 characters and press Enter or *Send to Buddy*: he jumps and the text scrolls across an amber LED sign above him (below the clock in Office Mode, which stays on), one LED at a time, about 2 characters a second. Short messages repeat so they stay up at least 8 s; a full-length one takes about 55 s. A message sent during a Monster sequence or while another one is up waits its turn (one at a time). Accents show without accents, emoji as a box. The last 10 messages are listed for reuse.
+- **Activities:** tiles for modes (Buddy, Office; the one that is on is outlined) and actions (Surprise!, Monster). They come from the list in `companion/DeskBuddy.Companion/Activities.cs`: a new firmware command is one entry there, and its tile is enabled only when the board announces that capability.
+- **Messages:** type up to 100 characters and press Enter or *Send*: he jumps and the text scrolls across an amber LED sign above him (below the clock in Office Mode, which stays on), one LED at a time, about 2 characters a second. Short messages repeat so they stay up at least 8 s; a full-length one takes about 55 s. A message sent during a Monster sequence or while another one is up waits its turn (one at a time). Accents show without accents, emoji as a box. The last 10 messages are listed under *Recent* (double-click or Enter to reuse); the list appears with the first message.
 - **Flashing while it runs:** `tools\idf.ps1 ... flash` / `monitor` signals the companion to let go of the port and reconnects it afterwards. Other serial tools (for example PuTTY) need *Disconnect* first: Windows lets only one program open a COM port.
 - **Without the companion** DeskBuddy works as before; only the clock stays *CLOCK NOT SET* after a power-up until the companion connects.
 - Protocol: [docs/protocol.md](docs/protocol.md).
@@ -100,6 +102,7 @@ tools\companion.ps1 -Test # unit tests (message encoding, frames)
 ```powershell
 tools\host-test.ps1              # gfx, buddy, office, layout, link (protocol) and marquee unit tests (MSVC, AddressSanitizer)
 tools\host-test.ps1 -Snapshot    # also renders poses, Monster key frames, a Monster contact sheet, the LED marquee and the Office Mode clock to firmware\tests\host\build\snapshots\*.png
+tools\host-test.ps1 -Icons       # exports Buddy's art for the companion to assets\buddy\ (faces, can, moon, icon-16..256.png, buddy.ico)
 ```
 
 - **Requirements:** Visual Studio Build Tools with the C++ workload. On Linux/macOS, plain `cmake` + `ctest` in `firmware/tests/host` works too.

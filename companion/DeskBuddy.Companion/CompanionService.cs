@@ -37,6 +37,9 @@ public sealed class CompanionService : IDisposable
     public bool IsConnected { get; private set; }
     public string ConnectionText { get; private set; } = "Starting";
     public string? Firmware { get; private set; }
+    public string? Protocol { get; private set; }
+    /// <summary>The port of the current connection; null while not connected.</summary>
+    public string? PortName => IsConnected ? _link?.PortName : null;
     public string Mode { get; private set; } = "unknown";
     public string ClockText { get; private set; } = "not synced";
     public IReadOnlySet<string> Caps { get; private set; } = new HashSet<string>();
@@ -73,11 +76,12 @@ public sealed class CompanionService : IDisposable
         CloseLink("Disconnected (auto-connect off)");
     }
 
-    public async Task RunAsync(string label, string body)
+    /// <summary>Sends an action command. True when DeskBuddy did it.</summary>
+    public async Task<bool> RunAsync(string label, string body)
     {
         if (_link is not { } link || !IsConnected)
         {
-            return;
+            return false;
         }
         try
         {
@@ -85,6 +89,7 @@ public sealed class CompanionService : IDisposable
             if (reply.IsOk)
             {
                 Write(LogKind.Info, $"{label}: done");
+                return true;
             }
             else
             {
@@ -99,6 +104,7 @@ public sealed class CompanionService : IDisposable
         {
             // Lost: reported by the link
         }
+        return false;
     }
 
     /// <summary>
@@ -257,6 +263,7 @@ public sealed class CompanionService : IDisposable
                 return;
             }
             Firmware = hello.Arg("fw");
+            Protocol = hello.Arg("proto");
             Caps = (hello.Arg("caps") ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries).ToHashSet();
             IsConnected = true;
             _missedPings = 0;

@@ -9,10 +9,19 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <AssemblyTitle>DeskBuddy Companion</AssemblyTitle>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <ApplicationIcon>..\..\assets\buddy\buddy.ico</ApplicationIcon>
+    <!-- The UI is built in code, not in the WinForms designer: designer serialization does not apply. -->
+    <NoWarn>$(NoWarn);WFO1000</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="System.IO.Ports" Version="10.0.0" />
+  </ItemGroup>
+
+  <!-- Buddy's own pixels, exported from the firmware sprites by tools/host-test.ps1 -Icons. -->
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\assets\buddy\face-neutral.png;..\..\assets\buddy\face-happy.png;..\..\assets\buddy\face-surprised.png;..\..\assets\buddy\face-sleepy.png;..\..\assets\buddy\can.png;..\..\assets\buddy\moon.png;..\..\assets\buddy\buddy.ico"
+                      LogicalName="DeskBuddy.Assets.%(Filename)%(Extension)" />
   </ItemGroup>
 
 </Project>
