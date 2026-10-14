@@ -30,7 +30,7 @@ Connect through the **UART** Type-C port (CH343) with DIP switch #16 on the ESP3
 
 | Area | State |
 |---|---|
-| Toolchain | ESP-IDF v5.5.5, pinned and installed with `tools/setup-idf.ps1`. Managed components are locked in `dependencies.lock`. Companion: .NET 10 SDK per user via `tools/setup-dotnet.ps1` (no admin). |
+| Toolchain | ESP-IDF v5.5.5, pinned and installed with `tools/setup-idf.ps1`. Managed components are locked in `dependencies.lock`. Companion: .NET 10 SDK per user via `tools/setup-dotnet.ps1` (no admin); `tools/companion.ps1 -Publish` makes a self-contained, double-clickable `companion\publish\DeskBuddy.Companion.exe` (the per-user runtime is not found by a double-clicked development build). |
 | Board support (`firmware/components/board`) | Done: I2C bus, IO expander (native USB kept connected), RGB panel with bounce buffers (driver-owned frame buffers, or app-owned via `on_bounce_fill`), GT911 with interrupt, backlight brightness |
 | Bring-up firmware (`firmware/bringup`) | Done, kept as the hardware regression test. Re-run after the board change: benchmarks unchanged. |
 | Rendering engine (`gfx`, `display`, `layout`) | Done: dirty rectangles, indexed sprites with transparency, integer scaling, flip, frame animation, tear-free double buffering with a proven swap. 26 host unit tests. See [docs/rendering-results.md](docs/rendering-results.md). |

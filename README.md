@@ -25,7 +25,7 @@ tools/common.ps1              Pinned ESP-IDF and .NET versions, tool paths and s
 tools/setup-idf.ps1           One-time ESP-IDF install
 tools/setup-dotnet.ps1        One-time per-user .NET SDK install (no administrator rights)
 tools/idf.ps1                 Runs idf.py in the pinned environment (auto-detects the port)
-tools/companion.ps1           Builds and starts the companion app
+tools/companion.ps1           Builds and starts the companion app; -Publish makes the double-clickable exe
 tools/host-test.ps1           Builds and runs the host tests with MSVC
 tools/flash-backup.ps1        Full 16 MB flash backup / verify / restore
 docs/                         Hardware findings, measured results, serial protocol
@@ -92,10 +92,13 @@ tools\idf.ps1 -C firmware\bringup -p COM7 flash       # bring-up regression firm
 ## Windows companion
 
 ```powershell
-tools\setup-dotnet.ps1    # once: .NET 10 SDK -> %LOCALAPPDATA%\Microsoft\dotnet (no administrator rights)
-tools\companion.ps1       # build and start
-tools\companion.ps1 -Test # unit tests (message encoding, frames)
+tools\setup-dotnet.ps1       # once: .NET 10 SDK -> %LOCALAPPDATA%\Microsoft\dotnet (no administrator rights)
+tools\companion.ps1          # build and start
+tools\companion.ps1 -Test    # unit tests (message encoding, frames)
+tools\companion.ps1 -Publish # companion\publish\DeskBuddy.Companion.exe: one self-contained file (~47 MB) to double-click
 ```
+
+- **Starting it by double-click:** use `companion\publish\DeskBuddy.Companion.exe` (make it with `-Publish`; pin it to the taskbar or copy it anywhere, also to another PC). It has .NET built in. The exe in `bin\Release` is a small development build that needs the .NET runtime: double-clicked, Windows says *You must install .NET Desktop Runtime*, because the SDK from `setup-dotnet.ps1` is installed per user and only `tools\companion.ps1` tells the app where it is. Re-run `-Publish` after changes (close the published app first).
 
 - **Window:** Buddy's face in the header reacts (sleepy while disconnected, happy or surprised after an action); next to it a status pill. The pill or the gear opens the connection details (port, firmware, clock, *Sync clock*); *Diagnostics* at the bottom opens the log of commands, replies and the board's own log output (so a separate serial monitor is not needed). Both are folded away at start. All artwork is Buddy's own pixel art, scaled by whole numbers only.
 - **Connection:** finds DeskBuddy's UART port (CH343, USB `1A86:55D3`) by itself and reconnects after unplugging. Opening the port does not reset the board. *Disconnect* keeps it disconnected until *Connect*.
