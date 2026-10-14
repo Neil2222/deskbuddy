@@ -109,9 +109,9 @@ The switch between DeskBuddy and the clock repaints the whole screen: the scene 
   An ESPHome user on the same board reports dimming that works a couple of times after a reboot and then stops. The expander's registers do not read back reliably (values lag or come from another register), so its state cannot be checked from firmware. Decision: the backlight is set once at boot (PWM register, then the enable bit, as in the original bring-up) and never changed afterwards; Office Mode is not dimmed.
 
 ### Message marquee (2026-10-14)
-The LED sign (`components/marquee`) is one sprite of 636x84 px; each update redraws its rectangle (56,448 px after alignment, plus the robot's own animation). It moves one LED column per 80 ms (12.5 redraws a second, about 2 characters a second).
+The LED sign (`components/marquee`) is one sprite of 636x84 px; each update redraws its rectangle (56,448 px after alignment, plus the robot's own animation). It moves one LED column per 40 ms (25 redraws a second, about 4 characters a second).
 
-Lowering the update rate only made the artifacts rarer. These rates were measured before the cache fix below:
+Before the cache fix below, lowering the update rate only made the artifacts rarer:
 
 | Update rate | Frames presented while scrolling | Longest bounce fill | Scanout resyncs | Seen by the user |
 |---|---|---|---|---|
@@ -135,6 +135,8 @@ Lowering the update rate only made the artifacts rarer. These rates were measure
 **Fix:** the surface has an optional `flush` callback that `gfx_scene_render()` calls for every row right after copying it into the frame buffer. On the device it is `esp_cache_msync(..., ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_TYPE_DATA)`: a writeback without invalidation. Rows start and end on 64-byte lines (64-byte aligned buffers, 32-px aligned dirty rectangles), as the API requires without `ESP_CACHE_MSYNC_FLAG_UNALIGNED`; chunked msync is off, so each call writes back at most one row (≤ 21 lines). No driver, bounce-buffer, cache, PSRAM or backlight setting changed.
 
 **Cost:** the render core now waits for its own PSRAM writes: render time while scrolling went from 8.1 / 13.6 ms to 10.5 / 17.5 ms (avg / max); the first frame of a Monster sequence (299 k px) took 33 ms. Swap waits and slow swaps are unchanged.
+
+**Back to 25 sign updates a second** (one LED column per 40 ms), same stress sequence (two messages back to back, Surprise and Monster during scrolling, a message sent during Monster): longest fill 280–300 µs, 21–32 frames a second while scrolling, 0 resyncs, 0 slow swaps. The user saw smooth scrolling and no glitches at all, also during Buddy's animations.
 
 **Rule:** every write into a PSRAM frame buffer goes through a surface with `flush`, so no drawn pixels are left for the scanout to evict.
 

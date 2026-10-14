@@ -5,8 +5,8 @@
 // the text scrolls in from the right and out to the left; short texts run again so every message stays up for at
 // least MARQUEE_MIN_SHOW_MS. The scroll position follows the elapsed time; the sign is redrawn only every
 // MARQUEE_FRAME_MS, and each redraw covers the panel only (the sprite alternates between two pixel buffers, so the
-// scene sees the change). A lower redraw rate means less frame-buffer traffic: at 25 redraws a second the scanout
-// showed horizontal artifacts (docs/rendering-results.md).
+// scene sees the change). The sign is wide, so its redraws rely on the renderer writing drawn rows back from the
+// cache at once; without that, 25 redraws a second caused scanout artifacts (docs/rendering-results.md).
 //
 // Text policy (UTF-8 in): printable ASCII as is; accented Latin letters lose their accents (e -> e); typographic
 // quotes, dashes and the ellipsis become their ASCII cousins; the euro sign, degree sign and hearts have their own
@@ -28,9 +28,9 @@ extern "C" {
 #define MARQUEE_COLS 78
 #define MARQUEE_ROWS 9            // a blank row above and below the 7-row font
 #define MARQUEE_TEXT_MAX 100      // glyphs; longer text is cut
-#define MARQUEE_COL_MS 80         // scroll speed: one LED column per 80 ms, 12.5 columns (about 2 characters) a second
-#define MARQUEE_FRAME_MS 80       // the sign is redrawn this often (12.5 fps): one column per redraw
-#define MARQUEE_INTRO_MS (7 * MARQUEE_COL_MS) // scanner sweep before the text (whole columns' time)
+#define MARQUEE_COL_MS 40         // scroll speed: one LED column per 40 ms, 25 columns (about 4 characters) a second
+#define MARQUEE_FRAME_MS 40       // the sign is redrawn this often (25 fps): one column per redraw
+#define MARQUEE_INTRO_MS (14 * MARQUEE_COL_MS) // scanner sweep before the text (whole columns' time)
 #define MARQUEE_MIN_SHOW_MS 8000  // short texts repeat until shown at least this long...
 #define MARQUEE_MAX_PASSES 3      // ...but at most this many times
 
