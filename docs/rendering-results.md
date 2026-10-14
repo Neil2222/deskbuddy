@@ -21,7 +21,7 @@ Behavior, artwork, layout and rendering only meet in the render loop. Behavior p
 2. The behavior state machine produces a pose; the view updates sprite fields.
 3. `gfx_scene_collect()` compares every sprite with what is on screen and reports old and new bounds of whatever changed.
 4. `gfx_repair_next()` adds the previous frame's changes, which the back buffer has not seen yet.
-5. `gfx_scene_render()` composes each dirty rectangle in 32 KB internal-RAM strips (background, then sprites in z order) and copies finished rows to the back buffer. PSRAM is only written, never read back.
+5. `gfx_scene_render()` composes each dirty rectangle in 32 KB internal-RAM strips (background, then sprites in z order) and copies finished rows to the back buffer. Each row is written back from the data cache to PSRAM right after its copy (the surface's `flush` callback, `esp_cache_msync`; see "Drawn rows must leave the cache at once"). PSRAM is only written, never read back.
 6. `display_present()` swaps the buffers (below).
 
 Nothing is drawn while nothing changes.
@@ -55,7 +55,7 @@ Nothing is drawn while nothing changes.
 ## Findings
 
 ### PSRAM bandwidth decides scanout stability
-- **Budget:** each bounce fill copies 20 KB from PSRAM and must finish within one bounce period: 10 lines at 1386 px / 30.85 MHz = **449 µs**. It takes 280–400 µs during normal animation.
+- **Budget:** each bounce fill copies 20 KB from PSRAM and must finish within one bounce period: 10 lines at 1386 px / 30.85 MHz = **449 µs**. Since the per-row cache writeback it takes 130–310 µs (before: 280–400 µs idle, up to 713 µs with the message sign).
 - **What breaks it:** full-frame PSRAM traffic. Full-screen redraws, and verify mode's compare, push fills to about 940 µs, the scanout underruns, and the driver resyncs at the next VSYNC. That is a visible one-frame glitch, counted as `resync` in the log.
 - **Mitigation now:** both boot-time full redraws happen before the backlight comes on (`while dark: 3 scanout resyncs`).
 - **Rule for the next phases:** keep redraws incremental while the screen is lit. Rare full redraws on a user action (the Office Mode switch) were acceptable in a user test; the backlight cannot be used to hide them (it does not change reliably at run time). Larger bounce buffers and 120 MHz PSRAM are untested options for more margin.
@@ -85,7 +85,7 @@ Measured with `DEMO_MONSTER_S` (a sequence every 12–13 s) and compared with th
 | Monster sequence, current (50 ms frame clock, head-only wobble, split cable sprite) | 15–27 | 34–69 k / 101 k px | 433–638 µs | 0 |
 
 - **Correctness:** host tests replay the whole sequence on two alternating buffers; every presented frame equals a full redraw, and no frame redraws the full screen.
-- **Open issue:** fills above the 449 µs budget do not resync, but they can show a few stale lines for one frame (the known intermittent horizontal artifact). The redraw size is no longer the main factor (frames now match the hop reaction's size), so the remaining lever is in the engine, for example pacing the PSRAM writes between composition strips. Not changed yet: it needs a decision.
+- **Resolved (2026-10-14):** the fills above the 449 µs budget showed a few stale lines for one frame (the known intermittent horizontal artifact). The cause was drawn pixels left in the data cache, not the redraw size; see "Drawn rows must leave the cache at once". With the fix, a Monster sequence during a scrolling message keeps every fill at or below 296 µs.
 
 ### Office Mode (2026-10-14)
 The switch between DeskBuddy and the clock repaints the whole screen: the scene is swapped and both buffers are redrawn (one full frame, then a one-pixel change that makes the double-buffer repair redraw the other buffer). The backlight is not touched (see the brightness finding below). The first versions switched in the dark (backlight faded out, redraw, faded in to 25 % of normal for the clock); the measurements below are from those versions with `DEMO_OFFICE_S=10` and `DEMO_MONSTER_S=13`, 8 switches including one in the middle of a Monster sequence.
@@ -109,17 +109,34 @@ The switch between DeskBuddy and the clock repaints the whole screen: the scene 
   An ESPHome user on the same board reports dimming that works a couple of times after a reboot and then stops. The expander's registers do not read back reliably (values lag or come from another register), so its state cannot be checked from firmware. Decision: the backlight is set once at boot (PWM register, then the enable bit, as in the original bring-up) and never changed afterwards; Office Mode is not dimmed.
 
 ### Message marquee (2026-10-14)
-The LED sign (`components/marquee`) is one sprite of 636x84 px; each update redraws its rectangle (about 59 k px after alignment, plus the robot's own animation).
+The LED sign (`components/marquee`) is one sprite of 636x84 px; each update redraws its rectangle (56,448 px after alignment, plus the robot's own animation). It moves one LED column per 80 ms (12.5 redraws a second, about 2 characters a second).
+
+Lowering the update rate only made the artifacts rarer. These rates were measured before the cache fix below:
 
 | Update rate | Frames presented while scrolling | Longest bounce fill | Scanout resyncs | Seen by the user |
 |---|---|---|---|---|
 | 25 per second (one LED column per 40 ms) | 27–29/s | 600–700 µs | 0 | frequent horizontal artifacts across the blue background: not acceptable |
-| 12.5 per second (two columns per 80 ms, same scroll speed) | 13.6–14.9/s | 613–679 µs | 0 | no artifacts at all, but the two-column jumps look choppy |
-| 16.7 per second (one column per 60 ms: slower scroll, about 2.7 characters a second) | 19.6–20.1/s | 608–676 µs | 0 | no artifacts; smooth enough, accepted. Small irregular hitches remain: a few smooth steps, then a short pause |
+| 12.5 per second (two columns per 80 ms, same scroll speed) | 13.6–14.9/s | 613–679 µs | 0 | no artifacts in one short test, but the two-column jumps look choppy |
+| 16.7 per second (one column per 60 ms) | 19.6–20.1/s | 608–676 µs | 0 | first test: no artifacts. A later test with consecutive messages while Buddy jumped: strong artifacts |
+| 12.5 per second (one column per 80 ms) | 15–31/s | 611–713 µs | 0 | severe artifacts, worst during a Monster sequence |
 
-**Remaining hitch (not fixed, accepted):** the sign changes every 60 ms, but a frame only appears at the next scanout frame start (every 29.7 ms), and the render-plus-swap time varies with the robot's own frames in between. So some steps show after two scanout frames (59 ms) and some after three (89 ms) [INFERENCE]. If it ever matters: step the sign on every second scanout frame instead of on a timer.
+### Drawn rows must leave the cache at once (2026-10-14)
+**Isolation on the device** (each step flashed and judged by the user on the physical screen):
 
-The fills above the 449 µs budget are the known cause of short stale-line artifacts (see "PSRAM bandwidth decides scanout stability"); a lower update rate makes them rarer, the worst case per frame is unchanged. The artifacts disappeared completely at 12.5 updates a second rather than halving, so there seems to be a threshold between 12.5 and 25 [INFERENCE].
+| Build | Longest bounce fill while a message runs | Seen by the user |
+|---|---|---|
+| Normal (12.5 sign updates a second) | 611–713 µs | severe broad artifacts across the background |
+| Buddy frozen while the sign scrolls (only the sign redrawn, 56,448 px per frame) | 563–687 µs | fewer, still clearly present |
+| Sign never drawn (lifecycle, events and Buddy's jump unchanged) | 347–365 µs | broad artifacts gone; only the older thin lines on the left |
+| Sign drawn, each drawn row written back from the cache at once | 238–306 µs (idle: 129–132 µs) | **no glitches at all**, including Surprise and Monster during scrolling |
+
+**Cause:** frame-buffer writes go through the 64 KB, 8-way data cache (64-byte lines, 128 sets; the pattern repeats every 8 KB, so every 4 frame rows of 2048 B land on the same sets). Nothing wrote drawn pixels back explicitly, so they stayed in the cache until something else needed those lines, mostly the bounce fill itself, which reads the front buffer through the same cache. Each dirty line it evicted cost an extra PSRAM write inside the time-critical fill. The width of a redraw decides how much it leaves behind: Buddy's 224-px-wide rectangle can occupy only 28 sets (at most 14 KB stays cached), the sign's 672-px-wide one 84 sets (up to 42 KB). That is why the sign overran the budget at a lower pixel count and frame rate than the tap reaction (64–70 k px at 13–16 frames a second, 362–394 µs).
+
+**Fix:** the surface has an optional `flush` callback that `gfx_scene_render()` calls for every row right after copying it into the frame buffer. On the device it is `esp_cache_msync(..., ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_TYPE_DATA)`: a writeback without invalidation. Rows start and end on 64-byte lines (64-byte aligned buffers, 32-px aligned dirty rectangles), as the API requires without `ESP_CACHE_MSYNC_FLAG_UNALIGNED`; chunked msync is off, so each call writes back at most one row (≤ 21 lines). No driver, bounce-buffer, cache, PSRAM or backlight setting changed.
+
+**Cost:** the render core now waits for its own PSRAM writes: render time while scrolling went from 8.1 / 13.6 ms to 10.5 / 17.5 ms (avg / max); the first frame of a Monster sequence (299 k px) took 33 ms. Swap waits and slow swaps are unchanged.
+
+**Rule:** every write into a PSRAM frame buffer goes through a surface with `flush`, so no drawn pixels are left for the scanout to evict.
 
 ## Touch
 

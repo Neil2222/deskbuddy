@@ -86,7 +86,7 @@ void test_marquee_stays_long_enough_then_hides(void)
     // In from the right edge and out to the left, one column per MARQUEE_COL_MS whatever the frame rate.
     CHECK_EQ(marquee_duration_ms(&s_m),
              MARQUEE_INTRO_MS + (uint32_t)(MARQUEE_COLS + s_m.ncols) * MARQUEE_COL_MS);
-    CHECK(marquee_duration_ms(&s_m) < 45000); // even the widest full-length message is done in under 45 s
+    CHECK(marquee_duration_ms(&s_m) < 60000); // even the widest full-length message is done within a minute
 
     start("");
     CHECK_EQ(marquee_apply(&s_m, 0, 0, 1000 + MARQUEE_INTRO_MS + MARQUEE_COLS * MARQUEE_COL_MS * 3 + 1),

@@ -139,8 +139,11 @@ static void render_rect(const gfx_scene_t *s, gfx_rect_t r, const gfx_surface_t 
             }
         }
         for (int row = 0; row < rows; row++) {
-            memcpy(dst->px + (size_t)(y0 + row) * dst->stride + r.x, s->strip + (size_t)row * r.w,
-                   (size_t)r.w * sizeof(gfx_color_t));
+            gfx_color_t *line = dst->px + (size_t)(y0 + row) * dst->stride + r.x;
+            memcpy(line, s->strip + (size_t)row * r.w, (size_t)r.w * sizeof(gfx_color_t));
+            if (dst->flush) {
+                dst->flush(line, r.w);
+            }
         }
     }
 }

@@ -17,6 +17,7 @@
 #include "buddy_brain.h"
 #include "buddy_view.h"
 #include "display.h"
+#include "esp_cache.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_random.h"
@@ -72,6 +73,20 @@ static uint32_t now_ms(void)
 static int64_t max64(int64_t a, int64_t b)
 {
     return a > b ? a : b;
+}
+
+// Surface flush for the PSRAM frame buffers: writes the rows the renderer just drew from the data cache to PSRAM
+// on the render core. Left in the cache, they would be written out whenever something evicts those lines, mostly
+// the scanout's bounce fills (which read through the same cache), pushing fills past their time budget.
+// Rows start and end on cache lines (32-px aligned dirty rectangles in 64-byte aligned buffers); the outward
+// rounding only guards that, and writing back a neighbouring line is harmless.
+static void flush_rows(const gfx_color_t *px, int count)
+{
+    const uintptr_t line = CONFIG_ESP32S3_DATA_CACHE_LINE_SIZE;
+    const uintptr_t start = (uintptr_t)px & ~(line - 1);
+    const uintptr_t end = ((uintptr_t)(px + count) + line - 1) & ~(line - 1);
+    ESP_ERROR_CHECK(esp_cache_msync((void *)start, end - start,
+                                    ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_TYPE_DATA));
 }
 
 #ifdef CONFIG_DESKBUDDY_GFX_VERIFY
@@ -519,7 +534,7 @@ static void render_task(void *arg)
         gfx_scene_collect(&s_scene, &changes);
         if (changes.count > 0) {
             gfx_repair_next(&repair, &changes, &redraw);
-            const gfx_surface_t back = {display_back_buffer(), W, H, W};
+            const gfx_surface_t back = {display_back_buffer(), W, H, W, flush_rows};
             const int64_t t0 = esp_timer_get_time();
             gfx_scene_render(&s_scene, &redraw, &back);
             const int64_t render_us = esp_timer_get_time() - t0;

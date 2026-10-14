@@ -20,9 +20,12 @@ typedef struct {
 } gfx_rect_t;
 
 // A block of pixels. stride is in pixels.
+// flush (optional): called with each row segment right after the renderer has written it, so a cached frame
+// buffer can write it out to memory at once instead of leaving it to whoever evicts those cache lines later.
 typedef struct {
     gfx_color_t *px;
     int w, h, stride;
+    void (*flush)(const gfx_color_t *px, int count);
 } gfx_surface_t;
 
 static inline bool gfx_rect_is_empty(gfx_rect_t r)

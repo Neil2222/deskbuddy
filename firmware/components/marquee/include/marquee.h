@@ -28,9 +28,9 @@ extern "C" {
 #define MARQUEE_COLS 78
 #define MARQUEE_ROWS 9            // a blank row above and below the 7-row font
 #define MARQUEE_TEXT_MAX 100      // glyphs; longer text is cut
-#define MARQUEE_COL_MS 60         // scroll speed: one LED column per 60 ms, about 17 columns (2.7 characters) a second
-#define MARQUEE_FRAME_MS 60       // the sign is redrawn this often (16.7 fps): one column per redraw
-#define MARQUEE_INTRO_MS (10 * MARQUEE_COL_MS) // scanner sweep before the text (whole columns' time)
+#define MARQUEE_COL_MS 80         // scroll speed: one LED column per 80 ms, 12.5 columns (about 2 characters) a second
+#define MARQUEE_FRAME_MS 80       // the sign is redrawn this often (12.5 fps): one column per redraw
+#define MARQUEE_INTRO_MS (7 * MARQUEE_COL_MS) // scanner sweep before the text (whole columns' time)
 #define MARQUEE_MIN_SHOW_MS 8000  // short texts repeat until shown at least this long...
 #define MARQUEE_MAX_PASSES 3      // ...but at most this many times
 
