@@ -27,6 +27,7 @@
 #include "gfx_scene.h"
 #include "input.h"
 #include "layout.h"
+#include "marquee.h"
 #include "office_clock.h"
 #include "office_switch.h"
 #include "serial_link.h"
@@ -162,6 +163,19 @@ static bool wall_clock(struct tm *tm, uint32_t *ms)
     return true;
 }
 
+// Messages from the companion (msg.show), shown on the LED marquee. One message can wait while another one is on
+// the sign or a Monster sequence runs. A repeated id is the same message: acknowledged, not shown again.
+typedef struct {
+    marquee_t sign;
+    bool ready;          // the sign is in the scene
+    uint32_t showing_id; // 0: nothing on the sign
+    uint32_t last_id;    // last accepted message
+    bool queued;
+    uint32_t queued_id;
+    char queued_text[LINK_TEXT_MAX_BYTES + 1];
+} messages_t;
+static messages_t s_msg;
+
 // What the companion shows as the device mode.
 static const char *mode_name(const office_switch_t *screen, const buddy_brain_t *brain)
 {
@@ -169,6 +183,27 @@ static const char *mode_name(const office_switch_t *screen, const buddy_brain_t 
         return "office";
     }
     return brain->state == BUDDY_STATE_MONSTER ? "monster" : "normal";
+}
+
+// A message can go up now: the screen is lit, the sign is free, and no Monster sequence would be interrupted (in
+// Office Mode the character is paused, so the sign appears under the clock right away).
+static bool msg_can_start(const office_switch_t *screen, const buddy_brain_t *brain, bool lit)
+{
+    return lit && !marquee_active(&s_msg.sign) && (screen->office || brain->state != BUDDY_STATE_MONSTER);
+}
+
+static void msg_start(uint32_t id, const char *text, const office_switch_t *screen, buddy_brain_t *brain,
+                      uint32_t now)
+{
+    marquee_start(&s_msg.sign, text, now);
+    s_msg.showing_id = id;
+    if (!screen->office) {
+        buddy_brain_event(brain, BUDDY_EVENT_POKE, now); // he jumps when a message comes in
+    }
+    ESP_LOGI(TAG, "message %" PRIu32 " on the marquee for %" PRIu32 " ms", id, marquee_duration_ms(&s_msg.sign));
+    char body[48];
+    snprintf(body, sizeof(body), "evt msg id=%" PRIu32 " state=showing", id);
+    serial_link_send(0, body);
 }
 
 // Runs a companion command (on the render task, which owns the character and the scene) and replies.
@@ -181,8 +216,9 @@ static void run_command(const link_command_t *c, buddy_brain_t *brain, office_sw
     case LINK_CMD_STATUS: {
         struct tm tm;
         uint32_t ms;
-        snprintf(body, sizeof(body), "ok mode=%s time=%s uptime=%" PRIu32, mode_name(screen, brain),
-                 wall_clock(&tm, &ms) ? "set" : "unset", now / 1000);
+        snprintf(body, sizeof(body), "ok mode=%s time=%s msg=%s queued=%d uptime=%" PRIu32, mode_name(screen, brain),
+                 wall_clock(&tm, &ms) ? "set" : "unset", marquee_active(&s_msg.sign) ? "showing" : "idle",
+                 s_msg.queued, now / 1000);
         break;
     }
     case LINK_CMD_POKE:
@@ -217,6 +253,28 @@ static void run_command(const link_command_t *c, buddy_brain_t *brain, office_sw
             ESP_LOGI(TAG, "clock set by the companion: %04d-%02d-%02d %02d:%02d:%02d (UTC%+" PRId32 " min)",
                      tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec,
                      link_tz_offset_min(&s_tz, tv.tv_sec));
+        }
+        break;
+    }
+    case LINK_CMD_MSG_SHOW: {
+        const uint32_t id = c->u.msg.id;
+        if (!s_msg.ready) {
+            strcpy(body, "err unavailable");
+        } else if (id == s_msg.last_id || (id == s_msg.showing_id && marquee_active(&s_msg.sign))) {
+            strcpy(body, "ok dup=1");
+        } else if (msg_can_start(screen, brain, lit)) {
+            s_msg.last_id = id;
+            serial_link_send(c->seq, "ok"); // the reply first, then the "showing" event
+            msg_start(id, c->u.msg.text, screen, brain, now);
+            return;
+        } else if (s_msg.queued) {
+            snprintf(body, sizeof(body), "err busy mode=%s", mode_name(screen, brain));
+        } else {
+            s_msg.queued = true;
+            s_msg.queued_id = s_msg.last_id = id;
+            strcpy(s_msg.queued_text, c->u.msg.text);
+            strcpy(body, "ok queued=1");
+            ESP_LOGI(TAG, "message %" PRIu32 " waits for the sign", id);
         }
         break;
     }
@@ -286,6 +344,10 @@ static void render_task(void *arg)
         office_button_show(&moon, false);
     }
     office_switch_init(&screen);
+    s_msg.ready = marquee_init(&s_msg.sign, &s_scene, 30); // above everything
+    if (!s_msg.ready) {
+        ESP_LOGW(TAG, "no room in the scene for the message marquee");
+    }
 
     buddy_brain_init(&brain, t_start, esp_random());
     gfx_scene_invalidate(&s_scene, s_layout.screen); // both buffers start black: first two frames are full
@@ -421,6 +483,27 @@ static void render_task(void *arg)
         }
         next = step.next_ms < next ? step.next_ms : next;
         next = !light_ok && next > BACKLIGHT_RETRY_MS ? BACKLIGHT_RETRY_MS : next;
+
+        // The message sign: above the robot, or below the clock in Office Mode (which stays on).
+        if (s_msg.ready) {
+            const gfx_rect_t area = screen.office ? s_layout.screen : s_layout.stage;
+            const int mx = area.x + (area.w - MARQUEE_W) / 2;
+            const int my = screen.office ? area.y + area.h - MARQUEE_H - 36 : area.y + 22;
+            const bool was_showing = marquee_active(&s_msg.sign);
+            uint32_t sign_next = marquee_apply(&s_msg.sign, mx, my, now);
+            if (was_showing && !marquee_active(&s_msg.sign)) {
+                char body[48];
+                snprintf(body, sizeof(body), "evt msg id=%" PRIu32 " state=done", s_msg.showing_id);
+                serial_link_send(0, body);
+                s_msg.showing_id = 0;
+            }
+            if (s_msg.queued && msg_can_start(&screen, &brain, presented >= 2)) {
+                s_msg.queued = false;
+                msg_start(s_msg.queued_id, s_msg.queued_text, &screen, &brain, now);
+                sign_next = marquee_apply(&s_msg.sign, mx, my, now);
+            }
+            next = sign_next < next ? sign_next : next;
+        }
 
         const char *new_mode = mode_name(&screen, &brain);
         if (new_mode != mode) {

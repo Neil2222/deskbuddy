@@ -132,3 +132,69 @@ void test_link_time_zone_switches_at_the_announced_moment(void)
     const link_tz_t fixed = {.offset_min = -300};
     CHECK_EQ(link_tz_offset_min(&fixed, 1800000000), -300);
 }
+
+// msg.show: percent-encoded UTF-8 text, an id against repeats, and a style for later presentations.
+void test_link_parses_messages(void)
+{
+    link_command_t c;
+    CHECK_EQ(parse(frame(">DB1 5 msg.show id=7 style=marquee text=Hello%2C%20world%21"), &c), LINK_OK);
+    CHECK(c.cmd == LINK_CMD_MSG_SHOW && c.u.msg.id == 7 && c.u.msg.style == LINK_STYLE_MARQUEE);
+    CHECK(strcmp(c.u.msg.text, "Hello, world!") == 0);
+    CHECK_EQ(parse(frame(">DB1 6 msg.show text=caf%C3%a9%20%E2%99%A5 id=4294967295"), &c), LINK_OK); // default style
+    CHECK(c.u.msg.style == LINK_STYLE_MARQUEE && c.u.msg.id == 4294967295u);
+    CHECK(strcmp(c.u.msg.text, "caf\xC3\xA9 \xE2\x99\xA5") == 0);
+    CHECK_EQ(parse(frame(">DB1 6 msg.show id=1 text=a.b_c:d+e-f"), &c), LINK_OK); // these need no encoding
+    CHECK(strcmp(c.u.msg.text, "a.b_c:d+e-f") == 0);
+
+    // The limits: 100 characters, and 200 bytes of UTF-8 (100 two-byte letters fit exactly).
+    static char line[LINK_LINE_MAX];
+    char text[3 * LINK_TEXT_MAX_BYTES + 1] = "";
+    for (int i = 0; i < LINK_TEXT_MAX_CHARS; i++) {
+        strcat(text, "%C3%A9");
+    }
+    snprintf(line, sizeof(line), ">DB1 8 msg.show id=2 text=%s", text);
+    CHECK_EQ(parse(frame(line), &c), LINK_OK);
+    CHECK_EQ(strlen(c.u.msg.text), LINK_TEXT_MAX_BYTES);
+    snprintf(line, sizeof(line), ">DB1 8 msg.show id=2 text=%sx", text); // one character too many
+    CHECK_EQ(parse(frame(line), &c), LINK_ERR_ARGS);
+    CHECK_EQ(c.seq, 8);
+    memset(text, 'x', LINK_TEXT_MAX_CHARS + 1);
+    text[LINK_TEXT_MAX_CHARS + 1] = '\0';
+    snprintf(line, sizeof(line), ">DB1 8 msg.show id=2 text=%s", text);
+    CHECK_EQ(parse(frame(line), &c), LINK_ERR_ARGS);
+    text[LINK_TEXT_MAX_CHARS] = '\0';
+    snprintf(line, sizeof(line), ">DB1 8 msg.show id=2 text=%s", text);
+    CHECK_EQ(parse(frame(line), &c), LINK_OK);
+    text[0] = '\0';
+    for (int i = 0; i < 49; i++) { // 49 four-byte emoji (196 bytes) and 4 letters: 53 characters, 200 bytes
+        strcat(text, "%F0%9F%98%80");
+    }
+    snprintf(line, sizeof(line), ">DB1 8 msg.show id=2 text=%sxxxx", text);
+    CHECK_EQ(parse(frame(line), &c), LINK_OK);
+    snprintf(line, sizeof(line), ">DB1 8 msg.show id=2 text=%sxxxxx", text); // 201 bytes
+    CHECK_EQ(parse(frame(line), &c), LINK_ERR_ARGS);
+}
+
+void test_link_rejects_bad_messages(void)
+{
+    link_command_t c;
+    CHECK_EQ(parse(frame(">DB1 9 msg.show text=hi"), &c), LINK_ERR_ARGS); // no id
+    CHECK_EQ(c.seq, 9);
+    CHECK_EQ(parse(frame(">DB1 9 msg.show id=0 text=hi"), &c), LINK_ERR_ARGS);
+    CHECK_EQ(parse(frame(">DB1 9 msg.show id=%31 text=hi"), &c), LINK_ERR_ARGS); // only the text is encoded
+    CHECK_EQ(parse(frame(">DB1 9 msg.show id=1"), &c), LINK_ERR_ARGS);         // no text
+    CHECK_EQ(parse(frame(">DB1 9 msg.show id=1 text="), &c), LINK_ERR_ARGS);   // empty text
+    CHECK_EQ(parse(frame(">DB1 9 msg.show id=1 text=hi,there"), &c), LINK_ERR_ARGS);  // ',' must be encoded
+    CHECK_EQ(parse(frame(">DB1 9 msg.show id=1 text=%G1"), &c), LINK_ERR_ARGS);       // not hex
+    CHECK_EQ(parse(frame(">DB1 9 msg.show id=1 text=ab%2"), &c), LINK_ERR_ARGS);      // cut short
+    CHECK_EQ(parse(frame(">DB1 9 msg.show id=1 text=a%00b"), &c), LINK_ERR_ARGS);     // NUL
+    CHECK_EQ(parse(frame(">DB1 9 msg.show id=1 text=%C3"), &c), LINK_ERR_ARGS);       // truncated UTF-8
+    CHECK_EQ(parse(frame(">DB1 9 msg.show id=1 text=%C0%AF"), &c), LINK_ERR_ARGS);    // overlong
+    CHECK_EQ(parse(frame(">DB1 9 msg.show id=1 text=%ED%A0%80"), &c), LINK_ERR_ARGS); // surrogate
+    CHECK_EQ(parse(frame(">DB1 9 msg.show id=1 text=%F4%90%80%80"), &c), LINK_ERR_ARGS); // above U+10FFFF
+    CHECK_EQ(parse(frame(">DB1 9 msg.show id=1 style= text=hi"), &c), LINK_ERR_ARGS);
+    // A style this firmware does not have yet: well-formed, so a clear "unsupported" for this command.
+    CHECK_EQ(parse(frame(">DB1 10 msg.show id=1 style=speech text=hi"), &c), LINK_ERR_UNSUPPORTED);
+    CHECK_EQ(c.seq, 10);
+    CHECK(strcmp(link_error_code(LINK_ERR_UNSUPPORTED), "unsupported") == 0);
+}

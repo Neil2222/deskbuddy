@@ -69,7 +69,13 @@ extern int g_test_failed;
     X(link_rejects_noise_and_corruption)             \
     X(link_rejects_unknown_commands_and_bad_arguments) \
     X(link_formats_replies_the_companion_can_check)  \
-    X(link_time_zone_switches_at_the_announced_moment)
+    X(link_time_zone_switches_at_the_announced_moment) \
+    X(link_parses_messages)                          \
+    X(link_rejects_bad_messages)                     \
+    X(marquee_text_policy)                           \
+    X(marquee_stays_long_enough_then_hides)          \
+    X(marquee_shows_the_text_scrolling_left)         \
+    X(marquee_redraws_only_the_sign)
 
 #define X(name) void test_##name(void);
 TEST_LIST

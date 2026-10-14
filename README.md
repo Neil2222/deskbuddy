@@ -2,7 +2,7 @@
 
 A standalone desk gadget with animated pixel-art characters, built on the Waveshare ESP32-S3-Touch-LCD-7B.
 
-Status: board bring-up done; rendering engine and a placeholder robot character running on the device, including its first personality animation (drinking a can of Monster Energy through a charging cable) and an Office Mode desk clock. A Windows companion app connects over USB: it sets the clock and triggers actions. No workplace integrations or persistent state yet.
+Status: board bring-up done; rendering engine and a placeholder robot character running on the device, including its first personality animation (drinking a can of Monster Energy through a charging cable) and an Office Mode desk clock. A Windows companion app connects over USB: it sets the clock, triggers actions and sends messages that scroll across a retro LED sign. No workplace integrations or persistent state yet.
 See [HANDOVER.md](HANDOVER.md) for project state and next steps. Measurements: [docs/bringup-results.md](docs/bringup-results.md) and [docs/rendering-results.md](docs/rendering-results.md).
 
 ## Layout
@@ -13,6 +13,7 @@ firmware/components/gfx/      Hardware-independent renderer: dirty rectangles, s
 firmware/components/buddy/    Placeholder character: behavior, Monster sequence, ASCII programmer art, pose-to-sprite view
 firmware/components/layout/   Screen split: character stage + reserved control-panel area
 firmware/components/link/     Serial protocol to the Windows companion: frame parsing and formatting (docs/protocol.md)
+firmware/components/marquee/  LED marquee for messages: 5x7 dot-matrix font, text policy, scrolling sign sprite
 firmware/components/office/   Office Mode: antialiased stroke font, desk-clock face, moon button, dark scene switch
 firmware/components/display/  Application-owned frame buffers, scanout fill, buffer-swap proof
 firmware/components/board/    Board support: I2C, IO expander, RGB panel, GT911 touch, backlight
@@ -83,11 +84,13 @@ tools\idf.ps1 -C firmware\bringup -p COM7 flash       # bring-up regression firm
 ```powershell
 tools\setup-dotnet.ps1    # once: .NET 10 SDK -> %LOCALAPPDATA%\Microsoft\dotnet (no administrator rights)
 tools\companion.ps1       # build and start
+tools\companion.ps1 -Test # unit tests (message encoding, frames)
 ```
 
 - **Connection:** finds DeskBuddy's UART port (CH343, USB `1A86:55D3`) by itself and reconnects after unplugging. Opening the port does not reset the board. *Disconnect* keeps it disconnected until *Connect*.
 - **Clock:** synced on connect, when the board restarts, every hour, and when Windows' time or time zone changes or the laptop wakes up. Daylight-saving switches happen on time even while the companion is not running.
 - **Actions:** Surprise, Monster, Office Mode, Buddy Mode, Sync clock. Mode and connection state are shown, plus a log of commands, replies and the board's own log output (so a separate serial monitor is not needed).
+- **Messages:** type up to 100 characters and press Enter or *Send to Buddy*: he jumps and the text scrolls across an amber LED sign above him (below the clock in Office Mode, which stays on), one LED at a time, about 2.7 characters a second. Short messages repeat so they stay up at least 8 s; a full-length one takes about 40 s. A message sent during a Monster sequence or while another one is up waits its turn (one at a time). Accents show without accents, emoji as a box. The last 10 messages are listed for reuse.
 - **Flashing while it runs:** `tools\idf.ps1 ... flash` / `monitor` signals the companion to let go of the port and reconnects it afterwards. Other serial tools (for example PuTTY) need *Disconnect* first: Windows lets only one program open a COM port.
 - **Without the companion** DeskBuddy works as before; only the clock stays *CLOCK NOT SET* after a power-up until the companion connects.
 - Protocol: [docs/protocol.md](docs/protocol.md).
@@ -95,8 +98,8 @@ tools\companion.ps1       # build and start
 ## Host tests (no hardware)
 
 ```powershell
-tools\host-test.ps1              # gfx, buddy, office, layout and link (protocol) unit tests (MSVC, AddressSanitizer)
-tools\host-test.ps1 -Snapshot    # also renders poses, Monster key frames, a Monster contact sheet and the Office Mode clock to firmware\tests\host\build\snapshots\*.png
+tools\host-test.ps1              # gfx, buddy, office, layout, link (protocol) and marquee unit tests (MSVC, AddressSanitizer)
+tools\host-test.ps1 -Snapshot    # also renders poses, Monster key frames, a Monster contact sheet, the LED marquee and the Office Mode clock to firmware\tests\host\build\snapshots\*.png
 ```
 
 - **Requirements:** Visual Studio Build Tools with the C++ workload. On Linux/macOS, plain `cmake` + `ctest` in `firmware/tests/host` works too.

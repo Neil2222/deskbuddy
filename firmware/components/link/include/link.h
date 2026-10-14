@@ -19,17 +19,26 @@ extern "C" {
 #endif
 
 #define LINK_PROTO 1
-#define LINK_LINE_MAX 256 // bytes per line, including the newline
+#define LINK_LINE_MAX 768  // longest received line, including the newline (a message with percent-encoded text)
+#define LINK_REPLY_MAX 160 // longest line the device sends
+#define LINK_TEXT_MAX_CHARS 100 // msg.show text: Unicode code points...
+#define LINK_TEXT_MAX_BYTES 200 // ...and UTF-8 bytes
 
 typedef enum {
-    LINK_CMD_HELLO = 1, // -> ok proto= fw= caps=
+    LINK_CMD_HELLO = 1, // -> ok proto= fw= caps= styles=
     LINK_CMD_PING,      // -> ok
-    LINK_CMD_STATUS,    // -> ok mode= time= uptime=
+    LINK_CMD_STATUS,    // -> ok mode= time= msg= uptime=
     LINK_CMD_POKE,      // the surprise reaction, as if the robot had been tapped
     LINK_CMD_MONSTER,   // the Monster Energy sequence
     LINK_CMD_MODE_SET,  // mode=office|normal
     LINK_CMD_TIME_SET,  // utc= [ms=] off= [next= next_off=]
+    LINK_CMD_MSG_SHOW,  // id= [style=] text=
 } link_cmd_t;
+
+// How a message is presented. Only the marquee exists so far; the wire names are listed in link.c.
+typedef enum {
+    LINK_STYLE_MARQUEE = 1,
+} link_style_t;
 
 // Local time = UTC + offset; the offset changes at a known moment (the next daylight-saving switch), so the clock
 // stays right across it even without the companion.
@@ -49,6 +58,11 @@ typedef struct {
             uint16_t ms;
             link_tz_t tz;
         } time; // TIME_SET
+        struct {
+            uint32_t id; // chosen by the companion; a repeated id is the same message (not shown twice)
+            link_style_t style;
+            char text[LINK_TEXT_MAX_BYTES + 1]; // valid UTF-8, NUL-terminated, 1..LINK_TEXT_MAX_CHARS code points
+        } msg; // MSG_SHOW
     } u;
 } link_command_t;
 
@@ -60,10 +74,12 @@ typedef enum {
     LINK_ERR_SYNTAX,
     LINK_ERR_UNKNOWN_CMD,
     LINK_ERR_ARGS,
+    LINK_ERR_UNSUPPORTED, // well-formed, but asks for something this firmware does not have (e.g. a message style)
 } link_result_t;
 
 // Parses one received line (without its newline; a trailing '\r' is ignored). On LINK_OK *out holds the command.
-// On LINK_ERR_UNKNOWN_CMD and LINK_ERR_ARGS out->seq holds the sequence number to reply to; otherwise it is 0.
+// On LINK_ERR_UNKNOWN_CMD, LINK_ERR_ARGS and LINK_ERR_UNSUPPORTED out->seq holds the sequence number to reply to;
+// otherwise it is 0.
 link_result_t link_parse_command(const char *line, size_t len, link_command_t *out);
 
 // The error code sent in "err <code>" replies.

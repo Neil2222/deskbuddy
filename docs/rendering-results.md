@@ -108,6 +108,19 @@ The switch between DeskBuddy and the clock repaints the whole screen: the scene 
 
   An ESPHome user on the same board reports dimming that works a couple of times after a reboot and then stops. The expander's registers do not read back reliably (values lag or come from another register), so its state cannot be checked from firmware. Decision: the backlight is set once at boot (PWM register, then the enable bit, as in the original bring-up) and never changed afterwards; Office Mode is not dimmed.
 
+### Message marquee (2026-10-14)
+The LED sign (`components/marquee`) is one sprite of 636x84 px; each update redraws its rectangle (about 59 k px after alignment, plus the robot's own animation).
+
+| Update rate | Frames presented while scrolling | Longest bounce fill | Scanout resyncs | Seen by the user |
+|---|---|---|---|---|
+| 25 per second (one LED column per 40 ms) | 27–29/s | 600–700 µs | 0 | frequent horizontal artifacts across the blue background: not acceptable |
+| 12.5 per second (two columns per 80 ms, same scroll speed) | 13.6–14.9/s | 613–679 µs | 0 | no artifacts at all, but the two-column jumps look choppy |
+| 16.7 per second (one column per 60 ms: slower scroll, about 2.7 characters a second) | 19.6–20.1/s | 608–676 µs | 0 | no artifacts; smooth enough, accepted. Small irregular hitches remain: a few smooth steps, then a short pause |
+
+**Remaining hitch (not fixed, accepted):** the sign changes every 60 ms, but a frame only appears at the next scanout frame start (every 29.7 ms), and the render-plus-swap time varies with the robot's own frames in between. So some steps show after two scanout frames (59 ms) and some after three (89 ms) [INFERENCE]. If it ever matters: step the sign on every second scanout frame instead of on a timer.
+
+The fills above the 449 µs budget are the known cause of short stale-line artifacts (see "PSRAM bandwidth decides scanout stability"); a lower update rate makes them rarer, the worst case per frame is unchanged. The artifacts disappeared completely at 12.5 updates a second rather than halving, so there seems to be a threshold between 12.5 and 25 [INFERENCE].
+
 ## Touch
 
 Measured over 15 taps on the robot by the user, during a 10-minute run that had 0 resyncs and 0 slow swaps:

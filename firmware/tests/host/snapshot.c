@@ -4,14 +4,15 @@
 //   buddy_snapshot [output_dir]
 //
 // Writes buddy_<pose>.png, monster_<ms>.png at the key moments of the Monster sequence, monster_sheet.png (the
-// stage every 200 ms of the sequence, at half size, on one sheet), and the Office Mode clock: office_clock.png and
-// office_not_set.png.
+// stage every 200 ms of the sequence, at half size, on one sheet), the message marquee (marquee_intro.png,
+// marquee.png, office_marquee.png) and the Office Mode clock: office_clock.png and office_not_set.png.
 #include <stdio.h>
 #include <string.h>
 
 #include "buddy_monster.h"
 #include "buddy_view.h"
 #include "layout.h"
+#include "marquee.h"
 #include "office_clock.h"
 #include "png.h"
 
@@ -47,6 +48,7 @@ int main(int argc, char **argv)
     static office_button_t moon;
     static office_clock_t clock;
     static uint8_t clock_mem[OFFICE_CLOCK_MEMORY];
+    static marquee_t marquee;
     layout_t layout = layout_compute(W, H, STAGE_PERCENT, false, ALIGN);
     const int moon_top = layout.panel.h * 78 / 100; // as the firmware places it
     const gfx_rect_t moon_area = {layout.panel.x, layout.panel.y + moon_top, layout.panel.w,
@@ -55,7 +57,8 @@ int main(int argc, char **argv)
         !buddy_view_init(&view, &scene, layout.stage, 10, 0) ||
         !buddy_button_init(&button, &scene, layout.panel, view.scale, 10) ||
         !office_button_init(&moon, &scene, moon_area, 5, 10) ||
-        !office_clock_init(&clock, &scene, layout.screen, clock_mem, sizeof(clock_mem), 20)) {
+        !office_clock_init(&clock, &scene, layout.screen, clock_mem, sizeof(clock_mem), 20) ||
+        !marquee_init(&marquee, &scene, 30)) {
         fprintf(stderr, "scene setup failed\n");
         return 1;
     }
@@ -122,6 +125,23 @@ int main(int argc, char **argv)
     if (!write(dir, "monster_sheet", &sheet)) {
         return 1;
     }
+    // The message marquee over the stage, as the firmware places it: its scanner sweep, then mid-scroll over the
+    // surprised robot (a message makes him jump).
+    const int mx = layout.stage.x + (layout.stage.w - MARQUEE_W) / 2, my = 22;
+    buddy_pose_t surprised = shots[2].pose;
+    buddy_view_apply(&view, &surprised, 0);
+    buddy_button_apply(&button, true, true);
+    marquee_start(&marquee, "Koffie om 15:00? Taart: \xE2\x82\xAC" "5,- \xE2\x99\xA5 caf\xC3\xA9 \xF0\x9F\x98\x80!", 0);
+    marquee_apply(&marquee, mx, my, MARQUEE_INTRO_MS / 2);
+    gfx_scene_render(&scene, &all, &dst);
+    if (!write(dir, "marquee_intro", &dst)) {
+        return 1;
+    }
+    marquee_apply(&marquee, mx, my, MARQUEE_INTRO_MS + 150 * MARQUEE_COL_MS);
+    gfx_scene_render(&scene, &all, &dst);
+    if (!write(dir, "marquee", &dst)) {
+        return 1;
+    }
 
     // Office Mode, as the firmware switches to it.
     buddy_view_hide(&view);
@@ -132,6 +152,12 @@ int main(int argc, char **argv)
     scene.background_ctx = NULL;
     const struct tm tm = {.tm_year = 126, .tm_mon = 9, .tm_mday = 14, .tm_wday = 3, .tm_hour = 9, .tm_min = 41};
     office_clock_apply(&clock, &tm, 100);
+    marquee_apply(&marquee, (W - MARQUEE_W) / 2, H - MARQUEE_H - 36, MARQUEE_INTRO_MS + 120 * MARQUEE_COL_MS);
+    gfx_scene_render(&scene, &all, &dst);
+    if (!write(dir, "office_marquee", &dst)) {
+        return 1;
+    }
+    marquee_apply(&marquee, 0, 0, marquee_duration_ms(&marquee)); // over: hidden
     gfx_scene_render(&scene, &all, &dst);
     if (!write(dir, "office_clock", &dst)) {
         return 1;

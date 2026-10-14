@@ -101,6 +101,59 @@ public sealed class CompanionService : IDisposable
         }
     }
 
+    /// <summary>
+    /// Sends a message for DeskBuddy's LED marquee. True when it was taken (showing now, or waiting for the sign).
+    /// Never retried: a lost reply cannot make the message show twice (DeskBuddy also ignores a repeated id).
+    /// </summary>
+    public async Task<bool> SendMessageAsync(string text)
+    {
+        var cleaned = MessageText.Clean(text);
+        if (MessageText.Problem(cleaned) is { } problem)
+        {
+            Write(LogKind.Warning, $"Message not sent: {problem}");
+            return false;
+        }
+        if (_link is not { } link || !IsConnected)
+        {
+            return false;
+        }
+        var id = NextMessageId();
+        try
+        {
+            var reply = await link.RequestAsync(
+                $"msg.show id={id} style=marquee text={MessageText.Encode(cleaned)}", ReplyTimeout);
+            if (reply.IsOk)
+            {
+                Write(LogKind.Info, reply.Arg("queued") == "1"
+                    ? $"Message {id} waits for the sign (Monster time, or another message is up)"
+                    : $"Message {id} sent: \"{cleaned}\"");
+                return true;
+            }
+            Write(LogKind.Warning, $"Message refused ({reply.Name}{Describe(reply)})");
+        }
+        catch (TimeoutException)
+        {
+            Write(LogKind.Warning, "Message: no answer from DeskBuddy (not resent)");
+        }
+        catch (Exception e) when (e is IOException or OperationCanceledException)
+        {
+        }
+        return false;
+    }
+
+    // Message ids start at a random point each run, so DeskBuddy does not take a new message for a repeat of one
+    // from an earlier run.
+    private uint _messageId = (uint)Random.Shared.Next(1, int.MaxValue);
+
+    private uint NextMessageId()
+    {
+        if (++_messageId == 0)
+        {
+            _messageId = 1;
+        }
+        return _messageId;
+    }
+
     public Task SyncClockAsync() => SyncClockAsync("manual");
 
     private void Tick()
@@ -247,6 +300,11 @@ public sealed class CompanionService : IDisposable
         case "mode":
             Mode = frame.Arg("mode") ?? Mode;
             Changed?.Invoke();
+            break;
+        case "msg":
+            Write(LogKind.Info, frame.Arg("state") == "done"
+                ? $"Message {frame.Arg("id")} finished on the marquee"
+                : $"Message {frame.Arg("id")} is on the marquee");
             break;
         case "boot":
             Write(LogKind.Info, "DeskBuddy restarted");

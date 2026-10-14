@@ -17,13 +17,14 @@ static const char *TAG = "link";
 #define TASK_PRIO 4 // below rendering: commands are rare and never urgent
 #define TASK_CORE 0
 #define QUEUE_WAIT_MS 100
-#define CAPS "poke,monster,mode,time,status"
+#define CAPS "poke,monster,mode,time,status,msg"
+#define STYLES "marquee" // msg.show styles this firmware draws
 
 static QueueHandle_t s_events;
 
 void serial_link_send(uint32_t seq, const char *body)
 {
-    char line[LINK_LINE_MAX];
+    char line[LINK_REPLY_MAX];
     const size_t n = link_format(line, sizeof(line), seq, body);
     if (n == 0) {
         ESP_LOGE(TAG, "frame too long: %s", body);
@@ -55,8 +56,9 @@ static void handle_line(const char *line, size_t len)
         return;
     }
     if (cmd.cmd == LINK_CMD_HELLO) {
-        char body[96];
-        snprintf(body, sizeof(body), "ok proto=%d fw=%s caps=" CAPS, LINK_PROTO, esp_app_get_description()->version);
+        char body[128];
+        snprintf(body, sizeof(body), "ok proto=%d fw=%s caps=" CAPS " styles=" STYLES, LINK_PROTO,
+                 esp_app_get_description()->version);
         serial_link_send(cmd.seq, body);
         return;
     }

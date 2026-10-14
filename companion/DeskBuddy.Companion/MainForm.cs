@@ -1,4 +1,5 @@
 using DeskBuddy.Companion.Device;
+using DeskBuddy.Companion.Protocol;
 
 namespace DeskBuddy.Companion;
 
@@ -6,6 +7,7 @@ namespace DeskBuddy.Companion;
 public sealed class MainForm : Form
 {
     private const int MaxLogLines = 3000;
+    private const int MaxHistory = 10;
 
     private readonly CompanionService _service; // created in the constructor: needs the form's UI context
     private readonly ComboBox _ports = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 280 };
@@ -22,16 +24,25 @@ public sealed class MainForm : Form
         Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, WordWrap = false, Dock = DockStyle.Fill,
         Font = new Font(FontFamily.GenericMonospace, 9f), BackColor = SystemColors.Window,
     };
+    private readonly TextBox _message = new() { Width = 520, MaxLength = 400 };
+    private readonly Label _counter = new() { AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(6, 6, 6, 3) };
+    private readonly Button _send = new()
+    {
+        Text = "Send to Buddy", AutoSize = true, MinimumSize = new Size(140, 34),
+        Font = new Font(SystemFonts.MessageBoxFont!, FontStyle.Bold),
+    };
+    private readonly ListBox _history = new() { Width = 700, Height = 92, IntegralHeight = false };
 
     public MainForm()
     {
         _service = new CompanionService();
         Text = "DeskBuddy Companion";
-        ClientSize = new Size(900, 600);
+        ClientSize = new Size(900, 720);
         MinimumSize = new Size(640, 400);
         Font = SystemFonts.MessageBoxFont!;
 
         var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, Padding = new Padding(8) };
+        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -57,6 +68,14 @@ public sealed class MainForm : Form
         AddAction(actions, "Sync clock", "time", _service.SyncClockAsync);
         layout.Controls.Add(actions);
 
+        var message = new GroupBox { Text = "Message on Buddy's LED sign", AutoSize = true, Dock = DockStyle.Top, Padding = new Padding(8) };
+        var messageRows = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false };
+        messageRows.Controls.Add(Row(_message, _counter, _send));
+        messageRows.Controls.Add(new Label { Text = "Recent (double-click to reuse):", AutoSize = true });
+        messageRows.Controls.Add(_history);
+        message.Controls.Add(messageRows);
+        layout.Controls.Add(message);
+
         var clear = new Button { Text = "Clear log", AutoSize = true };
         layout.Controls.Add(Row(_showDevice, clear));
         layout.Controls.Add(_log);
@@ -70,6 +89,28 @@ public sealed class MainForm : Form
         };
         _disconnect.Click += (_, _) => _service.Disconnect();
         clear.Click += (_, _) => _log.Clear();
+        _message.TextChanged += (_, _) => UpdateState();
+        _message.KeyDown += (_, e) =>
+        {
+            if (e.KeyCode == Keys.Enter)
+            {
+                e.SuppressKeyPress = true; // no beep
+                if (_send.Enabled)
+                {
+                    _ = SendMessageAsync();
+                }
+            }
+        };
+        _send.Click += (_, _) => _ = SendMessageAsync();
+        _history.DoubleClick += (_, _) =>
+        {
+            if (_history.SelectedItem is string text)
+            {
+                _message.Text = text;
+                _message.Focus();
+                _message.SelectAll();
+            }
+        };
         _service.Changed += UpdateState;
         _service.Log += AppendLog;
 
@@ -148,6 +189,40 @@ public sealed class MainForm : Form
         }
         _connect.Enabled = !_service.IsConnected;
         _disconnect.Enabled = _service.IsConnected || _service.AutoConnect;
+
+        var text = MessageText.Clean(_message.Text);
+        var problem = MessageText.Problem(text);
+        _counter.Text = $"{MessageText.CountChars(text)} / {MessageText.MaxChars}";
+        _counter.ForeColor = problem is not null && text.Length > 0 ? Color.Firebrick : SystemColors.GrayText;
+        _send.Enabled = _service.IsConnected && _service.Caps.Contains("msg") && problem is null && !_sending;
+    }
+
+    private bool _sending;
+
+    private async Task SendMessageAsync()
+    {
+        var text = MessageText.Clean(_message.Text);
+        _sending = true;
+        UpdateState();
+        try
+        {
+            if (await _service.SendMessageAsync(text))
+            {
+                _history.Items.Remove(text);
+                _history.Items.Insert(0, text);
+                while (_history.Items.Count > MaxHistory)
+                {
+                    _history.Items.RemoveAt(_history.Items.Count - 1);
+                }
+                _message.Clear();
+            }
+        }
+        finally
+        {
+            _sending = false;
+            UpdateState();
+            _message.Focus();
+        }
     }
 
     private void AppendLog(LogKind kind, string text)
