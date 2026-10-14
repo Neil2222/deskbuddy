@@ -69,7 +69,7 @@ public sealed class MainForm : Form
     private readonly CheckBox _showDevice = new() { Text = "Device log", Checked = true, AutoSize = true, FlatStyle = FlatStyle.Flat };
     private readonly TextBox _log = new()
     {
-        Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, WordWrap = false, BorderStyle = BorderStyle.None,
+        Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Both, WordWrap = false, BorderStyle = BorderStyle.None,
     };
 
     public MainForm()
