@@ -51,6 +51,18 @@ extern int g_test_failed;
     X(buddy_idle_blinks_and_breathes)                \
     X(buddy_survives_clock_wraparound)               \
     X(buddy_view_fits_stage_and_hits)                \
+    X(monster_phases_run_in_order_then_idle)         \
+    X(monster_ignores_events_until_finished)         \
+    X(monster_tells_the_story)                       \
+    X(monster_redraws_match_full_redraw)             \
+    X(office_switch_finishes_a_transition_before_the_next) \
+    X(office_time_validity)                          \
+    X(office_font_covers_every_text)                 \
+    X(office_clock_shows_time_date_and_fallback)     \
+    X(office_clock_redraws_match_full_redraw)        \
+    X(office_pauses_character_mid_monster)           \
+    X(office_moon_button)                            \
+    X(office_switch_redraws_fully_only_while_switching) \
     X(layout_splits_screen)
 
 #define X(name) void test_##name(void);

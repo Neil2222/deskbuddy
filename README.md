@@ -2,7 +2,7 @@
 
 A standalone desk gadget with animated pixel-art characters, built on the Waveshare ESP32-S3-Touch-LCD-7B.
 
-Status: board bring-up done; rendering engine and a placeholder robot character running on the device. No Windows bridge, workplace integrations or persistent state yet.
+Status: board bring-up done; rendering engine and a placeholder robot character running on the device, including its first personality animation (drinking a can of Monster Energy through a charging cable) and an Office Mode desk clock. No Windows bridge, workplace integrations, wall-clock time source or persistent state yet.
 See [HANDOVER.md](HANDOVER.md) for project state and next steps. Measurements: [docs/bringup-results.md](docs/bringup-results.md) and [docs/rendering-results.md](docs/rendering-results.md).
 
 ## Layout
@@ -10,8 +10,9 @@ See [HANDOVER.md](HANDOVER.md) for project state and next steps. Measurements: [
 ```
 firmware/deskbuddy/           Application: render loop, touch task, layout options (menuconfig "DeskBuddy")
 firmware/components/gfx/      Hardware-independent renderer: dirty rectangles, sprites, compositor, double-buffer repair
-firmware/components/buddy/    Placeholder character: behavior, ASCII programmer art, pose-to-sprite view
+firmware/components/buddy/    Placeholder character: behavior, Monster sequence, ASCII programmer art, pose-to-sprite view
 firmware/components/layout/   Screen split: character stage + reserved control-panel area
+firmware/components/office/   Office Mode: antialiased stroke font, desk-clock face, moon button, dark scene switch
 firmware/components/display/  Application-owned frame buffers, scanout fill, buffer-swap proof
 firmware/components/board/    Board support: I2C, IO expander, RGB panel, GT911 touch, backlight
 firmware/bringup/             Bring-up firmware: test pattern, touch dot, performance benchmarks (hardware regression)
@@ -51,11 +52,16 @@ tools\idf.ps1 -C firmware\deskbuddy flash monitor     # Ctrl+] exits the monitor
 tools\idf.ps1 -C firmware\bringup -p COM7 flash       # bring-up regression firmware, explicit port
 ```
 
+- **Touch:** tap the robot for a surprise and happy hops. Tap the Monster can in the control panel and he drinks it through a cable plugged into his head (about 7 s; taps during the show are ignored).
+- **Office Mode:** tap the moon at the bottom of the control panel. The screen shows a desk clock (24-hour time and date), and the character is paused; a running Monster sequence is dropped. Tap anywhere to bring DeskBuddy back. The backlight keeps its brightness: the board's backlight controller did not apply brightness changes reliably.
+  - **If the screen stays dark or very dim** (seen after plugging in and after flashing): unplug the board for about 10 s. If it is dark right after plugging in, pressing RESET also helps.
+  - **The clock has no time source yet.** The board has no RTC (only the IO expander and touch answer on I2C) and nothing sets the ESP32 clock, which restarts at 1970 on every power-up. Until something sets it, the clock shows `--:--` and *CLOCK NOT SET* rather than a guessed time. Options are listed in [HANDOVER.md](HANDOVER.md#known-issues-and-caveats).
 - **Options** (`tools\idf.ps1 -C firmware\deskbuddy menuconfig` → *DeskBuddy*):
   - stage width (default 65 %) and panel side;
   - backlight brightness;
+  - time zone for the clock (POSIX TZ string; default Central European Time with daylight saving);
   - performance-log interval;
-  - automatic demo pokes;
+  - automatic demo pokes, Monster animations and Office Mode toggles (hands-off measurements);
   - `GFX_VERIFY` debug mode.
 - **Debug variants without touching the committed config:** use a separate build directory and an extra defaults file, e.g.
   `tools\idf.ps1 -C firmware\deskbuddy -B $env:TEMP\db-verify -D SDKCONFIG=$env:TEMP\db-verify\sdkconfig -D "SDKCONFIG_DEFAULTS=sdkconfig.defaults;$env:TEMP\verify.defaults" flash`.
@@ -72,8 +78,8 @@ tools\idf.ps1 -C firmware\bringup -p COM7 flash       # bring-up regression firm
 ## Host tests (no hardware)
 
 ```powershell
-tools\host-test.ps1              # gfx, buddy and layout unit tests (MSVC, AddressSanitizer)
-tools\host-test.ps1 -Snapshot    # also renders the robot's poses to firmware\tests\host\build\snapshots\*.png
+tools\host-test.ps1              # gfx, buddy, office and layout unit tests (MSVC, AddressSanitizer)
+tools\host-test.ps1 -Snapshot    # also renders poses, Monster key frames, a Monster contact sheet and the Office Mode clock to firmware\tests\host\build\snapshots\*.png
 ```
 
 - **Requirements:** Visual Studio Build Tools with the C++ workload. On Linux/macOS, plain `cmake` + `ctest` in `firmware/tests/host` works too.

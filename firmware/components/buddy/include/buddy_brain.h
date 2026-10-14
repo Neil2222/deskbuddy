@@ -22,6 +22,13 @@ extern "C" {
 #define BUDDY_HAPPY_HOPS 3
 #define BUDDY_MOTION_TICK_MS 20   // update rate while hopping
 
+// Things that can happen to the character, from any source: the touchscreen, a script, and later the Windows
+// companion over USB. The numeric values are part of that external interface: never renumber or reuse a value.
+typedef enum {
+    BUDDY_EVENT_POKE = 1,          // touched: surprise, then happy hops
+    BUDDY_EVENT_DRINK_MONSTER = 2, // drinks a can of Monster Energy through a charging cable
+} buddy_event_t;
+
 typedef struct {
     buddy_state_t state;
     uint32_t state_start;
@@ -31,8 +38,13 @@ typedef struct {
 
 void buddy_brain_init(buddy_brain_t *b, uint32_t now_ms, uint32_t seed);
 
-// The character was touched.
-void buddy_brain_poke(buddy_brain_t *b, uint32_t now_ms);
+// Delivers an event. Returns true when it started a reaction. Pokes restart the touch reaction; while the Monster
+// sequence runs every event is ignored, so it always plays to the end. Unknown events are ignored.
+bool buddy_brain_event(buddy_brain_t *b, buddy_event_t ev, uint32_t now_ms);
+
+// Drops whatever the character is doing, including a running Monster sequence, and idles from now_ms on (used
+// when he comes back from being paused, e.g. after Office Mode).
+void buddy_brain_rest(buddy_brain_t *b, uint32_t now_ms);
 
 // Advances to now_ms and writes the pose to show. Returns how many ms until the pose may change next (>= 1).
 uint32_t buddy_brain_tick(buddy_brain_t *b, uint32_t now_ms, buddy_pose_t *pose);

@@ -1,5 +1,6 @@
 #include "input.h"
 
+#include "board.h"
 #include "esp_attr.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -9,6 +10,7 @@ static const char *TAG = "input";
 
 #define QUEUE_LEN 16
 #define RELEASE_POLL_MS 100 // while touched, re-read even without an interrupt so a missed release cannot stick
+#define ERROR_RETRY_MS 10   // after a failed read, re-read until one succeeds (see touch_task)
 #define TASK_PRIO 10
 #define TASK_CORE 1
 
@@ -44,12 +46,25 @@ static void touch_task(void *arg)
 {
     (void)arg;
     bool down = false;
+    int failures = 0;
     input_event_t last = {0};
     for (;;) {
-        const bool irq = ulTaskNotifyTake(pdTRUE, down ? pdMS_TO_TICKS(RELEASE_POLL_MS) : portMAX_DELAY) > 0;
+        const TickType_t wait = failures ? pdMS_TO_TICKS(ERROR_RETRY_MS)
+                                : down   ? pdMS_TO_TICKS(RELEASE_POLL_MS)
+                                         : portMAX_DELAY;
+        const bool irq = ulTaskNotifyTake(pdTRUE, wait) > 0;
         const int64_t t = irq ? s_irq_us : esp_timer_get_time();
+        // A failed read must not end touch input. The GT911 raises its interrupt again only after a successful read
+        // has cleared its status register, so keep retrying. And the reads can keep failing until the IO expander
+        // on the same bus is addressed again (seen after backlight writes), so address it before each retry.
         if (esp_lcd_touch_read_data(s_touch) != ESP_OK) {
+            failures++;
+            board_i2c_recover();
             continue;
+        }
+        if (failures) {
+            ESP_LOGW(TAG, "touch read recovered after %d failed attempts", failures);
+            failures = 0;
         }
         esp_lcd_touch_point_data_t pt[1];
         uint8_t count = 0;

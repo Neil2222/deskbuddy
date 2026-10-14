@@ -2,24 +2,60 @@
 // compositor. A first step towards a desktop simulator: lets the art be reviewed without the device.
 //
 //   buddy_snapshot [output_dir]
+//
+// Writes buddy_<pose>.png, monster_<ms>.png at the key moments of the Monster sequence, monster_sheet.png (the
+// stage every 200 ms of the sequence, at half size, on one sheet), and the Office Mode clock: office_clock.png and
+// office_not_set.png.
 #include <stdio.h>
+#include <string.h>
 
+#include "buddy_monster.h"
 #include "buddy_view.h"
 #include "layout.h"
+#include "office_clock.h"
 #include "png.h"
 
 enum { W = 1024, H = 600, ALIGN = 32, STAGE_PERCENT = 65 }; // firmware defaults (Kconfig)
 
+// Sheet tiles: this part of the stage (screen pixels), halved.
+enum { CROP_X = 64, CROP_Y = 32, CROP_W = 576, CROP_H = 480, COLS = 6, SHEET_STEP_MS = 200 };
+enum { TILE_W = CROP_W / 2, TILE_H = CROP_H / 2 };
+enum { TILES = (BUDDY_MONSTER_MS + SHEET_STEP_MS - 1) / SHEET_STEP_MS, ROWS = (TILES + COLS - 1) / COLS };
+
+static gfx_color_t s_px[W * H];
+static gfx_color_t s_sheet[COLS * TILE_W * ROWS * TILE_H];
+
+static bool write(const char *dir, const char *name, const gfx_surface_t *s)
+{
+    char path[512];
+    snprintf(path, sizeof(path), "%s/%s.png", dir, name);
+    if (!png_write_rgb565(path, s)) {
+        fprintf(stderr, "cannot write %s\n", path);
+        return false;
+    }
+    printf("%s\n", path);
+    return true;
+}
+
 int main(int argc, char **argv)
 {
     const char *dir = argc > 1 ? argv[1] : ".";
-    static gfx_color_t px[W * H];
     static gfx_color_t strip[16 * 1024];
     static gfx_scene_t scene;
     static buddy_view_t view;
+    static buddy_button_t button;
+    static office_button_t moon;
+    static office_clock_t clock;
+    static uint8_t clock_mem[OFFICE_CLOCK_MEMORY];
     layout_t layout = layout_compute(W, H, STAGE_PERCENT, false, ALIGN);
+    const int moon_top = layout.panel.h * 78 / 100; // as the firmware places it
+    const gfx_rect_t moon_area = {layout.panel.x, layout.panel.y + moon_top, layout.panel.w,
+                                  layout.panel.h - moon_top};
     if (!gfx_scene_init(&scene, W, H, layout_background, &layout, strip, 16 * 1024, ALIGN) ||
-        !buddy_view_init(&view, &scene, layout.stage, 10, 0)) {
+        !buddy_view_init(&view, &scene, layout.stage, 10, 0) ||
+        !buddy_button_init(&button, &scene, layout.panel, view.scale, 10) ||
+        !office_button_init(&moon, &scene, moon_area, 5, 10) ||
+        !office_clock_init(&clock, &scene, layout.screen, clock_mem, sizeof(clock_mem), 20)) {
         fprintf(stderr, "scene setup failed\n");
         return 1;
     }
@@ -27,25 +63,80 @@ int main(int argc, char **argv)
         const char *name;
         buddy_pose_t pose;
     } shots[] = {
-        {"idle", {BUDDY_STATE_IDLE, BUDDY_EYES_OPEN, BUDDY_MOUTH_NEUTRAL, BUDDY_ANTENNA_CALM, 0}},
-        {"blink", {BUDDY_STATE_IDLE, BUDDY_EYES_CLOSED, BUDDY_MOUTH_NEUTRAL, BUDDY_ANTENNA_CALM, 1}},
-        {"surprised", {BUDDY_STATE_SURPRISED, BUDDY_EYES_WIDE, BUDDY_MOUTH_OPEN, BUDDY_ANTENNA_EXCITED, 3}},
-        {"happy", {BUDDY_STATE_HAPPY, BUDDY_EYES_HAPPY, BUDDY_MOUTH_SMILE, BUDDY_ANTENNA_EXCITED, 4}},
+#define POSE(st, e, m, a, l) {.state = (st), .eyes = (e), .mouth = (m), .antenna = (a), .lift = (l)}
+        {"idle", POSE(BUDDY_STATE_IDLE, BUDDY_EYES_OPEN, BUDDY_MOUTH_NEUTRAL, BUDDY_ANTENNA_CALM, 0)},
+        {"blink", POSE(BUDDY_STATE_IDLE, BUDDY_EYES_CLOSED, BUDDY_MOUTH_NEUTRAL, BUDDY_ANTENNA_CALM, 1)},
+        {"surprised", POSE(BUDDY_STATE_SURPRISED, BUDDY_EYES_WIDE, BUDDY_MOUTH_OPEN, BUDDY_ANTENNA_EXCITED, 3)},
+        {"happy", POSE(BUDDY_STATE_HAPPY, BUDDY_EYES_HAPPY, BUDDY_MOUTH_SMILE, BUDDY_ANTENNA_EXCITED, 4)},
+#undef POSE
     };
-    const gfx_surface_t dst = {px, W, H, W};
+    const gfx_surface_t dst = {s_px, W, H, W};
     gfx_dirty_t all;
     gfx_dirty_init(&all, W, H, ALIGN);
     gfx_dirty_add(&all, (gfx_rect_t){0, 0, W, H});
     for (unsigned i = 0; i < sizeof(shots) / sizeof(shots[0]); i++) {
         buddy_view_apply(&view, &shots[i].pose, 0);
         gfx_scene_render(&scene, &all, &dst);
-        char path[512];
-        snprintf(path, sizeof(path), "%s/buddy_%s.png", dir, shots[i].name);
-        if (!png_write_rgb565(path, &dst)) {
-            fprintf(stderr, "cannot write %s\n", path);
+        char name[64];
+        snprintf(name, sizeof(name), "buddy_%s", shots[i].name);
+        if (!write(dir, name, &dst)) {
             return 1;
         }
-        printf("%s\n", path);
     }
-    return 0;
+
+    // Key moments of the Monster sequence, full screen (the panel shows the button without its can meanwhile).
+    static const uint32_t k_moments[] = {150, 700, 1000, 1500, 1750, 2000, 2300, 2560, 2700, 3300, 3900, 4400,
+                                         4560, 4630, 5000, 5340, 5700, 6500, 6790};
+    buddy_button_apply(&button, true, false);
+    for (unsigned i = 0; i < sizeof(k_moments) / sizeof(k_moments[0]); i++) {
+        buddy_pose_t pose;
+        buddy_monster_pose(k_moments[i], &pose);
+        buddy_view_apply(&view, &pose, k_moments[i]);
+        gfx_scene_render(&scene, &all, &dst);
+        char name[64];
+        snprintf(name, sizeof(name), "monster_%04u", (unsigned)k_moments[i]);
+        if (!write(dir, name, &dst)) {
+            return 1;
+        }
+    }
+
+    // Contact sheet.
+    const int sheet_w = COLS * TILE_W;
+    memset(s_sheet, 0, sizeof(s_sheet));
+    for (int i = 0; i < TILES; i++) {
+        const uint32_t t = (uint32_t)i * SHEET_STEP_MS;
+        buddy_pose_t pose;
+        buddy_monster_pose(t, &pose);
+        buddy_view_apply(&view, &pose, t);
+        gfx_scene_render(&scene, &all, &dst);
+        const int ox = (i % COLS) * TILE_W, oy = (i / COLS) * TILE_H;
+        for (int y = 0; y < TILE_H; y++) {
+            for (int x = 0; x < TILE_W; x++) {
+                const bool border = x == 0 || y == 0;
+                s_sheet[(size_t)(oy + y) * sheet_w + ox + x] =
+                    border ? GFX_RGB(255, 255, 255) : s_px[(size_t)(CROP_Y + 2 * y) * W + CROP_X + 2 * x];
+            }
+        }
+    }
+    const gfx_surface_t sheet = {s_sheet, sheet_w, ROWS * TILE_H, sheet_w};
+    if (!write(dir, "monster_sheet", &sheet)) {
+        return 1;
+    }
+
+    // Office Mode, as the firmware switches to it.
+    buddy_view_hide(&view);
+    buddy_button_apply(&button, false, false);
+    office_button_show(&moon, false);
+    office_clock_show(&clock, true);
+    scene.background = office_background;
+    scene.background_ctx = NULL;
+    const struct tm tm = {.tm_year = 126, .tm_mon = 9, .tm_mday = 14, .tm_wday = 3, .tm_hour = 9, .tm_min = 41};
+    office_clock_apply(&clock, &tm, 100);
+    gfx_scene_render(&scene, &all, &dst);
+    if (!write(dir, "office_clock", &dst)) {
+        return 1;
+    }
+    office_clock_apply(&clock, NULL, 0);
+    gfx_scene_render(&scene, &all, &dst);
+    return write(dir, "office_not_set", &dst) ? 0 : 1;
 }

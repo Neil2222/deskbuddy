@@ -8,6 +8,7 @@
 #include "esp_lcd_touch_gt911.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 
 static const char *TAG = "board";
@@ -42,13 +43,23 @@ static i2c_master_bus_handle_t s_i2c;
 static i2c_master_dev_handle_t s_exio;
 static uint8_t s_exio_out = EXIO_DEFAULT;
 static board_callbacks_t s_cbs;
+// Expander writes come from the render task (backlight) and the touch task (board_i2c_recover).
+static SemaphoreHandle_t s_exio_lock;
+static StaticSemaphore_t s_exio_lock_buf;
 
+// The expander shares the bus with the touch controller, whose task reads it about 110 times a second while a
+// finger is down; an occasional transaction fails. Writes are idempotent, so retry a few times.
 static esp_err_t exio_write(uint8_t reg, uint8_t val)
 {
     const uint8_t buf[2] = {reg, val};
-    return i2c_master_transmit(s_exio, buf, sizeof(buf), 50);
+    esp_err_t err = ESP_FAIL;
+    for (int attempt = 0; attempt < 3 && err != ESP_OK; attempt++) {
+        err = i2c_master_transmit(s_exio, buf, sizeof(buf), 50);
+    }
+    return err;
 }
 
+// Callers hold s_exio_lock, or run during board_init before any other task touches the expander.
 static esp_err_t exio_update(uint8_t set, uint8_t clear)
 {
     s_exio_out = (s_exio_out | set) & (uint8_t)~clear;
@@ -178,6 +189,7 @@ esp_err_t board_init(const board_callbacks_t *cbs, board_t *out)
 {
     ESP_RETURN_ON_FALSE(cbs && out, ESP_ERR_INVALID_ARG, TAG, "null arg");
     s_cbs = *cbs;
+    s_exio_lock = xSemaphoreCreateMutexStatic(&s_exio_lock_buf);
 
     const i2c_master_bus_config_t bus = {
         .i2c_port = I2C_NUM_0,
@@ -198,15 +210,30 @@ esp_err_t board_init(const board_callbacks_t *cbs, board_t *out)
 
 esp_err_t board_backlight_set(uint8_t percent)
 {
-    if (percent == 0) {
-        return exio_update(0, EXIO_BL_EN);
-    }
     if (percent > 100) {
         percent = 100;
     }
-    if (percent < 3) {
+    if (percent > 0 && percent < 3) {
         percent = 3; // Waveshare: duty >= 97 % (inverted) turns the panel fully dark
     }
-    ESP_RETURN_ON_ERROR(exio_write(EXIO_REG_PWM, (uint8_t)((100 - percent) * 255 / 100)), TAG, "bl pwm");
-    return exio_update(EXIO_BL_EN, 0);
+    xSemaphoreTake(s_exio_lock, portMAX_DELAY);
+    esp_err_t err = ESP_OK;
+    if (percent == 0) {
+        err = exio_update(0, EXIO_BL_EN);
+    } else {
+        err = exio_write(EXIO_REG_PWM, (uint8_t)((100 - percent) * 255 / 100));
+        if (err == ESP_OK) {
+            err = exio_update(EXIO_BL_EN, 0);
+        }
+    }
+    xSemaphoreGive(s_exio_lock);
+    return err;
+}
+
+esp_err_t board_i2c_recover(void)
+{
+    xSemaphoreTake(s_exio_lock, portMAX_DELAY);
+    const esp_err_t err = exio_write(EXIO_REG_OUT, s_exio_out); // same value: the outputs do not change
+    xSemaphoreGive(s_exio_lock);
+    return err;
 }

@@ -12,15 +12,39 @@ void test_buddy_art_decodes_within_palette(void)
     const buddy_art_t *a = buddy_art_get();
     CHECK(a != NULL);
     CHECK(buddy_art_get() == a); // decoded once
-    CHECK_EQ(a->body.w, 28);
-    CHECK_EQ(a->body.h, 31);
-    const gfx_image_t *all[] = {&a->body, &a->antenna_on, &a->antenna_off, &a->shadow, &a->shadow_small,
-                                &a->eyes[0], &a->eyes[1], &a->eyes[2], &a->eyes[3], &a->eyes[4],
-                                &a->mouth[0], &a->mouth[1], &a->mouth[2]};
-    for (unsigned i = 0; i < sizeof(all) / sizeof(all[0]); i++) {
-        for (int p = 0; p < all[i]->w * all[i]->h; p++) {
-            CHECK(all[i]->px[p] < a->palette.count);
+    CHECK_EQ(a->head.w, 28);
+    CHECK_EQ(a->head.h + a->torso.h, 31);
+    CHECK_EQ(a->torso_at.y, a->head_at.y + a->head.h); // stacked without a gap
+    const buddy_props_art_t *p = &a->props;
+    const gfx_image_t *all[64];
+    int n = 0;
+    const gfx_image_t *singles[] = {&a->head, &a->torso, &a->antenna_on, &a->antenna_off, &a->antenna_green,
+                                    &a->antenna_white, &a->shadow, &a->shadow_small, &p->can_crushed,
+                                    &p->can_shadow, &p->port, &p->plug, &p->coil, &p->hand, &p->alert, &p->plate};
+    for (unsigned i = 0; i < sizeof(singles) / sizeof(singles[0]); i++) {
+        all[n++] = singles[i];
+    }
+#define ADD_ALL(arr, count)               \
+    for (int i = 0; i < (count); i++) {   \
+        all[n++] = &(arr)[i];             \
+    }
+    ADD_ALL(a->eyes, BUDDY_EYES_COUNT)
+    ADD_ALL(a->mouth, BUDDY_MOUTH_COUNT)
+    ADD_ALL(p->can, BUDDY_CAN_LEVELS)
+    ADD_ALL(p->bolt, BUDDY_BOLT_SHAPES)
+    ADD_ALL(p->spark, BUDDY_SPARK_FRAMES)
+    ADD_ALL(p->poof, BUDDY_POOF_FRAMES)
+    ADD_ALL(p->battery, BUDDY_BATTERY_FRAMES)
+#undef ADD_ALL
+    CHECK(n <= 64);
+    for (int i = 0; i < n; i++) {
+        CHECK(all[i]->w > 0 && all[i]->h > 0);
+        for (int px = 0; px < all[i]->w * all[i]->h; px++) {
+            CHECK(all[i]->px[px] < a->palette.count);
         }
+    }
+    for (int t = 0; t < BUDDY_TINT_COUNT; t++) {
+        CHECK_EQ(a->tint[t].count, a->palette.count);
     }
     // Interchangeable frames share a size, so swapping them redraws a fixed area.
     for (int i = 1; i < BUDDY_EYES_COUNT; i++) {
@@ -30,9 +54,19 @@ void test_buddy_art_decodes_within_palette(void)
         CHECK(a->mouth[i].w == a->mouth[0].w && a->mouth[i].h == a->mouth[0].h);
     }
     CHECK(a->shadow.w == a->shadow_small.w && a->shadow.h == a->shadow_small.h);
-    // Face parts sit on the face screen (body rows 6..13 = art rows 10..17, columns 6..21).
+    for (int i = 1; i < BUDDY_CAN_LEVELS; i++) {
+        CHECK(p->can[i].w == p->can[0].w && p->can[i].h == p->can[0].h);
+    }
+    for (int i = 1; i < BUDDY_BATTERY_FRAMES; i++) {
+        CHECK(p->battery[i].w == p->battery[0].w && p->battery[i].h == p->battery[0].h);
+    }
+    for (int i = 1; i < BUDDY_SPARK_FRAMES; i++) {
+        CHECK(p->spark[i].w == p->spark[0].w && p->spark[i].h == p->spark[0].h);
+    }
+    // Face parts sit on the face screen (body rows 6..13 = art rows 10..17, columns 6..21), also when the eyes look
+    // one pixel to either side.
     for (int e = 0; e < 2; e++) {
-        CHECK(a->eye_at[e].x >= 6 && a->eye_at[e].x + a->eyes[0].w <= 22);
+        CHECK(a->eye_at[e].x - 1 >= 6 && a->eye_at[e].x + a->eyes[0].w + 1 <= 22);
         CHECK(a->eye_at[e].y >= 10 && a->eye_at[e].y + a->eyes[0].h <= 18);
     }
     CHECK(a->mouth_at.x >= 6 && a->mouth_at.x + a->mouth[0].w <= 22);
@@ -47,7 +81,7 @@ void test_buddy_poke_runs_surprise_happy_idle(void)
     buddy_brain_tick(&b, 2000, &p);
     CHECK_EQ(p.state, BUDDY_STATE_IDLE);
 
-    buddy_brain_poke(&b, 2000);
+    CHECK(buddy_brain_event(&b, BUDDY_EVENT_POKE, 2000));
     CHECK(buddy_brain_tick(&b, 2000, &p) >= 1);
     CHECK_EQ(p.state, BUDDY_STATE_SURPRISED);
     CHECK_EQ(p.eyes, BUDDY_EYES_WIDE);
@@ -80,10 +114,10 @@ void test_buddy_poke_runs_surprise_happy_idle(void)
     CHECK_EQ(p.antenna, BUDDY_ANTENNA_CALM);
 
     // A poke while happy restarts the reaction.
-    buddy_brain_poke(&b, 9000);
+    CHECK(buddy_brain_event(&b, BUDDY_EVENT_POKE, 9000));
     buddy_brain_tick(&b, 9000 + BUDDY_SURPRISE_MS + 10, &p);
     CHECK_EQ(p.state, BUDDY_STATE_HAPPY);
-    buddy_brain_poke(&b, 9500);
+    CHECK(buddy_brain_event(&b, BUDDY_EVENT_POKE, 9500));
     buddy_brain_tick(&b, 9500, &p);
     CHECK_EQ(p.state, BUDDY_STATE_SURPRISED);
 }
@@ -137,7 +171,7 @@ void test_buddy_survives_clock_wraparound(void)
     buddy_brain_t b;
     buddy_pose_t p;
     buddy_brain_init(&b, UINT32_MAX - 100, 3);
-    buddy_brain_poke(&b, UINT32_MAX - 100);
+    buddy_brain_event(&b, BUDDY_EVENT_POKE, UINT32_MAX - 100);
     buddy_brain_tick(&b, (uint32_t)(UINT32_MAX - 100 + BUDDY_SURPRISE_MS), &p); // crosses zero
     CHECK_EQ(p.state, BUDDY_STATE_HAPPY);
 }
@@ -151,28 +185,41 @@ void test_buddy_view_fits_stage_and_hits(void)
     CHECK(gfx_scene_init(&scene, 1024, 600, test_background, NULL, strip, 1024 * 4, 32));
     CHECK(buddy_view_init(&v, &scene, stage, 10, 0));
     CHECK_EQ(v.scale, 8);
-    CHECK_EQ(scene.count, 6);
+    CHECK_EQ(scene.count, 20); // robot 7, Monster props 13
 
-    const gfx_rect_t body = gfx_sprite_bounds(&v.body);
+    const gfx_rect_t body = gfx_rect_union(gfx_sprite_bounds(&v.head), gfx_sprite_bounds(&v.torso));
     const int cx = body.x + body.w / 2, cy = body.y + body.h / 2;
     CHECK(buddy_view_hit(&v, cx, cy));
     CHECK(!buddy_view_hit(&v, 5, 5));
     CHECK(!buddy_view_hit(&v, 900, cy)); // control-panel side
 
-    buddy_pose_t pose = {BUDDY_STATE_HAPPY, BUDDY_EYES_HAPPY, BUDDY_MOUTH_SMILE, BUDDY_ANTENNA_EXCITED, 0};
-    const int shadow_y = v.shadow.y;
+    buddy_pose_t pose = {.state = BUDDY_STATE_HAPPY, .eyes = BUDDY_EYES_HAPPY, .mouth = BUDDY_MOUTH_SMILE,
+                         .antenna = BUDDY_ANTENNA_EXCITED};
+    const int shadow_y = v.shadow.y, torso_dy = v.torso.y - v.head.y;
     for (int lift = 0; lift <= BUDDY_MAX_LIFT; lift++) {
         pose.lift = (uint8_t)lift;
         buddy_view_apply(&v, &pose, 0);
-        CHECK_EQ(v.body.y, body.y - lift * v.scale);
+        CHECK_EQ(v.torso.y, body.y + torso_dy - lift * v.scale);
+        CHECK_EQ(v.head.y, body.y - lift * v.scale);
+        CHECK_EQ(v.head.x, v.torso.x); // no wobble: head and torso move together
         CHECK_EQ(v.shadow.y, shadow_y); // the shadow stays on the ground
         CHECK(v.eye[0].image == &v.art->eyes[BUDDY_EYES_HAPPY]);
-        gfx_sprite_t *parts[] = {&v.shadow, &v.body, &v.antenna, &v.eye[0], &v.eye[1], &v.mouth};
+        gfx_sprite_t *parts[] = {&v.shadow, &v.head, &v.torso, &v.antenna, &v.eye[0], &v.eye[1], &v.mouth};
         for (unsigned i = 0; i < sizeof(parts) / sizeof(parts[0]); i++) {
             CHECK(gfx_rect_contains_rect(stage, gfx_sprite_bounds(parts[i])));
         }
     }
     CHECK(v.shadow.image == &v.art->shadow_small); // high hop: smaller shadow
+
+    // A wobble moves the head and its face, not the torso.
+    pose.lift = 0;
+    buddy_view_apply(&v, &pose, 0);
+    const int torso_x = v.torso.x, head_x = v.head.x, eye_x = v.eye[0].x;
+    pose.wobble = 1;
+    buddy_view_apply(&v, &pose, 0);
+    CHECK_EQ(v.torso.x, torso_x);
+    CHECK_EQ(v.head.x, head_x + v.scale);
+    CHECK_EQ(v.eye[0].x, eye_x + v.scale);
 
     // A tiny stage cannot hold the character.
     static gfx_scene_t small;

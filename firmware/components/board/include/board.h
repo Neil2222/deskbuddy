@@ -40,6 +40,11 @@ esp_err_t board_init(const board_callbacks_t *cbs, board_t *out);
 // 0 turns the backlight off; 1..100 sets brightness in percent.
 esp_err_t board_backlight_set(uint8_t percent);
 
+// Re-sends the IO expander's output register (same value: nothing changes). Observed on the device: after some
+// backlight writes the expander leaves the shared I2C bus in a state where every touch-controller read fails,
+// until the expander is addressed again. Call this when a touch read fails.
+esp_err_t board_i2c_recover(void);
+
 #ifdef __cplusplus
 }
 #endif

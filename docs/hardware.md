@@ -15,6 +15,7 @@ Sources:
 | Touch | GT911 at I2C 0x5D, firmware 1060, config version 91, 5 points |
 | IO expander | Waveshare-programmed MCU at I2C 0x24. It provides PWM and ADC, which the CH422G named in the docs does not have. |
 | Battery | CS8501 charger. Battery voltage is read through the expander ADC (register 0x06). Not used yet. |
+| RTC | **None.** An I2C scan of 0x08–0x77 on the device (2026-10-14) finds only 0x24 (expander) and 0x5D (touch), as Waveshare's address map says. The `rtc_pcf85063` tag in the factory boot log comes from a test image shared with other boards. The HY2.0 header carries I2C if an RTC module is added later. |
 | eFuses | No secure boot, no flash encryption, download mode enabled, USB-JTAG enabled |
 
 ## Pins
@@ -40,7 +41,7 @@ Register map from Waveshare's `io_extension` driver:
 - **0x02:** pin mode (1 = output).
 - **0x03:** output latch.
 - **0x04:** input.
-- **0x05:** backlight PWM, 0–255. Inverted: 0 is brightest. Above about 97 % duty the panel goes fully dark.
+- **0x05:** backlight PWM, 0–255. Inverted: 0 is brightest. Above about 97 % duty the panel goes fully dark. Changes after boot were not applied reliably on our board (see [rendering-results.md](rendering-results.md)), so the firmware sets it once at boot.
 - **0x06:** ADC (16-bit).
 
 | Pin | Function | Our default |

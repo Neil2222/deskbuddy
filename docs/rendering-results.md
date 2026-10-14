@@ -8,10 +8,11 @@ All numbers come from the device's own `PERF` logs (5-second windows). The bring
 | Module | Role | Hardware dependent |
 |---|---|---|
 | `components/gfx` | Rectangles, dirty-rectangle set, indexed sprites with transparency, integer scaling and horizontal flip, frame animation, scene compositor, double-buffer repair | No (host-tested) |
-| `components/buddy` | Placeholder robot: behavior state machine (`buddy_brain`), ASCII programmer art (`buddy_art`), pose-to-sprite mapping (`buddy_view`) | No (host-tested) |
+| `components/buddy` | Placeholder robot: behavior state machine and events (`buddy_brain`), the Monster Energy sequence (`buddy_monster`), ASCII programmer art (`buddy_art`), pose-to-sprite mapping including the procedural arm and cable (`buddy_view`) | No (host-tested) |
 | `components/layout` | Character stage (default 65 % of the width, rounded to 672 px) and the reserved control-panel area; background painting | No (host-tested) |
+| `components/office` | Office Mode: antialiased stroke font rasterized into indexed images, the desk-clock face, the moon button, and the scene switch (`office_switch`) | No (host-tested) |
 | `components/display` | Application-owned frame buffers, the scanout fill, and the buffer-swap proof | Yes |
-| `deskbuddy/main` | Touch task (GT911 → events), render loop, layout configuration (Kconfig), performance log, verify mode | Yes |
+| `deskbuddy/main` | Touch task (GT911 → events), render loop, Office Mode switching, backlight at boot, wall-clock time and time zone, layout configuration (Kconfig), performance log, verify mode | Yes |
 
 Behavior, artwork, layout and rendering only meet in the render loop. Behavior produces a *pose*; the view maps it to sprites; the compositor only sees sprites and a background callback.
 
@@ -57,7 +58,7 @@ Nothing is drawn while nothing changes.
 - **Budget:** each bounce fill copies 20 KB from PSRAM and must finish within one bounce period: 10 lines at 1386 px / 30.85 MHz = **449 µs**. It takes 280–400 µs during normal animation.
 - **What breaks it:** full-frame PSRAM traffic. Full-screen redraws, and verify mode's compare, push fills to about 940 µs, the scanout underruns, and the driver resyncs at the next VSYNC. That is a visible one-frame glitch, counted as `resync` in the log.
 - **Mitigation now:** both boot-time full redraws happen before the backlight comes on (`while dark: 3 scanout resyncs`).
-- **Rule for the next phases:** keep redraws incremental while the screen is lit. Scene changes that need a full redraw should hide it (backlight fade) or spread it over frames. Larger bounce buffers and 120 MHz PSRAM are untested options for more margin.
+- **Rule for the next phases:** keep redraws incremental while the screen is lit. Rare full redraws on a user action (the Office Mode switch) were acceptable in a user test; the backlight cannot be used to hide them (it does not change reliably at run time). Larger bounce buffers and 120 MHz PSRAM are untested options for more margin.
 
 ### Swap timing
 Presenting waits 0–30 ms for the next frame start (about 15–18 ms on average). Rendering at more than 33.7 FPS is impossible by design. The pixel-art frame rates (8–15 FPS for sprite frames) are far below it.
@@ -67,6 +68,45 @@ Presenting waits 0–30 ms for the next frame start (about 15–18 ms on average
 - **Possible cause (not confirmed):** host USB power management. Windows "USB battery saver" (*USB-batterijbesparing*: stop USB devices when the screen turns off) was enabled on the host laptop, and the laptop had just turned its screens off. The user has since disabled that setting.
 - **Hypothesis:** the setting cut one of the two USB connections. The ESP32 stayed powered through the other, but the backlight or IO-expander supply did not, and the expander MCU lost its outputs. A board reset re-initialises the expander.
 - **Status:** not reproduced and not handled in firmware. To confirm, re-enable the setting temporarily and let the laptop turn its screens off. A later robustness item: detect a lost expander state (read back its registers) and restore it, so the panel recovers without a reset.
+- **Second occurrence (2026-10-14):** the laptop ran out of battery and shut down. After reconnecting, the firmware booted and rendered normally (touches were handled) but the screen stayed black. An ESP32 reset over the UART port (which re-initialises the expander) brought the picture back.
+- **Third occurrence (2026-10-14):** the board was plugged into the laptop (UART port) and the screen stayed black. A reset over the UART port brought the picture back; the boot log after that reset was normal (backlight on 0.94 s after start). The power-up itself could not be logged: the serial port only appears after plug-in. Possible cause (not confirmed): at power-up the ESP32 sends the backlight command (about 0.7 s after power) before the expander MCU is ready; after a reset only the ESP32 restarts, so the command arrives. To check: replug several times and count how often it stays dark.
+- **Reproduction attempts (2026-10-14, evening, laptop on its charger):** (1) laptop sleep for 66 s (20:48:19–20:49:25) with the board running: the screen stayed on, COM5 stayed connected, and the board's uptime continued (no restart). (2) Unplugged for 10 s and replugged: the board restarted (uptime 21.8 s at 20:51:05) and the backlight came on normally. Neither reproduced the black screen.
+- **Suspected cause (not confirmed):** all four occurrences coincide with the host laptop changing its power state or the board getting power (screens off, battery shutdown, a day at work with several standby periods and a Windows restart at 16:28, plugging in). Either the backlight command at power-up reaches the expander MCU before it is ready, or a short supply dip resets only the expander while the ESP32 keeps running; both leave the backlight off with nothing re-sending it. **Workaround:** press RESET (or unplug for 10 s). **If it becomes frequent:** connect the log without resetting and read the uptime (short: the board restarted, so delay or repeat the backlight command at boot; long: the expander lost its state, so re-send the expander state periodically).
+- **The afternoon at work was a different failure (2026-10-14):** Windows' device log (*Kernel-PnP/Device Management*, event 1010) shows the board's USB-serial chip (CH343, `VID_1A86&PID_55D3`) *"surprise removed as it is reported as missing on the bus"* at 10:51:14, while it was plugged in and 3 minutes after a normal 15-minute log ended; the laptop's first standby came later (10:58). Afterwards the screen stayed dark and RESET, BOOT and taps did nothing, and COM5 could not be opened. The CH343 does not depend on the ESP32 or the expander, so the board most likely lost USB power or its connection (loose cable or connector, or the laptop switching off the port; a high backlight current could trigger that, not confirmed). This cannot be fixed in firmware. Check: the cable and connector, another USB port, or power the board from a charger or a powered hub. To tell the two failures apart: if COM5 is missing, it is the connection; if COM5 is present and RESET brings the picture back, it is the power-up problem above.
+
+### Monster Energy animation (2026-10-14)
+Measured with `DEMO_MONSTER_S` (a sequence every 12–13 s) and compared with the tap reaction on the same board and build (`DEMO_POKE_S=3`).
+
+| | Frames/s | Redraw avg / max | Longest bounce fill | Scanout resyncs |
+|---|---|---|---|---|
+| Idle | 3.1–3.3 | 50 k / 64.5 k px | 336–391 µs | 0 |
+| Tap reaction (surprise + hops) | 13–16 | 64–65 k / 70 k px | 362–394 µs | 0 |
+| Monster sequence, first version (every 20 ms tick, whole body trembling) | 20–32 | 47–99 k / 137 k px | 528–628 µs | 0 |
+| Monster sequence, current (50 ms frame clock, head-only wobble, split cable sprite) | 15–27 | 34–69 k / 101 k px | 433–638 µs | 0 |
+
+- **Correctness:** host tests replay the whole sequence on two alternating buffers; every presented frame equals a full redraw, and no frame redraws the full screen.
+- **Open issue:** fills above the 449 µs budget do not resync, but they can show a few stale lines for one frame (the known intermittent horizontal artifact). The redraw size is no longer the main factor (frames now match the hop reaction's size), so the remaining lever is in the engine, for example pacing the PSRAM writes between composition strips. Not changed yet: it needs a decision.
+
+### Office Mode (2026-10-14)
+The switch between DeskBuddy and the clock repaints the whole screen: the scene is swapped and both buffers are redrawn (one full frame, then a one-pixel change that makes the double-buffer repair redraw the other buffer). The backlight is not touched (see the brightness finding below). The first versions switched in the dark (backlight faded out, redraw, faded in to 25 % of normal for the clock); the measurements below are from those versions with `DEMO_OFFICE_S=10` and `DEMO_MONSTER_S=13`, 8 switches including one in the middle of a Monster sequence.
+
+| | Value |
+|---|---|
+| Redraw of both buffers | two frames, about 110–130 ms (logged as `clock drawn` / `DeskBuddy drawn`) |
+| Scanout resyncs during the redraw | 2–4 per switch |
+| Resyncs and full redraws outside a switch | 0 in every window |
+| Clock without a valid time (current state) | 0 frames redrawn; longest bounce fill 57 µs |
+| Clock with a valid time (host tests) | colon glows twice per second (about 11 k px); a minute change redraws one or two numerals |
+
+- **Lit switches look fine:** in a user test where the "off" during the switch did not take effect, 31 switches (9 within 2.5 s, 3 during a Monster sequence) were redrawn with the backlight on, 2–4 resyncs each, and the user saw no glitch. So the dark switch was dropped.
+- **Found and fixed during testing:** invalidating the whole screen for both redraw frames made the double-buffer repair redraw a third full frame after the switch. A host test runs the whole loop (scene, character, clock, switch, repair) and fails if any full-screen frame is presented outside booting or switching.
+- **Touch stopped working in Office Mode (found on the device, fixed):** after some backlight writes, the IO expander leaves the shared I2C bus in a state where every GT911 read fails, until the expander is addressed again. One streak lasted 9.5 s and ended 30 ms after the next expander write. Because a failed read never clears the GT911's status register, the GT911 stops interrupting, and the touch task used to wait for an interrupt forever. So after the fade-in to the clock (the last expander write) touch was dead and the clock could not be dismissed. Now the touch task retries every 10 ms after a failed read and re-sends the expander's output register first (same value). Over 11 hands-off switches every failure streak ended after 1–3 attempts. Without run-time backlight writes, no touch read failed in the later tests.
+- **Backlight brightness is not applied reliably (found on the device):** the IO expander (a CH32V003 microcontroller with Waveshare firmware) acknowledges every write. Three write patterns were tried, each tested by the user:
+  1. Fades (PWM register, then output register with the enable bit, every 20 ms; about 25 writes per switch): brightness after a switch was random, and eventually stuck at about 5 % until the board was unplugged for 10 s. RESET did not clear it. The same stuck-dim state appeared right after flashing (three times).
+  2. No fades (backlight off, redraw, on at 20 % or 80 %; the level re-sent 200 ms later): still random, including levels never requested (about 60 %, full, fully dark, unchanged).
+  3. PWM register only, as in Waveshare's brightness-slider example (enable bit set once): the brightness never changed at all, and "off" did not go dark.
+
+  An ESPHome user on the same board reports dimming that works a couple of times after a reboot and then stops. The expander's registers do not read back reliably (values lag or come from another register), so its state cannot be checked from firmware. Decision: the backlight is set once at boot (PWM register, then the enable bit, as in the original bring-up) and never changed afterwards; Office Mode is not dimmed.
 
 ## Touch
 

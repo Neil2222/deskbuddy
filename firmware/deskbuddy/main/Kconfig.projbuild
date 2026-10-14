@@ -17,6 +17,13 @@ menu "DeskBuddy"
         range 3 100
         default 80
 
+    config DESKBUDDY_TIMEZONE
+        string "Time zone (POSIX TZ string)"
+        default "CET-1CEST,M3.5.0,M10.5.0/3"
+        help
+            Local time zone for the Office Mode clock, including daylight saving rules. The default is
+            Central European Time (Amsterdam, Brussels, Berlin). The clock itself is kept in UTC.
+
     config DESKBUDDY_PERF_LOG_S
         int "Performance log interval in seconds (0 = off)"
         range 0 3600
@@ -28,6 +35,22 @@ menu "DeskBuddy"
         default 0
         help
             Runs the reaction animations without touching the screen, for hands-off measurements.
+
+    config DESKBUDDY_DEMO_MONSTER_S
+        int "Start the Monster Energy animation automatically every N seconds (0 = off)"
+        range 0 3600
+        default 0
+        help
+            Plays the Monster charging sequence without touching the screen, for hands-off measurements.
+            Normally it is started by tapping the Monster can in the control panel.
+
+    config DESKBUDDY_DEMO_OFFICE_S
+        int "Toggle Office Mode automatically every N seconds (0 = off)"
+        range 0 3600
+        default 0
+        help
+            Switches between DeskBuddy and the Office Mode clock without touching the screen, for hands-off
+            tests of the scene switch. Normally it is toggled with the moon button and a tap on the clock.
 
     config DESKBUDDY_GFX_VERIFY
         bool "Verify every presented frame against a full redraw (debug, slow)"
