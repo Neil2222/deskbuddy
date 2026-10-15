@@ -79,7 +79,7 @@ stateDiagram-v2
 
 | File | Holds | Written |
 |---|---|---|
-| `device-events.jsonl` | The canonical device log: `event` (one per `(dev, boot, seq)`), `boot` (first seen), `gap` (overflow, count known), `boot_end` (`complete` true/false) | Append-only, flushed to disk per batch |
+| `device-events.jsonl` | The canonical device log: `event` (one per `(dev, boot, seq)`), `boot` (first seen), `gap` (overflow, count known), `boot_end` (`seen_live` true/false; never a claim of completeness) | Append-only, flushed to disk per batch |
 | `device-checkpoints.json` | Per `(dev, boot)`: the contiguous checkpoint | Replaced atomically, after the log lines it covers |
 | `companion-events.jsonl` | The Companion's own facts: `request` (an `act` it sends, with iid, action, origin; written before sending) and `request_result` (`ok`, `dup`, `busy`, `unsupported`, `err:<code>`, `no_reply`, `lost`) | Append-only |
 | `installation.json` | This installation's stable id (GUIDv7), carried by every line | Once |
@@ -184,9 +184,18 @@ skipped. A mood override does not block actions (moods and actions are independe
   - **Durability:** the checkpoint is persisted only after the event lines (and gap records) it covers are appended
     and flushed. A crash in between re-fetches events already stored: harmless by the key. The checkpoint never
     passes a seq that is neither stored nor recorded as a gap.
-  - **A new boot** (in `hello` / `evt boot`) closes the previous one: if its last fetch did not end in a reply after
-    which nothing newer was seen, a gap record "possibly unfetched events after seq N, count unknown" is written for
-    it; then the new boot is fetched from 0.
+  - **A new boot** (in `hello` / `evt boot`) closes the previous one with a `boot_end` record and the new boot is
+    fetched from 0. `seen_live=true`: the restart arrived on a live connection that had fetched that boot and
+    detected no hole up to `after`; that is no proof of completeness (the device cannot say which seq a boot ended
+    at, so a final event lost on the wire stays undetectable). `seen_live=false`: it restarted while the Companion
+    was away; events after `after` may have been missed, how many is unknown. History views must present neither
+    as "complete".
+  - **A restart during the handshake** (an `evt boot` read before the `hello` reply was handled) is kept in order
+    with the events received meanwhile. Events before an `evt boot` naming the `hello`'s own boot belong to an
+    earlier boot whose id is unknown: they are not stored (logged), and that earlier boot, if known, is closed with
+    `seen_live=false`. A later `evt boot` (the `hello` came from the old boot) switches to the new boot and fetches
+    it. No second `hello` is needed: `evt boot` carries `dev`, `boot` and `fw`. A `log.since` reply naming another
+    boot counts as a failed attempt (at most three, 5 s apart), never an endless loop.
   - Events are never invented to fill a gap, and a gap is never read as "nothing happened".
 - **Device time.** A `t=` event stores that UTC time (and the local time and offset derived from it on the
   Companion). An `up=` event (the clock was not set yet) stores `time_known=false` with `boot` and `uptime_ms`, never
@@ -231,7 +240,7 @@ could repeat after a crash, and its result would be lost. So the journals come b
 | P3 (done) | Engine, `schedule.json`, Schedule page, drag-and-drop | 112 tests; drag verified in the running app |
 | **P4** Protocol + firmware (done, on `feature/schedule`) | `act iid=`, `ask_peukie` in `acts=`, `evt act shown/done`, `status act=`, `evt mood src=`, `evt did`, MY DAY page, caps `track,did`; the Companion needs no change (it ignores unknown events and lists no `ask_peukie` tile) | 93 host tests incl. the application end to end on a fake platform; the simulator smoke-tested over TCP; firmware builds without warnings; on the board (`2a0c261`): question by command, JA / NEE / timeout distinct, Clock Mode interrupts and refuses, MY DAY all seven, Clock zoom unchanged (0 resyncs), Companion connects |
 | **P4.1** Recorded events (done, on `feature/schedule`) | Identity `(dev, boot, seq)` (MAC / machine hash, 64-bit boot id from a true entropy source), event time `t=` or `up=`, the last 64 events in PSRAM, `log.since` replay (2 lines per frame, reply after the last, `lost=` on overflow), cap `log`; no flash writes; `evt did n=` replaced by `seq=` | 97 host tests; simulator; on the board (`29f5c80`): 20/20 automated checks over the UART (identity, new boot per restart, `up=`/`t=`, reconnect replay, identical repeat, overflow `lost=4`, 64 events in 1.31 s at 27.9 fps with 0 resyncs) and the user's JA / NEE / MY DAY replayed identically |
-| **P5** History (done, on `feature/schedule`) | `device-events.jsonl` (canonical, keyed), checkpoints, `companion-events.jsonl` (requests with iid), `installation.json`, all with `.sim` twins; replay after hello and on holes, gaps and boot ends; interactions and activities derived (`HistoryDeriver`); worker thread (`HistoryRecorder`); Activities tiles send `act … iid=` | 18 unit tests (live, replay, duplicates, out of order, holes, overflow, unexplained loss, wire loss, boot end incomplete / complete, crash before checkpoint, checkpoint ahead of the log, torn line, uptime-only time, outcomes, origins, MY DAY, one JA smoke break, shows and moods no activity, simulator isolation); end to end with the Companion and the simulator (connected, disconnected, reconnect, Companion restart, stale checkpoint, simulator restart): 12 events, 12 keys, nothing missing |
+| **P5** History (done, on `feature/schedule`) | `device-events.jsonl` (canonical, keyed), checkpoints, `companion-events.jsonl` (requests with iid), `installation.json`, all with `.sim` twins; replay after hello and on holes, gaps and boot ends; interactions and activities derived (`HistoryDeriver`); worker thread (`HistoryRecorder`); Activities tiles send `act … iid=`; restart during the handshake; `boot_end seen_live` | 21 unit tests (live, replay, duplicates, out of order, holes, overflow, unexplained loss, wire loss, boot end seen live / while away, restarts during the handshake, bounded retries, crash before checkpoint, checkpoint ahead of the log, torn line, uptime-only time, outcomes, origins, MY DAY, one JA smoke break, shows and moods no activity, simulator isolation); end to end with the simulator: 12 events, nothing missing or doubled; on the board (`29f5c80`, Companion `bdc8eb6`): the 13 buffered P4.1 events recovered with their original seq, iids, times and outcomes; reconnect and two Companion restarts added nothing; a new MY DAY tap and a touch question that timed out stored live and kept after a restart (18 events, 18 keys); YES → one linked smoke, NO / TIMEOUT / shows → none |
 | **P6** Live scheduling | MoodDirector wired; ActionScheduler (occurrences, grace, availability, skips); `action` in the editor (schedule v2); Pause | In the simulator: a block a minute ahead sends one `mood.set`; `ask_peukie` asks once and records yes, no or timeout; Clock Mode gives `skipped:busy:office` and is not interrupted; a disconnect past grace gives `skipped:offline`; a restart does not ask again |
 | **P7** History + polish | History page (today, this week, outcomes), Away presets, optional reminders, DPI pass (125/150 %), regression tests | Screenshots at 3 DPIs; history matches the journals |
 | Future | PatternAnalyzer, SuggestionEngine, edit provenance | Separate approval |
