@@ -17,7 +17,7 @@ DeskBuddy and the Windows companion (`companion/`) talk over the board's **UART*
 - `DB1`: protocol version 1. A device that receives another version answers `err bad_version proto=1`.
 - `<seq>`: 1 to 4294967295, chosen by the companion; the reply carries the same number. Events and errors without a trustworthy sequence number (bad checksum) use 0.
 - `<crc>`: CRC-16/CCITT-FALSE (polynomial 0x1021, initial 0xFFFF, no reflection; `123456789` gives `29B1`) over everything before ` #`, as 4 hex digits.
-- Single spaces between tokens. Names: lower-case letters, digits, `.` and `_`. Values: letters, digits and `. _ : + -`; `%XX` escapes only in a message `text`. At most 8 arguments; received lines at most 767 bytes, sent lines at most 159.
+- Single spaces between tokens. Names: lower-case letters, digits, `.` and `_`. Values: letters, digits and `. _ : + -`; `%XX` escapes only in a message `text`. At most 8 arguments; received lines at most 767 bytes, sent lines at most 255.
 - Lines end with `\n` (the device sends `\r\n`).
 
 **Safety:** only a complete, well-formed command line with a matching checksum does anything. Plain text (typing in a serial monitor), the device's own output echoed back, esptool traffic and corrupted lines are ignored or rejected. During flashing the firmware is not even running. The companion does not retry actions after a timeout, so a lost reply cannot trigger an action twice.
@@ -26,17 +26,20 @@ DeskBuddy and the Windows companion (`companion/`) talk over the board's **UART*
 
 | Command | Arguments | Reply |
 |---|---|---|
-| `hello` | | `ok proto=1 fw=<version> caps=<list> styles=<list> moods=<list>` |
+| `hello` | | `ok proto=1 fw=<version> caps=<list> styles=<list> moods=<list> acts=<list>` |
 | `ping` | | `ok` |
 | `status` | | `ok mode=<normal\|office\|monster> mood=<mood> time=<set\|unset> msg=<showing\|idle> queued=<0\|1> uptime=<s>` (`office`: Clock Mode, see below) |
-| `poke` | | `ok`, or `err busy mode=<mode>` (Clock Mode, an activity running (Monster, or water, sneeze, stare, meditate from the touchscreen menu), a zoom under way, screen not up yet) |
+| `poke` | | `ok`, or `err busy mode=<mode>` (Clock Mode, an activity running (Monster, water, sneeze, stare, meditate), a zoom under way, screen not up yet) |
 | `monster` | | `ok`, or `err busy mode=<mode>` (as `poke`) |
+| `act` | `name=<activity>` | `ok` (it starts), `err busy mode=<mode>` (as `poke`), `err unsupported` (an activity this firmware does not have), `err bad_args` |
 | `mode.set` | `mode=office\|clock\|normal` | `ok` (switches like *Clock* in the touchscreen menu / a tap on the clock: Buddy zooms into the clock or out of it, about 1.5 s; `evt mode` follows when the new scene is on screen; a request during a zoom is carried out after it), or `err unavailable` |
 | `time.set` | `utc=<s> [ms=<0-999>] off=<min> [next=<utc s> next_off=<min>]` | `ok` |
 | `msg.show` | `id=<1-4294967295> [style=marquee] text=<percent-encoded UTF-8>` | `ok` (on the sign now), `ok queued=1` (waits its turn), `ok dup=1` (this id was already taken), `err busy mode=<mode>` (one is already waiting), `err unsupported` (unknown style), `err bad_args` |
 | `mood.set` | `name=<mood> [secs=<1-86400>]` | `ok`, `err unsupported` (a mood this firmware does not have), `err bad_args` |
 
-**Capabilities:** `hello` lists what the firmware supports (`poke,monster,mode,time,status,msg,mood`), which message styles it draws (`styles=marquee`) and which moods it has (`moods=idle,relaxed,peukie,angry,sleepy,working,happy`, in display order). The companion only enables the matching buttons, so new commands, styles and moods can be added without breaking older companions or firmware.
+**Capabilities:** `hello` lists what the firmware supports (`poke,monster,mode,time,status,msg,mood,act`), which message styles it draws (`styles=marquee`), which moods it has (`moods=idle,relaxed,peukie,angry,sleepy,working,happy`) and which activities `act` starts (`acts=water,sneeze,stare,meditate`), each in display order. The companion only enables the matching buttons, so new commands, styles, moods and activities can be added without breaking older companions or firmware.
+
+**Activities (`act`)** are short shows on top of Buddy's mood, the same ones the touchscreen menu starts: `water` (a glass of water short-circuits him), `sneeze` (his head flies off), `stare` (a staring contest, the camera close on his face), `meditate` (he floats until a notification drops him). Each plays to its end (2.7 to 7.4 s); meanwhile `poke`, `monster` and `act` get `err busy`, and the mood resumes afterwards. Names are lower-case letters and `_`, at most 15; `monster` and `poke` keep their own commands.
 
 **Clock Mode is `office` on the wire.** It was first called Office Mode; `status`, `evt mode` and `mode.set` keep that name, so existing companions and scripts work unchanged. `mode.set mode=clock` is accepted as an alias (firmware from 2026-10-15 on; older firmware answers `err bad_args`, so clients that must work with any firmware send `office`).
 
@@ -87,6 +90,12 @@ DeskBuddy and the Windows companion (`companion/`) talk over the board's **UART*
 
 1. Firmware: add it to `link_cmd_t` and `COMMANDS` in `components/link`, decode its arguments in `decode_args()`, run it in `run_command()` (`main.c`), add its capability to `CAPS` in `serial_link.c`, and add host tests (`firmware/tests/host/test_link.c`).
 2. Companion: add a button (`MainForm.cs`) that sends it when the capability is present.
+3. Document it here.
+
+## Adding an activity
+
+1. Firmware: its state, event and timeline in `components/buddy` (`buddy_activity.h`), its name and face in `k_acts` in `buddy_activity.c` (the list feeds `hello`'s `acts=` and `act`), and its tile in the touchscreen menu (`menu_items.c`); extend the host tests (`test_activity.c`).
+2. Companion: an `ActTile(...)` entry in `Activities.cs` (`tools/host-test.ps1 -Icons` exports `face-<activity>.png` from the same face).
 3. Document it here.
 
 ## Adding a mood

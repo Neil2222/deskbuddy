@@ -1,6 +1,7 @@
 #include "buddy_activity.h"
 
 #include <stddef.h>
+#include <string.h>
 
 #include "buddy_brain.h" // BUDDY_MOTION_TICK_MS
 #include "buddy_monster.h"
@@ -16,6 +17,43 @@ static const char *const k_say[BUDDY_SAY_COUNT] = {
 const char *buddy_say_text(buddy_say_t say)
 {
     return k_say[say < BUDDY_SAY_COUNT ? say : BUDDY_SAY_NONE];
+}
+
+static const struct {
+    const char *name;
+    buddy_event_t event;
+    buddy_face_t face;
+} k_acts[BUDDY_ACTS] = {
+    {"water", BUDDY_EVENT_DRINK_WATER, {BUDDY_EYES_WIDE, BUDDY_MOUTH_OPEN, true, false}}, // "!"
+    {"sneeze", BUDDY_EVENT_SNEEZE, {BUDDY_EYES_SQUEEZE, BUDDY_MOUTH_OPEN, true, false}},  // a... a...
+    {"stare", BUDDY_EVENT_STARE, {BUDDY_EYES_FOCUS, BUDDY_MOUTH_NEUTRAL, true, false}},   // a challenger's stare
+    {"meditate", BUDDY_EVENT_MEDITATE, {BUDDY_EYES_CLOSED, BUDDY_MOUTH_SMILE, false, false}}, // at peace
+};
+
+const char *buddy_act_name(int i)
+{
+    return i >= 0 && i < BUDDY_ACTS ? k_acts[i].name : "";
+}
+
+bool buddy_act_parse(const char *name, buddy_event_t *out)
+{
+    for (int i = 0; name && i < BUDDY_ACTS; i++) {
+        if (strcmp(name, k_acts[i].name) == 0) {
+            *out = k_acts[i].event;
+            return true;
+        }
+    }
+    return false;
+}
+
+buddy_face_t buddy_act_face(buddy_event_t ev)
+{
+    for (int i = 0; i < BUDDY_ACTS; i++) {
+        if (k_acts[i].event == ev) {
+            return k_acts[i].face;
+        }
+    }
+    return buddy_mood_face(BUDDY_MOOD_IDLE);
 }
 
 #define TICK BUDDY_MOTION_TICK_MS

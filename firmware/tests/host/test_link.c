@@ -226,4 +226,14 @@ void test_link_parses_moods(void)
     CHECK_EQ(parse(frame(">DB1 9 mood.set name=happy secs=-5"), &c), LINK_ERR_ARGS);
     CHECK_EQ(parse(frame(">DB1 9 mood.set name=happy secs="), &c), LINK_ERR_ARGS);
     CHECK_EQ(parse(frame(">DB1 9 mood.set name=happy secs=ten"), &c), LINK_ERR_ARGS);
+
+    // act: an activity by name, checked for shape only (which ones exist: hello acts=, err unsupported).
+    CHECK_EQ(parse(frame(">DB1 10 act name=sneeze"), &c), LINK_OK);
+    CHECK(c.cmd == LINK_CMD_ACT && c.seq == 10 && strcmp(c.u.act.name, "sneeze") == 0);
+    CHECK_EQ(parse(frame(">DB1 11 act name=juggle_cats extra=1"), &c), LINK_OK); // unknown keys ignored
+    CHECK(strcmp(c.u.act.name, "juggle_cats") == 0);
+    CHECK_EQ(parse(frame(">DB1 12 act"), &c), LINK_ERR_ARGS);
+    CHECK_EQ(c.seq, 12);
+    CHECK_EQ(parse(frame(">DB1 12 act name=Sneeze"), &c), LINK_ERR_ARGS);
+    CHECK_EQ(parse(frame(">DB1 12 act name=abcdefghijklmnop"), &c), LINK_ERR_ARGS);
 }

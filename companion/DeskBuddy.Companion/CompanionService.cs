@@ -45,6 +45,8 @@ public sealed class CompanionService : IDisposable
     public string Mood { get; private set; } = DeviceMood.Idle;
     /// <summary>The moods the firmware supports (hello moods=), in display order; empty: none.</summary>
     public IReadOnlyList<string> Moods { get; private set; } = [];
+    /// <summary>The activities the firmware can start with <c>act</c> (hello acts=), in display order; empty: none.</summary>
+    public IReadOnlyList<string> Acts { get; private set; } = [];
     public string ClockText { get; private set; } = "not synced";
     public IReadOnlySet<string> Caps { get; private set; } = new HashSet<string>();
 
@@ -285,6 +287,7 @@ public sealed class CompanionService : IDisposable
             Protocol = hello.Arg("proto");
             Caps = (hello.Arg("caps") ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries).ToHashSet();
             Moods = DeviceMood.ParseList(hello.Arg("moods"));
+            Acts = DeviceMood.ParseList(hello.Arg("acts")); // the same comma-separated list
             Mood = DeviceMood.Idle; // until status says otherwise
             IsConnected = true;
             _missedPings = 0;

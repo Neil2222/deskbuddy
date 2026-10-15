@@ -2,6 +2,7 @@
 
 #include <string.h>
 
+#include "buddy_activity.h"
 #include "buddy_art.h"
 #include "marquee.h"
 
@@ -377,14 +378,14 @@ void menu_art_icon(menu_canvas_t *c, menu_icon_t icon, uint8_t arg, int cx, int 
     case MENU_ICON_SURPRISE:
         menu_art_face(c, (buddy_face_t){BUDDY_EYES_WIDE, BUDDY_MOUTH_OPEN, true, false}, false, cx, cy);
         return;
-    case MENU_ICON_SNEEZE: // squeezed shut, mouth open: a... a...
-        menu_art_face(c, (buddy_face_t){BUDDY_EYES_SQUEEZE, BUDDY_MOUTH_OPEN, true, false}, false, cx, cy);
+    case MENU_ICON_SNEEZE: // the activities' faces, as the companion's tiles show them too
+        menu_art_face(c, buddy_act_face(BUDDY_EVENT_SNEEZE), false, cx, cy);
         return;
-    case MENU_ICON_STARE: // the narrowed stare of a challenger
-        menu_art_face(c, (buddy_face_t){BUDDY_EYES_FOCUS, BUDDY_MOUTH_NEUTRAL, true, false}, false, cx, cy);
+    case MENU_ICON_STARE:
+        menu_art_face(c, buddy_act_face(BUDDY_EVENT_STARE), false, cx, cy);
         return;
-    case MENU_ICON_MEDITATE: // eyes closed, a peaceful smile, antenna dimmed
-        menu_art_face(c, (buddy_face_t){BUDDY_EYES_CLOSED, BUDDY_MOUTH_SMILE, false, false}, false, cx, cy);
+    case MENU_ICON_MEDITATE:
+        menu_art_face(c, buddy_act_face(BUDDY_EVENT_MEDITATE), false, cx, cy);
         return;
     case MENU_ICON_MONSTER: {
         const gfx_image_t *can = &buddy_art_get()->props.can[BUDDY_CAN_LEVELS - 1];

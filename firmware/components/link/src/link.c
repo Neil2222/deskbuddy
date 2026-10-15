@@ -20,6 +20,7 @@ static const struct {
     {"hello", LINK_CMD_HELLO},       {"ping", LINK_CMD_PING},       {"status", LINK_CMD_STATUS},
     {"poke", LINK_CMD_POKE},         {"monster", LINK_CMD_MONSTER}, {"mode.set", LINK_CMD_MODE_SET},
     {"time.set", LINK_CMD_TIME_SET}, {"msg.show", LINK_CMD_MSG_SHOW}, {"mood.set", LINK_CMD_MOOD_SET},
+    {"act", LINK_CMD_ACT},
 };
 
 static const struct {
@@ -263,6 +264,14 @@ static link_result_t decode_args(link_command_t *c, const arg_t *args, int n)
         }
         memcpy(c->u.mood.name, name, len + 1);
         c->u.mood.secs = (uint32_t)v_secs;
+    } else if (c->cmd == LINK_CMD_ACT) {
+        // Like a mood: only the shape is checked here; which activities exist is the device's business.
+        const char *name = get_arg(args, n, "name", v[0]);
+        const size_t len = name ? strlen(name) : 0;
+        if (len == 0 || len > LINK_MOOD_NAME_MAX || strspn(name, "abcdefghijklmnopqrstuvwxyz_") != len) {
+            return LINK_ERR_ARGS;
+        }
+        memcpy(c->u.act.name, name, len + 1);
     }
     return LINK_OK;
 }

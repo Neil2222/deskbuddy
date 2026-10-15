@@ -19,9 +19,9 @@
   </ItemGroup>
 
   <!-- Buddy's own pixels, exported from the firmware sprites by tools/host-test.ps1 -Icons. Every face-*.png is taken
-       (not the @8x previews), so a face exported for a new mood is embedded without listing it here. -->
+       (not the @8x previews), so a face exported for a new mood or activity is embedded without listing it here. -->
   <ItemGroup>
-    <EmbeddedResource Include="..\..\assets\buddy\face-*.png;..\..\assets\buddy\can.png;..\..\assets\buddy\moon.png;..\..\assets\buddy\buddy.ico"
+    <EmbeddedResource Include="..\..\assets\buddy\face-*.png;..\..\assets\buddy\can.png;..\..\assets\buddy\glass.png;..\..\assets\buddy\moon.png;..\..\assets\buddy\buddy.ico"
                       Exclude="..\..\assets\buddy\*@*.png"
                       LogicalName="DeskBuddy.Assets.%(Filename)%(Extension)" />
   </ItemGroup>

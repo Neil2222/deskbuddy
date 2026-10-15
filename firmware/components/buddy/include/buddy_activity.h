@@ -16,8 +16,11 @@
 // function here, and an item in the touchscreen menu (menu_items.c).
 #pragma once
 
+#include <stdbool.h>
 #include <stdint.h>
 
+#include "buddy_brain.h"
+#include "buddy_mood.h"
 #include "buddy_pose.h"
 
 #ifdef __cplusplus
@@ -49,6 +52,15 @@ uint32_t buddy_activity_pose(buddy_state_t state, uint32_t t, buddy_pose_t *pose
 
 // What he is doing, for the touchscreen menu's footer ("drinking"); NULL when `state` is not an activity.
 const char *buddy_activity_doing(buddy_state_t state);
+
+// The activities by the names the protocol uses (act name=, hello acts=), in display order. The Monster sequence and
+// the tap reaction have their own commands (monster, poke) and are not listed.
+#define BUDDY_ACTS 4
+const char *buddy_act_name(int i);                       // i < BUDDY_ACTS
+bool buddy_act_parse(const char *name, buddy_event_t *out); // false (and *out untouched) for an unknown name
+
+// The face that stands for an activity in pictures of Buddy (the touchscreen menu's icons, the companion's tiles).
+buddy_face_t buddy_act_face(buddy_event_t ev);
 
 #ifdef __cplusplus
 }

@@ -289,12 +289,18 @@ static void run_command(const link_command_t *c, buddy_brain_t *brain, office_sw
         break;
     }
     case LINK_CMD_POKE:
-    case LINK_CMD_MONSTER: {
-        const buddy_event_t be = c->cmd == LINK_CMD_POKE ? BUDDY_EVENT_POKE : BUDDY_EVENT_DRINK_MONSTER;
+    case LINK_CMD_MONSTER:
+    case LINK_CMD_ACT: {
+        buddy_event_t be = c->cmd == LINK_CMD_POKE ? BUDDY_EVENT_POKE : BUDDY_EVENT_DRINK_MONSTER;
+        if (c->cmd == LINK_CMD_ACT && !buddy_act_parse(c->u.act.name, &be)) {
+            strcpy(body, "err unsupported"); // an activity this firmware does not have
+            break;
+        }
         if (!lit || screen->office || !scene_settled(screen) || !buddy_brain_event(brain, be, now)) {
             snprintf(body, sizeof(body), "err busy mode=%s", mode_name(screen, brain));
         } else {
-            ESP_LOGI(TAG, "%s (companion)", c->cmd == LINK_CMD_POKE ? "Poke" : "Monster time");
+            ESP_LOGI(TAG, "%s (companion)",
+                     c->cmd == LINK_CMD_POKE ? "Poke" : c->cmd == LINK_CMD_MONSTER ? "Monster time" : c->u.act.name);
         }
         break;
     }

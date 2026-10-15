@@ -60,10 +60,10 @@ public class MoodTests
     {
         var caps = new HashSet<string> { "mode", "poke", "monster", "mood" };
         IReadOnlyList<string> moods = ["idle", "sleepy", "happy"];
-        Assert.True(Activities.IsAvailable(Tile("Sleepy"), caps, moods));
-        Assert.False(Activities.IsAvailable(Tile("Angry"), caps, moods)); // not in moods=
-        Assert.False(Activities.IsAvailable(Tile("Sleepy"), new HashSet<string> { "mode" }, moods)); // no mood cap
-        Assert.True(Activities.IsAvailable(Tile("Monster"), caps, [])); // actions do not need moods=
+        Assert.True(Activities.IsAvailable(Tile("Sleepy"), caps, moods, []));
+        Assert.False(Activities.IsAvailable(Tile("Angry"), caps, moods, [])); // not in moods=
+        Assert.False(Activities.IsAvailable(Tile("Sleepy"), new HashSet<string> { "mode" }, moods, [])); // no mood cap
+        Assert.True(Activities.IsAvailable(Tile("Monster"), caps, [], [])); // actions do not need moods=
     }
 
     [Fact]

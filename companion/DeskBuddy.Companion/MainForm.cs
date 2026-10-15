@@ -234,20 +234,24 @@ public sealed class MainForm : Form
     private Label Caption(string text, int width) => new()
     {
         Text = text, Width = width, ForeColor = Theme.Muted, Font = _theme.Small, TextAlign = ContentAlignment.MiddleLeft,
-        Margin = new Padding(0, 3, 0, 3), Height = 28,
+        Margin = new Padding(0, 3, 0, 3), Height = 28, UseMnemonic = false, // plain text: "Food & Drink" keeps its "&"
     };
 
     private const int TileWidth = 96, TileHeight = 80, TileGap = 8, GroupGap = 16, GroupCaption = 22;
     // Mood tiles are smaller (six of them): the 21 px faces still fit whole at 2x above the label.
     private const int MoodTileWidth = 80, MoodTileHeight = 76;
 
-    // One group per kind (Mode, Actions, Mood), each a caption over its tiles. Groups sit side by side and wrap.
+    // One group per kind (Mode, Actions, Food & Drink, Mood), each a caption over its tiles. Groups sit side by side
+    // and wrap.
     private void BuildActivities()
     {
-        foreach (var kind in new[] { ActivityKind.Mode, ActivityKind.Action, ActivityKind.Mood })
+        foreach (var kind in new[] { ActivityKind.Mode, ActivityKind.Action, ActivityKind.Food, ActivityKind.Mood })
         {
             var group = new Panel { Margin = new Padding(0, 0, GroupGap, 0) };
-            var caption = Caption(kind switch { ActivityKind.Mode => "Mode", ActivityKind.Mood => "Mood", _ => "Actions" }, 120);
+            var caption = Caption(kind switch
+            {
+                ActivityKind.Mode => "Mode", ActivityKind.Mood => "Mood", ActivityKind.Food => "Food & Drink", _ => "Actions",
+            }, 120);
             caption.Dock = DockStyle.Top;
             caption.Height = GroupCaption;
             caption.TextAlign = ContentAlignment.TopLeft;
@@ -536,7 +540,7 @@ public sealed class MainForm : Form
 
         foreach (var (tile, activity) in _tiles)
         {
-            tile.Enabled = connected && Activities.IsAvailable(activity, _service.Caps, _service.Moods);
+            tile.Enabled = connected && Activities.IsAvailable(activity, _service.Caps, _service.Moods, _service.Acts);
             tile.Selected = connected && Activities.IsOn(activity, _service.Mode, _service.Mood);
         }
 

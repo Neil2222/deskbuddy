@@ -6,10 +6,10 @@
 //
 // Writes:
 //   face-<expression>.png, @8x     Buddy's head: antenna, head, eyes, mouth (24x21 at 1x). Every mood's face as the
-//                                  touchscreen menu shows it (buddy_mood_face(); idle's is "neutral"), and
-//                                  "surprised" (a tap).
+//                                  touchscreen menu shows it (buddy_mood_face(); idle's is "neutral"),
+//                                  "surprised" (a tap), and every activity's (face-<act name>, buddy_act_face()).
 //   buddy.png, buddy@8x.png        the whole robot, standing
-//   can.png, moon.png              the Monster can and the Office Mode moon, as on the device
+//   can.png, glass.png, moon.png   the Monster can, the glass of water and the Clock Mode moon, as on the device
 //   icon-<size>.png, buddy.ico     the application icon in 16..256 px. From 24 px up: the whole head at the largest
 //                                  integer scale that fits. 16 and 20 px are too small for the 24-px-wide head, so
 //                                  they are exact crops of it (face screen with eyes and mouth; at 20 px with the
@@ -18,6 +18,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "buddy_activity.h"
 #include "buddy_art.h"
 #include "buddy_mood.h"
 #include "office_clock.h"
@@ -220,19 +221,26 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    // Faces: every mood's (as the touchscreen menu shows them; idle's is "neutral"), and a tap's surprise.
+    // Faces: every mood's (as the touchscreen menu shows them; idle's is "neutral"), a tap's surprise, and every
+    // activity's (face-<act name>, as the menu's icons).
     struct {
         char name[16];
         buddy_face_t face;
-    } faces[BUDDY_MOOD_COUNT + 1];
+    } faces[BUDDY_MOOD_COUNT + 1 + BUDDY_ACTS];
     for (int m = 0; m < BUDDY_MOOD_COUNT; m++) {
         snprintf(faces[m].name, sizeof(faces[m].name), "%s", m == BUDDY_MOOD_IDLE ? "neutral" : buddy_mood_name(m));
         faces[m].face = buddy_mood_face((buddy_mood_t)m);
     }
     snprintf(faces[BUDDY_MOOD_COUNT].name, sizeof(faces[0].name), "surprised");
     faces[BUDDY_MOOD_COUNT].face = (buddy_face_t){BUDDY_EYES_WIDE, BUDDY_MOUTH_OPEN, true, false};
+    for (int i = 0; i < BUDDY_ACTS; i++) {
+        buddy_event_t ev = BUDDY_EVENT_POKE;
+        buddy_act_parse(buddy_act_name(i), &ev);
+        snprintf(faces[BUDDY_MOOD_COUNT + 1 + i].name, sizeof(faces[0].name), "%s", buddy_act_name(i));
+        faces[BUDDY_MOOD_COUNT + 1 + i].face = buddy_act_face(ev);
+    }
     canvas_t neutral = {0};
-    for (int i = 0; i <= BUDDY_MOOD_COUNT; i++) {
+    for (int i = 0; i < (int)(sizeof(faces) / sizeof(faces[0])); i++) {
         const buddy_face_t *f = &faces[i].face;
         canvas_t full = head(a, f->eyes, f->mouth, f->lit ? &a->antenna_on : &a->antenna_off);
         if (f->cig) { // in the corner of his mouth, glowing, all within the face screen
@@ -270,6 +278,10 @@ int main(int argc, char **argv)
     canvas_t can = make(a->props.can[BUDDY_CAN_LEVELS - 1].w, a->props.can[BUDDY_CAN_LEVELS - 1].h);
     blit(&can, &a->props.can[BUDDY_CAN_LEVELS - 1], &a->palette, 0, 0);
     save(dir, "can", &can);
+    const gfx_image_t *full_glass = &a->props.glass[BUDDY_GLASS_LEVELS - 1];
+    canvas_t glass = make(full_glass->w, full_glass->h);
+    blit(&glass, full_glass, &a->palette, 0, 0);
+    save(dir, "glass", &glass);
     const gfx_palette_t *moon_pal;
     const gfx_image_t *moon_img = office_moon_image(&moon_pal);
     if (!moon_img) {

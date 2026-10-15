@@ -20,14 +20,15 @@ extern "C" {
 
 #define LINK_PROTO 1
 #define LINK_LINE_MAX 768  // longest received line, including the newline (a message with percent-encoded text)
-#define LINK_REPLY_MAX 256 // longest line the device sends (hello lists capabilities, styles and moods)
+#define LINK_REPLY_MAX 256 // longest line the device sends (hello lists capabilities, styles, moods and activities)
 #define LINK_TEXT_MAX_CHARS 100 // msg.show text: Unicode code points...
 #define LINK_TEXT_MAX_BYTES 200 // ...and UTF-8 bytes
-#define LINK_MOOD_NAME_MAX 15    // mood.set name: lower-case letters and '_' (the device decides which exist)
+#define LINK_MOOD_NAME_MAX 15    // mood.set name and act name: lower-case letters and '_' (the device decides
+                                 // which exist)
 #define LINK_MOOD_SECS_MAX 86400 // mood.set secs: at most a day
 
 typedef enum {
-    LINK_CMD_HELLO = 1, // -> ok proto= fw= caps= styles= moods=
+    LINK_CMD_HELLO = 1, // -> ok proto= fw= caps= styles= moods= acts=
     LINK_CMD_PING,      // -> ok
     LINK_CMD_STATUS,    // -> ok mode= mood= time= msg= uptime=
     LINK_CMD_POKE,      // the surprise reaction, as if the robot had been tapped
@@ -36,6 +37,7 @@ typedef enum {
     LINK_CMD_TIME_SET,  // utc= [ms=] off= [next= next_off=]
     LINK_CMD_MSG_SHOW,  // id= [style=] text=
     LINK_CMD_MOOD_SET,  // name= [secs=]
+    LINK_CMD_ACT,       // name=: an activity (hello acts=)
 } link_cmd_t;
 
 // How a message is presented. Only the marquee exists so far; the wire names are listed in link.c.
@@ -70,6 +72,9 @@ typedef struct {
             char name[LINK_MOOD_NAME_MAX + 1];
             uint32_t secs; // 0: until changed
         } mood; // MOOD_SET
+        struct {
+            char name[LINK_MOOD_NAME_MAX + 1];
+        } act; // ACT
     } u;
 } link_command_t;
 
