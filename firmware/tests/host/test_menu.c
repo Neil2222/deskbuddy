@@ -216,7 +216,7 @@ void test_menu_activities_and_availability(void)
     menu_status_t no_office = k_idle;
     no_office.office = false;
     CHECK_EQ(slot_of(&m, &no_office, "activity.clock"), -1);
-    CHECK_EQ(menu_page_items(&m, &no_office, items, NULL), 4); // Surprise!, Sneeze, Stare, Meditate
+    CHECK_EQ(menu_page_items(&m, &no_office, items, NULL), 5); // Surprise!, Sneeze, Stare, Meditate, Peukie?
 
     // Food & Drink: Monster and Water work (and are busy during any activity); the rest is planned.
     menu_open(&m, MENU_FOOD, t += 500);
@@ -526,5 +526,7 @@ void test_menu_redraws_match_full_redraw(void)
     CHECK_EQ(bad, 0);
     const int panel = layout.panel.w * layout.panel.h;
     printf("    menu: %d frames, largest redraw %d px (panel %d px)\n", frames, max_area, panel);
-    CHECK(max_area <= panel / 2); // page changes flip tile by tile, never the whole panel at once
+    // Page changes flip tile by tile, never the whole panel at once. (Back from a full Activities page is the most:
+    // the first rows of Home make the old tiles they overlap give way.)
+    CHECK(max_area < panel * 2 / 3);
 }

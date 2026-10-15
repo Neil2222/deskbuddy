@@ -18,6 +18,7 @@
 #include "layout.h"
 #include "marquee.h"
 #include "menu.h"
+#include "menu_ask.h"
 #include "menu_view.h"
 #include "office_clock.h"
 #include "office_zoom.h"
@@ -379,13 +380,16 @@ int main(int argc, char **argv)
     static uint8_t clock_mem[OFFICE_CLOCK_MEMORY];
     static uint8_t menu_mem[MENU_VIEW_MEMORY];
     static marquee_t marquee;
+    static menu_ask_t ask;
     s_layout = layout_compute(W, H, STAGE_PERCENT, false, ALIGN);
     if (!gfx_scene_init(&s_scene, W, H, layout_background, &s_layout, strip, 16 * 1024, ALIGN) ||
         !buddy_view_init(&s_view, &s_scene, s_layout.stage, 10, 0) ||
         !menu_init(&s_menu, &menu_default, layout_panel_content(&s_layout), 0) ||
         !menu_view_init(&s_menu_view, &s_scene, &s_menu, menu_mem, sizeof(menu_mem), 10) ||
         !office_clock_init(&clock, &s_scene, s_layout.screen, clock_mem, sizeof(clock_mem), 20) ||
-        !marquee_init(&marquee, &s_scene, 30)) {
+        !marquee_init(&marquee, &s_scene, 30) ||
+        !menu_ask_init(&ask, &s_scene, s_layout.stage, s_view.home_y0 - BUDDY_MAX_LIFT * s_view.home_scale,
+                       "PEUKIE ROKEN?", 25)) {
         fprintf(stderr, "scene setup failed\n");
         return 1;
     }
@@ -509,6 +513,38 @@ int main(int argc, char **argv)
     if (!write("activity_sheet", &act_sheet)) {
         return 1;
     }
+
+    // "PEUKIE ROKEN?": hopeful (glancing at NEE, JA being pressed), impatient with the bar red, and sad after no.
+    static const struct {
+        buddy_state_t state;
+        uint32_t t;
+        int pressed;
+        const char *name;
+    } k_ask[] = {
+        {BUDDY_STATE_ASK, 200, -1, "act_ask_0200"},
+        {BUDDY_STATE_ASK, 900, -1, "act_ask_0900"},
+        {BUDDY_STATE_ASK, 20500, MENU_ANSWER_YES, "act_ask_ja"},
+        {BUDDY_STATE_ASK, 54000, -1, "act_ask_54000"},
+        {BUDDY_STATE_SAD, 1500, -1, "act_sad_1500"},
+    };
+    const menu_status_t asking = {.mood = BUDDY_MOOD_IDLE, .busy = true, .doing = "asking", .office = true};
+    for (unsigned i = 0; i < sizeof(k_ask) / sizeof(k_ask[0]); i++) {
+        buddy_pose_t pose = {.state = k_ask[i].state};
+        buddy_activity_pose(k_ask[i].state, k_ask[i].t, &pose);
+        buddy_view_apply(&s_view, &pose, k_ask[i].t);
+        menu_view_apply(&s_menu_view, &s_menu, &asking, 20000 + k_ask[i].t);
+        ask.pressed = (int8_t)k_ask[i].pressed;
+        const bool on = k_ask[i].state == BUDDY_STATE_ASK;
+        menu_ask_apply(&ask, on ? BUDDY_ASK_MS - k_ask[i].t : 0, BUDDY_ASK_MS);
+        if (!shot(k_ask[i].name)) {
+            return 1;
+        }
+    }
+    ask.pressed = MENU_ANSWER_NONE;
+    menu_ask_apply(&ask, 0, BUDDY_ASK_MS);
+    menu_view_apply(&s_menu_view, &s_menu, &idle, 40000);
+    const buddy_pose_t rest = {.eyes = BUDDY_EYES_OPEN};
+    buddy_view_apply(&s_view, &rest, 0);
 
     if (!menu_screens()) {
         return 1;

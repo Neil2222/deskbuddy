@@ -29,7 +29,7 @@ DeskBuddy and the Windows companion (`companion/`) talk over the board's **UART*
 | `hello` | | `ok proto=1 fw=<version> caps=<list> styles=<list> moods=<list> acts=<list>` |
 | `ping` | | `ok` |
 | `status` | | `ok mode=<normal\|office\|monster> mood=<mood> time=<set\|unset> msg=<showing\|idle> queued=<0\|1> uptime=<s>` (`office`: Clock Mode, see below) |
-| `poke` | | `ok`, or `err busy mode=<mode>` (Clock Mode, an activity running (Monster, water, sneeze, stare, meditate), a zoom under way, screen not up yet) |
+| `poke` | | `ok`, or `err busy mode=<mode>` (Clock Mode, an activity running (Monster, water, sneeze, stare, meditate, the peukie question), a zoom under way, screen not up yet) |
 | `monster` | | `ok`, or `err busy mode=<mode>` (as `poke`) |
 | `act` | `name=<activity>` | `ok` (it starts), `err busy mode=<mode>` (as `poke`), `err unsupported` (an activity this firmware does not have), `err bad_args` |
 | `mode.set` | `mode=office\|clock\|normal` | `ok` (switches like *Clock* in the touchscreen menu / a tap on the clock: Buddy zooms into the clock or out of it, about 1.5 s; `evt mode` follows when the new scene is on screen; a request during a zoom is carried out after it), or `err unavailable` |
@@ -40,6 +40,8 @@ DeskBuddy and the Windows companion (`companion/`) talk over the board's **UART*
 **Capabilities:** `hello` lists what the firmware supports (`poke,monster,mode,time,status,msg,mood,act`), which message styles it draws (`styles=marquee`), which moods it has (`moods=idle,relaxed,peukie,angry,sleepy,working,happy`) and which activities `act` starts (`acts=water,sneeze,stare,meditate`), each in display order. The companion only enables the matching buttons, so new commands, styles, moods and activities can be added without breaking older companions or firmware.
 
 **Activities (`act`)** are short shows on top of Buddy's mood, the same ones the touchscreen menu starts: `water` (a glass of water short-circuits him), `sneeze` (his head flies off), `stare` (a staring contest, the camera close on his face), `meditate` (he floats until a notification drops him). Each plays to its end (2.7 to 7.4 s); meanwhile `poke`, `monster` and `act` get `err busy`, and the mood resumes afterwards. Names are lower-case letters and `_`, at most 15; `monster` and `poke` keep their own commands.
+
+**The peukie question** (*Peukie?* in the touchscreen menu) is answered on the touchscreen only, so it has no command. While Buddy asks (up to a minute) and while he is sad after a *no*, he is busy as during an activity. A *yes* starts a smoke break: `evt mood mood=peukie`, and two minutes later `evt mood` with the mood he had before.
 
 **Clock Mode is `office` on the wire.** It was first called Office Mode; `status`, `evt mode` and `mode.set` keep that name, so existing companions and scripts work unchanged. `mode.set mode=clock` is accepted as an alias (firmware from 2026-10-15 on; older firmware answers `err bad_args`, so clients that must work with any firmware send `office`).
 
@@ -69,7 +71,7 @@ DeskBuddy and the Windows companion (`companion/`) talk over the board's **UART*
 |---|---|
 | `evt boot proto=1 fw=<version>` | the firmware started (the companion re-sends the time) |
 | `evt mode mode=<normal\|office\|monster>` | the mode changed, by touch or by command |
-| `evt mood mood=<mood>` | the mood changed: by `mood.set`, on the touchscreen menu, or a timed mood ran out |
+| `evt mood mood=<mood>` | the mood changed: by `mood.set`, on the touchscreen menu, a timed mood ran out, or a smoke break began or ended |
 | `evt msg id=<id> state=<showing\|done>` | a message went up on the sign / finished |
 
 ## Errors

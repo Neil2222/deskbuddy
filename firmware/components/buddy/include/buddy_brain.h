@@ -33,6 +33,7 @@ typedef enum {
     BUDDY_EVENT_SNEEZE = 4,
     BUDDY_EVENT_STARE = 5,
     BUDDY_EVENT_MEDITATE = 6,
+    BUDDY_EVENT_ASK_PEUKIE = 7,    // "PEUKIE ROKEN?": he asks and waits for buddy_brain_answer()
 } buddy_event_t;
 
 typedef struct {
@@ -42,8 +43,9 @@ typedef struct {
     uint32_t rng;
     buddy_mood_t mood;
     uint32_t mood_start;
-    uint32_t mood_end; // when a timed mood returns to idle (mood_timed)
+    uint32_t mood_end; // when a timed mood ends (mood_timed)...
     bool mood_timed;
+    buddy_mood_t mood_back; // ...and the mood that follows it (idle, or what he was in before a smoke break)
     uint32_t cycle_start, cycle_len, cycle_n, cycle_seed; // where the mood's loop is
 } buddy_brain_t;
 
@@ -56,6 +58,13 @@ bool buddy_brain_event(buddy_brain_t *b, buddy_event_t ev, uint32_t now_ms);
 
 // True while an activity plays (events are ignored then).
 bool buddy_brain_busy(const buddy_brain_t *b, uint32_t now_ms);
+
+// While he asks (BUDDY_STATE_ASK): ms until he gives up waiting (as if the answer were no); 0 when not asking.
+uint32_t buddy_brain_asking(const buddy_brain_t *b, uint32_t now_ms);
+
+// Answers his question. Yes: happy hops, then a smoke break (the peukie mood for BUDDY_SMOKE_BREAK_MS, then back to
+// the mood he was in). No: briefly sad. Returns false when he is not asking (or the answer came too late).
+bool buddy_brain_answer(buddy_brain_t *b, bool yes, uint32_t now_ms);
 
 // Drops whatever the character is doing, including a running Monster sequence, and idles from now_ms on (used
 // when he comes back from being paused, e.g. after Office Mode).

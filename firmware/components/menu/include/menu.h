@@ -77,6 +77,7 @@ typedef enum {
     MENU_ICON_SNEEZE,   // Buddy's face, for activities that are him (no props)
     MENU_ICON_STARE,
     MENU_ICON_MEDITATE,
+    MENU_ICON_PEUKIE,   // the smoking face, for "PEUKIE?" (the question)
     MENU_ICON_COUNT,
 } menu_icon_t;
 

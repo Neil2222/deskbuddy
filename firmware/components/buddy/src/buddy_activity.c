@@ -428,6 +428,79 @@ static uint32_t meditate(uint32_t t, buddy_pose_t *p)
     return t < M_UP + 300 ? M_UP + 300 - t : BUDDY_MEDITATE_MS - t;
 }
 
+// --- "PEUKIE ROKEN?" ------------------------------------------------------------------------------------------------
+
+#define A_OFFER 350u      // the hand comes out with a cigarette
+#define A_GLANCE_MS 1800u // a hopeful hop, a glance at NEE, at JA, a blink
+#define A_IMPATIENT (BUDDY_ASK_MS - 10000u)
+
+static uint32_t ask(uint32_t t, buddy_pose_t *p)
+{
+    buddy_props_t *pr = &p->props;
+    pr->cig = true; // a fresh one, not lit yet
+    pr->cig_left = BUDDY_CIG_LENGTHS - 1;
+    pr->ember = 0;
+    p->eyes = BUDDY_EYES_OPEN;
+    p->mouth = BUDDY_MOUTH_SMILE;
+    p->antenna = BUDDY_ANTENNA_CALM;
+    if (t < A_OFFER) {
+        hand(pr, BUDDY_HAND_HOME, BUDDY_HAND_SHOW, buddy_ease(t, A_OFFER));
+        p->eyes = BUDDY_EYES_WIDE;
+        p->antenna = BUDDY_ANTENNA_EXCITED;
+        return TICK;
+    }
+    hand(pr, BUDDY_HAND_SHOW, BUDDY_HAND_SHOW, 0);
+    if (t >= A_IMPATIENT) { // come on...
+        p->eyes = BUDDY_EYES_HALF;
+        p->mouth = BUDDY_MOUTH_NEUTRAL;
+        p->wobble = (t / 400) % 2 ? 1 : 0;
+        return 400 - t % 400;
+    }
+    const uint32_t u = (t - A_OFFER) % A_GLANCE_MS;
+    uint32_t next;
+    if (u < 300) { // hopeful
+        p->lift = buddy_hop(u, 300, 1);
+        p->eyes = BUDDY_EYES_HAPPY;
+        next = TICK;
+    } else if (u < 800) { // NEE?
+        p->look = -1;
+        next = 800 - u;
+    } else if (u < 1300) { // JA!
+        p->look = 1;
+        next = 1300 - u;
+    } else if (u < 1450) {
+        p->eyes = BUDDY_EYES_CLOSED;
+        next = 1450 - u;
+    } else {
+        next = A_GLANCE_MS - u;
+    }
+    return buddy_min_u32(next, A_IMPATIENT - t);
+}
+
+static uint32_t sad(uint32_t t, buddy_pose_t *p)
+{
+    buddy_props_t *pr = &p->props;
+    p->eyes = BUDDY_EYES_HALF;
+    p->mouth = BUDDY_MOUTH_FROWN;
+    p->antenna = BUDDY_ANTENNA_DIM;
+    if (t < 400) { // the cigarette goes away again
+        pr->cig = true;
+        pr->cig_left = BUDDY_CIG_LENGTHS - 1;
+        hand(pr, BUDDY_HAND_SHOW, BUDDY_HAND_HOME, buddy_ease(t, 400));
+        p->eyes = BUDDY_EYES_CLOSED;
+        return TICK;
+    }
+    p->nod = 1; // head down, screen dimmed
+    p->tint = BUDDY_TINT_DROWSY;
+    if (t >= 1600 && t < 1900) { // a sigh
+        p->mouth = BUDDY_MOUTH_PUFF;
+    }
+    if (t >= 700 && t < 2500) { // a tear rolls down under his left eye
+        emit(p, 0, BUDDY_PART_SWEAT, BUDDY_FROM_BROW, 8, 4 + (int)((t - 700) * 4 / 1800), 0);
+    }
+    return 50;
+}
+
 // --- Dispatch -------------------------------------------------------------------------------------------------------
 
 uint32_t buddy_activity_ms(buddy_state_t state)
@@ -443,6 +516,10 @@ uint32_t buddy_activity_ms(buddy_state_t state)
         return BUDDY_STARE_MS;
     case BUDDY_STATE_MEDITATE:
         return BUDDY_MEDITATE_MS;
+    case BUDDY_STATE_ASK:
+        return BUDDY_ASK_MS;
+    case BUDDY_STATE_SAD:
+        return BUDDY_SAD_MS;
     default:
         return 0;
     }
@@ -466,6 +543,12 @@ uint32_t buddy_activity_pose(buddy_state_t state, uint32_t t, buddy_pose_t *pose
     case BUDDY_STATE_MEDITATE:
         next = meditate(t, pose);
         break;
+    case BUDDY_STATE_ASK:
+        next = ask(t, pose);
+        break;
+    case BUDDY_STATE_SAD:
+        next = sad(t, pose);
+        break;
     default:
         return UINT32_MAX;
     }
@@ -487,6 +570,10 @@ const char *buddy_activity_doing(buddy_state_t state)
         return "staring";
     case BUDDY_STATE_MEDITATE:
         return "meditating";
+    case BUDDY_STATE_ASK:
+        return "asking";
+    case BUDDY_STATE_SAD:
+        return "sad";
     default:
         return NULL;
     }

@@ -11,6 +11,9 @@
 //             fuming. The sign: BEST OF THREE?
 //   meditate  eyes closed, he floats up and hovers, sparkles drifting by. The sign: OMMMMM. A notification jolts him:
 //             wide eyes, strobing antenna, and he drops to the ground with a thud
+//   ask       "PEUKIE ROKEN?": he holds out a cigarette and looks hopefully from NEE to JA (the buttons are drawn by
+//             the touchscreen menu, menu_ask.h); impatient towards the end. buddy_brain_answer() ends it: yes is
+//             happy hops and a smoke break (the peukie mood), no (or a minute without an answer) makes him sad
 //
 // Pure logic: no rendering, no clock of its own. Adding one: a buddy_state_t, a buddy_event_t, its length and pose
 // function here, and an item in the touchscreen menu (menu_items.c).
@@ -31,6 +34,9 @@ extern "C" {
 #define BUDDY_SNEEZE_MS 2700u
 #define BUDDY_STARE_MS 5200u
 #define BUDDY_MEDITATE_MS 7400u
+#define BUDDY_ASK_MS 60000u          // "PEUKIE ROKEN?": how long he waits for an answer (then: as if no)
+#define BUDDY_SAD_MS 3000u           // after no
+#define BUDDY_SMOKE_BREAK_MS 120000u // after yes: the peukie mood for this long, then back to his mood
 
 // Lines Buddy puts on the LED sign (buddy_pose_t.say).
 typedef enum {

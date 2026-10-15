@@ -48,6 +48,7 @@ void buddy_brain_init(buddy_brain_t *b, uint32_t now_ms, uint32_t seed)
     b->mood = BUDDY_MOOD_IDLE;
     b->mood_start = now_ms;
     b->mood_timed = false;
+    b->mood_back = BUDDY_MOOD_IDLE;
     start_cycle(b, now_ms);
 }
 
@@ -87,6 +88,9 @@ bool buddy_brain_event(buddy_brain_t *b, buddy_event_t ev, uint32_t now_ms)
     case BUDDY_EVENT_MEDITATE:
         enter(b, BUDDY_STATE_MEDITATE, now_ms);
         return true;
+    case BUDDY_EVENT_ASK_PEUKIE:
+        enter(b, BUDDY_STATE_ASK, now_ms);
+        return true;
     default:
         return false;
     }
@@ -117,13 +121,40 @@ void buddy_brain_set_mood(buddy_brain_t *b, buddy_mood_t mood, uint32_t duration
     }
     b->mood_timed = duration_ms > 0 && mood != BUDDY_MOOD_IDLE;
     b->mood_end = now_ms + duration_ms;
+    b->mood_back = BUDDY_MOOD_IDLE;
+}
+
+uint32_t buddy_brain_asking(const buddy_brain_t *b, uint32_t now_ms)
+{
+    const uint32_t t = now_ms - b->state_start;
+    return b->state == BUDDY_STATE_ASK && t < BUDDY_ASK_MS ? BUDDY_ASK_MS - t : 0;
+}
+
+bool buddy_brain_answer(buddy_brain_t *b, bool yes, uint32_t now_ms)
+{
+    if (!buddy_brain_asking(b, now_ms)) {
+        return false;
+    }
+    if (!yes) {
+        enter(b, BUDDY_STATE_SAD, now_ms);
+        return true;
+    }
+    // A smoke break, then back to how he was (if he was smoking already, he just carries on).
+    const buddy_mood_t before = buddy_brain_mood(b, now_ms);
+    if (before != BUDDY_MOOD_PEUKIE) {
+        buddy_brain_set_mood(b, BUDDY_MOOD_PEUKIE, BUDDY_SMOKE_BREAK_MS, now_ms);
+        b->mood_back = before;
+    }
+    enter(b, BUDDY_STATE_HAPPY, now_ms); // happy hops first
+    return true;
 }
 
 buddy_mood_t buddy_brain_mood(buddy_brain_t *b, uint32_t now_ms)
 {
     if (b->mood_timed && buddy_reached(now_ms, b->mood_end)) {
         b->mood_timed = false;
-        b->mood = BUDDY_MOOD_IDLE;
+        b->mood = b->mood_back;
+        b->mood_back = BUDDY_MOOD_IDLE;
         b->mood_start = b->mood_end;
         resume_mood(b, now_ms);
     }
@@ -160,6 +191,11 @@ uint32_t buddy_brain_tick(buddy_brain_t *b, uint32_t now_ms, buddy_pose_t *pose)
         b->state = BUDDY_STATE_HAPPY;
         b->state_start += BUDDY_SURPRISE_MS;
         t -= BUDDY_SURPRISE_MS;
+    }
+    if (b->state == BUDDY_STATE_ASK && t >= BUDDY_ASK_MS) { // no answer in time: as if it were no
+        b->state = BUDDY_STATE_SAD;
+        b->state_start += BUDDY_ASK_MS;
+        t -= BUDDY_ASK_MS;
     }
     const uint32_t act = buddy_activity_ms(b->state);
     if ((b->state == BUDDY_STATE_HAPPY && t >= HAPPY_MS) || (act && t >= act)) {

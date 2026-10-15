@@ -31,6 +31,7 @@
 #include "layout.h"
 #include "marquee.h"
 #include "menu.h"
+#include "menu_ask.h"
 #include "menu_view.h"
 #include "office_clock.h"
 #include "office_switch.h"
@@ -129,6 +130,9 @@ static void verify_frame(const gfx_surface_t *frame, perf_t *perf)
 
 // Buddy's zoom into Office Mode and back (office_zoom.h); all Office Mode requests go here.
 static office_zoom_t s_zoom;
+
+// Buddy's question on the stage ("PEUKIE ROKEN?"), shown while the brain asks it.
+static menu_ask_t s_ask;
 
 // No scene change under way or asked for: neither Buddy's zoom nor the scene switch.
 static bool scene_settled(const office_switch_t *screen)
@@ -420,6 +424,10 @@ static void render_task(void *arg)
     if (!has_menu) {
         ESP_LOGW(TAG, "no touchscreen menu (the panel is too small, or no memory)");
     }
+    const int head_top = view.home_y0 - BUDDY_MAX_LIFT * view.home_scale;
+    if (!menu_ask_init(&s_ask, &s_scene, s_layout.stage, head_top, "PEUKIE ROKEN?", 25)) {
+        ESP_LOGW(TAG, "Buddy cannot ask questions (they do not fit the stage)");
+    }
     // The glyph cache is only read when the clock redraws (rarely): PSRAM.
     uint8_t *clock_mem = heap_caps_malloc(OFFICE_CLOCK_MEMORY, MALLOC_CAP_SPIRAM);
     const bool has_office = office_clock_init(&clock, &s_scene, s_layout.screen, clock_mem, OFFICE_CLOCK_MEMORY, 20);
@@ -484,11 +492,25 @@ static void render_task(void *arg)
                     }
                     continue;
                 }
+                // His question takes the touches that go down on its buttons (and answers on release).
+                const menu_touch_t type = ev.type == INPUT_DOWN ? MENU_TOUCH_DOWN
+                                          : ev.type == INPUT_MOVE ? MENU_TOUCH_MOVE
+                                                                  : MENU_TOUCH_UP;
+                const menu_answer_t answer = menu_ask_touch(&s_ask, type, ev.x, ev.y);
+                if (answer != MENU_ANSWER_NONE && buddy_brain_answer(&brain, answer == MENU_ANSWER_YES, t)) {
+                    ESP_LOGI(TAG, "peukie? %s", answer == MENU_ANSWER_YES ? "ja" : "nee");
+                }
+                if (menu_ask_holding(&s_ask)) {
+                    if (ev.type == INPUT_DOWN && !pending_touch_us) {
+                        pending_touch_us = ev.irq_us; // the button sinks in
+                    }
+                    continue;
+                }
+                if (answer != MENU_ANSWER_NONE) {
+                    continue;
+                }
                 if (has_menu) {
                     const menu_status_t st = menu_status(&brain, has_office, t);
-                    const menu_touch_t type = ev.type == INPUT_DOWN ? MENU_TOUCH_DOWN
-                                              : ev.type == INPUT_MOVE ? MENU_TOUCH_MOVE
-                                                                      : MENU_TOUCH_UP;
                     const menu_result_t r = menu_touch(&menu, type, ev.x, ev.y, &st, t);
                     run_menu_action(&r, &brain, t);
                     if (menu.down) {
@@ -523,7 +545,7 @@ static void render_task(void *arg)
 #if CONFIG_DESKBUDDY_DEMO_ACTIVITY_S > 0
         if ((int32_t)(now - next_activity) >= 0) {
             static const buddy_event_t k_demo[] = {BUDDY_EVENT_DRINK_WATER, BUDDY_EVENT_SNEEZE, BUDDY_EVENT_STARE,
-                                                   BUDDY_EVENT_MEDITATE};
+                                                   BUDDY_EVENT_MEDITATE, BUDDY_EVENT_ASK_PEUKIE}; // unanswered: sad
             const buddy_event_t ev = k_demo[demo_activity];
             if (!screen.office && scene_settled(&screen) && buddy_brain_event(&brain, ev, now)) {
                 ESP_LOGI(TAG, "activity %d (demo)", (int)ev);
@@ -629,6 +651,10 @@ static void render_task(void *arg)
                 next = menu_next < next ? menu_next : next;
             }
         }
+        // The question shows while he asks it: not during the zoom or in Clock Mode.
+        const uint32_t ask_left = !screen.office && !zoom.animate ? buddy_brain_asking(&brain, now) : 0;
+        const uint32_t ask_next = menu_ask_apply(&s_ask, ask_left, BUDDY_ASK_MS);
+        next = ask_next < next ? ask_next : next;
         next = step.next_ms < next ? step.next_ms : next;
         next = step.redrawn ? 0 : next; // the zoom carries on (and a waiting message goes up) right away
         next = !light_ok && next > BACKLIGHT_RETRY_MS ? BACKLIGHT_RETRY_MS : next;

@@ -101,7 +101,11 @@ extern int g_test_failed;
     X(activity_sneeze_blows_his_head_off)            \
     X(activity_stare_pushes_in_and_he_loses)         \
     X(activity_meditation_floats_until_a_notification) \
-    X(activity_redraws_match_full_redraw_on_the_stage)
+    X(activity_redraws_match_full_redraw_on_the_stage) \
+    X(ask_yes_is_happy_hops_a_smoke_break_then_his_mood) \
+    X(ask_no_or_no_answer_makes_him_briefly_sad)     \
+    X(ask_buttons_beside_him_answer_on_release)      \
+    X(ask_redraws_match_full_redraw)
 
 #define X(name) void test_##name(void);
 TEST_LIST

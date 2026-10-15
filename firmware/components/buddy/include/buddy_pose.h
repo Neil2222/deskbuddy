@@ -20,6 +20,8 @@ typedef enum {
     BUDDY_STATE_SNEEZE,    // a sneeze that blows his head off
     BUDDY_STATE_STARE,     // a staring contest with the viewer
     BUDDY_STATE_MEDITATE,  // floating in meditation, until a notification
+    BUDDY_STATE_ASK,       // asks a question ("PEUKIE ROKEN?") and waits for an answer (buddy_brain_answer)
+    BUDDY_STATE_SAD,       // the answer was no (or none came): briefly sad
 } buddy_state_t;
 
 typedef enum {
