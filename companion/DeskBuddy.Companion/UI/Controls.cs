@@ -439,6 +439,9 @@ public sealed class Picker : Control
 
     public object? SelectedItem => _selectedIndex >= 0 ? Items[_selectedIndex] : null;
 
+    /// <summary>The user picked another item (from the list or with the arrow keys); not raised for code changes.</summary>
+    public event EventHandler? Picked;
+
     public Picker(Theme theme)
     {
         _theme = theme;
@@ -450,7 +453,7 @@ public sealed class Picker : Control
         AccessibleRole = AccessibleRole.ComboBox;
         _menu = new ContextMenuStrip
         {
-            Renderer = new MenuRenderer(), ShowImageMargin = false, ShowCheckMargin = true, Font = theme.Text10,
+            Renderer = new DarkMenuRenderer(), ShowImageMargin = false, ShowCheckMargin = true, Font = theme.Text10,
             BackColor = Theme.Input, ForeColor = Theme.Text,
         };
         _menu.Closed += (_, _) => Invalidate();
@@ -475,7 +478,7 @@ public sealed class Picker : Control
         {
             var index = i;
             var item = new ToolStripMenuItem(Items[i].ToString()) { Checked = i == _selectedIndex };
-            item.Click += (_, _) => SelectedIndex = index;
+            item.Click += (_, _) => Pick(index);
             _menu.Items.Add(item);
         }
         _menu.MinimumSize = new Size(Width, 0);
@@ -495,15 +498,25 @@ public sealed class Picker : Control
             e.Handled = true;
             break;
         case Keys.Up when _selectedIndex > 0:
-            SelectedIndex = _selectedIndex - 1;
+            Pick(_selectedIndex - 1);
             e.Handled = true;
             break;
         case Keys.Down when _selectedIndex < Items.Count - 1:
-            SelectedIndex = _selectedIndex + 1;
+            Pick(_selectedIndex + 1);
             e.Handled = true;
             break;
         }
         base.OnKeyDown(e);
+    }
+
+    private void Pick(int index)
+    {
+        var changed = index != _selectedIndex;
+        SelectedIndex = index;
+        if (changed)
+        {
+            Picked?.Invoke(this, EventArgs.Empty);
+        }
     }
 
     protected override void OnMouseDown(MouseEventArgs e)
@@ -565,27 +578,30 @@ public sealed class Picker : Control
         TextRenderer.DrawText(g, Theme.GlyphChevronDown, _theme.Glyphs, new Rectangle(Width - pad - chevron, 0, chevron, Height),
                               Theme.Muted, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
     }
+}
 
-    /// <summary>The menu in the window's colours; the chosen item is marked with a cyan LED, like an active mode.</summary>
-    private sealed class MenuRenderer() : ToolStripProfessionalRenderer(new MenuColors())
+/// <summary>
+/// Menus in the window's colours (the Picker's list, the schedule's copy menu): ticked items are marked with a cyan
+/// LED, like an active mode. An item's own ForeColor is kept.
+/// </summary>
+internal sealed class DarkMenuRenderer() : ToolStripProfessionalRenderer(new Colors())
+{
+    protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e)
     {
-        protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e)
-        {
-            e.TextColor = Theme.Text;
-            base.OnRenderItemText(e);
-        }
-
-        protected override void OnRenderItemCheck(ToolStripItemImageRenderEventArgs e)
-        {
-            var d = e.ToolStrip?.LogicalToDeviceUnits(6) ?? 6;
-            var r = e.ImageRectangle;
-            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-            using var dot = new SolidBrush(Theme.Cyan);
-            e.Graphics.FillEllipse(dot, r.X + (r.Width - d) / 2f, r.Y + (r.Height - d) / 2f, d, d);
-        }
+        e.TextColor = e.Item?.ForeColor ?? Theme.Text;
+        base.OnRenderItemText(e);
     }
 
-    private sealed class MenuColors : ProfessionalColorTable
+    protected override void OnRenderItemCheck(ToolStripItemImageRenderEventArgs e)
+    {
+        var d = e.ToolStrip?.LogicalToDeviceUnits(6) ?? 6;
+        var r = e.ImageRectangle;
+        e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+        using var dot = new SolidBrush(Theme.Cyan);
+        e.Graphics.FillEllipse(dot, r.X + (r.Width - d) / 2f, r.Y + (r.Height - d) / 2f, d, d);
+    }
+
+    private sealed class Colors : ProfessionalColorTable
     {
         public override Color ToolStripDropDownBackground => Theme.Input;
         public override Color MenuBorder => Theme.CardBorder;
@@ -597,6 +613,12 @@ public sealed class Picker : Control
         public override Color CheckBackground => Theme.Input;
         public override Color CheckSelectedBackground => Theme.TileHover;
         public override Color CheckPressedBackground => Theme.TilePressed;
+        public override Color SeparatorDark => Theme.CardBorder;
+        public override Color SeparatorLight => Theme.Input;
+        public override Color MenuItemSelectedGradientBegin => Theme.TileHover;
+        public override Color MenuItemSelectedGradientEnd => Theme.TileHover;
+        public override Color MenuItemPressedGradientBegin => Theme.TilePressed;
+        public override Color MenuItemPressedGradientEnd => Theme.TilePressed;
     }
 }
 
