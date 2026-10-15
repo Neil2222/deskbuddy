@@ -1,4 +1,5 @@
 using DeskBuddy.Companion.Device;
+using DeskBuddy.Companion.Pdc;
 using DeskBuddy.Companion.Protocol;
 using Microsoft.Win32;
 
@@ -29,6 +30,8 @@ public sealed class CompanionService : IDisposable
     private DateTime _nextPing;
     private DateTime _nextSync;
     private int _missedPings;
+    private readonly PdcLease _pdcLease = new();
+    private readonly string? _pdcWarning;
 
     public bool AutoConnect { get; private set; } = true;
     /// <summary>Port chosen by the user; null: the first DeskBuddy (CH343) port found.</summary>
@@ -49,6 +52,8 @@ public sealed class CompanionService : IDisposable
     public IReadOnlyList<string> Acts { get; private set; } = [];
     public string ClockText { get; private set; } = "not synced";
     public IReadOnlySet<string> Caps { get; private set; } = new HashSet<string>();
+    /// <summary>The PDC Manager "Ze Doen Maar Wat" integration (off by default; see Pdc/).</summary>
+    public PdcIntegration Pdc { get; }
 
     public event Action? Changed;
     public event Action<LogKind, string>? Log;
@@ -57,6 +62,9 @@ public sealed class CompanionService : IDisposable
     {
         _ui = SynchronizationContext.Current ?? throw new InvalidOperationException("create on the UI thread");
         _tick.Tick += (_, _) => Tick();
+        Pdc = PdcIntegration.CreateDefault(out _pdcWarning);
+        Pdc.Log += Write;
+        Pdc.Changed += SendPdcLease;
         SystemEvents.TimeChanged += OnTimeChanged; // also raised when the time zone changes
         SystemEvents.PowerModeChanged += OnPowerModeChanged;
     }
@@ -64,6 +72,15 @@ public sealed class CompanionService : IDisposable
     public void Start()
     {
         _tick.Start();
+        if (_pdcWarning is not null)
+        {
+            Write(LogKind.Warning, _pdcWarning);
+        }
+        else if (!Pdc.IsDefaultServer)
+        {
+            Write(LogKind.Warning, $"PDC Manager: using the test server {Pdc.BaseUri} ({PdcEndpoint.EnvironmentVariable})");
+        }
+        _ = Pdc.StartAsync();
         Tick();
     }
 
@@ -186,6 +203,7 @@ public sealed class CompanionService : IDisposable
     private void Tick()
     {
         var now = DateTime.UtcNow;
+        _ = Pdc.TickAsync(); // no network at all while the integration is off
         var held = Mutex.TryOpenExisting(PortHoldMutex, out var hold);
         hold?.Dispose();
         if (held)
@@ -224,6 +242,7 @@ public sealed class CompanionService : IDisposable
         {
             _ = PingAsync();
         }
+        SendPdcLease();
     }
 
     private async Task ConnectAsync()
@@ -296,6 +315,9 @@ public sealed class CompanionService : IDisposable
             Write(LogKind.Info, $"Connected to DeskBuddy on {port} (firmware {Firmware}, protocol {hello.Arg("proto")})");
             await SyncClockAsync("connected");
             await RefreshStatusAsync();
+            Pdc.ResetDeviceIds(); // the board may have restarted while disconnected
+            _pdcLease.Reset();
+            SendPdcLease();
         }
         finally
         {
@@ -341,13 +363,73 @@ public sealed class CompanionService : IDisposable
                 ? $"Message {frame.Arg("id")} finished on the marquee"
                 : $"Message {frame.Arg("id")} is on the marquee");
             break;
+        case PdcWire.ClickEvent:
+            _ = HandlePdcClickAsync(frame);
+            break;
         case "boot":
             Write(LogKind.Info, "DeskBuddy restarted");
+            Pdc.ResetDeviceIds();
+            _pdcLease.Reset(); // it lost the lease: resent right away
+            SendPdcLease();
             if (IsConnected)
             {
                 _ = ResyncAfterBootAsync();
             }
             break;
+        }
+    }
+
+    // The lease: pdc.set right after hello, on every change of state or count, and every 10 s (only to firmware
+    // with the pdc capability).
+    private void SendPdcLease()
+    {
+        if (_link is not { } link || !IsConnected || !Caps.Contains(PdcWire.Cap))
+        {
+            return;
+        }
+        if (_pdcLease.Next(DateTimeOffset.UtcNow, Pdc.CanClick, Pdc.Count) is { } body)
+        {
+            _ = SendPdcAsync(link, body);
+        }
+    }
+
+    private async Task HandlePdcClickAsync(Frame frame)
+    {
+        if (!Caps.Contains(PdcWire.Cap))
+        {
+            return;
+        }
+        if (PdcWire.ClickId(frame) is not { } id)
+        {
+            Write(LogKind.Warning, "ZDMW click from DeskBuddy without a valid id: ignored");
+            return;
+        }
+        Write(LogKind.Info, $"ZDMW click {id} confirmed on DeskBuddy");
+        if (await Pdc.DeviceClickAsync(id) is { } result && _link is { } link && IsConnected)
+        {
+            await SendPdcAsync(link, PdcWire.Result(id, result));
+        }
+    }
+
+    private async Task SendPdcAsync(DeviceLink link, string body)
+    {
+        try
+        {
+            var reply = await link.RequestAsync(body, ReplyTimeout);
+            if (!reply.IsOk)
+            {
+                Write(LogKind.Warning, $"DeskBuddy refused {body.Split(' ')[0]} ({reply.Name})");
+            }
+        }
+        catch (TimeoutException)
+        {
+            if (_link == link && body.StartsWith("pdc.set", StringComparison.Ordinal))
+            {
+                _pdcLease.Reset(); // sent again on the next tick
+            }
+        }
+        catch (Exception e) when (e is IOException or OperationCanceledException)
+        {
         }
     }
 
@@ -446,6 +528,7 @@ public sealed class CompanionService : IDisposable
         Mode = "unknown";
         Mood = DeviceMood.Idle;
         link?.Dispose();
+        _pdcLease.Reset();
         if (link is not null)
         {
             Write(LogKind.Info, text);
@@ -497,6 +580,11 @@ public sealed class CompanionService : IDisposable
         SystemEvents.TimeChanged -= OnTimeChanged;
         SystemEvents.PowerModeChanged -= OnPowerModeChanged;
         _tick.Dispose();
+        if (_link is { } link && IsConnected && Caps.Contains(PdcWire.Cap))
+        {
+            _ = SendPdcAsync(link, PdcWire.Set(false, null)); // best effort: written before the port closes
+        }
         _link?.Dispose();
+        Pdc.Dispose();
     }
 }

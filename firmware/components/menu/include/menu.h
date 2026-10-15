@@ -7,6 +7,7 @@
 //   food & drink activities that are meals: Monster today; water, coffee, lunch and snacks later
 //   games        later: interactive experiences with their own screens
 //   schedule     later: routines and reminders, configured from the Windows companion
+//   pdc          the PDC Manager integration (ZDMW), only while the companion offers it (menu_status_t.pdc)
 // Scenarios (combinations of actions run by the companion) and needs (hunger, thirst, energy) are not menu items:
 // they will trigger the same actions and change what the items show.
 //
@@ -37,6 +38,7 @@ typedef enum {
     MENU_FOOD,
     MENU_GAMES,
     MENU_SCHEDULE,
+    MENU_PDC,
     MENU_CATEGORY_COUNT,
 } menu_category_t;
 
@@ -57,6 +59,7 @@ typedef enum {
     MENU_DO_MOOD,    // sets mood `arg` (buddy_mood_t) until it is changed
     MENU_DO_EVENT,   // delivers buddy_event_t `arg` (Surprise!, Monster)
     MENU_DO_OFFICE,  // switches to the Office Mode clock
+    MENU_DO_PDC,     // asks to confirm a ZDMW click (then the companion sends it to PDC Manager)
 } menu_do_t;
 
 typedef enum {
@@ -78,6 +81,7 @@ typedef enum {
     MENU_ICON_STARE,
     MENU_ICON_MEDITATE,
     MENU_ICON_PEUKIE,   // the smoking face, for "PEUKIE?" (the question)
+    MENU_ICON_ZDMW,     // the exasperated face: "ZE DOEN MAAR WAT!" (PDC Manager)
     MENU_ICON_COUNT,
 } menu_icon_t;
 
@@ -107,10 +111,13 @@ typedef struct {
     bool busy;           // an activity is playing (the Monster sequence or another): he ignores other ones
     const char *doing;   // what he is doing ("drinking"; buddy_activity_doing), NULL: his mood is shown
     bool office;         // Clock Mode (first called Office Mode) is available
+    bool pdc;            // the companion offers the PDC Manager integration: the PDC category shows
+    bool pdc_ready;      // ...and a ZDMW click can be sent now (none under way, no cooldown)
+    int32_t pdc_count;   // the ZDMW counter; -1: unknown
 } menu_status_t;
 
 typedef enum {
-    MENU_ITEM_HIDDEN, // not offered (Office Mode without its clock)
+    MENU_ITEM_HIDDEN, // not offered (Office Mode without its clock, PDC without the companion offering it)
     MENU_ITEM_SOON,   // shown with a SOON tag, not interactive
     MENU_ITEM_BUSY,   // shown dimmed: not right now (Surprise! while Buddy drinks a Monster)
     MENU_ITEM_READY,

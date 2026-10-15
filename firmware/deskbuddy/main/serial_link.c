@@ -19,7 +19,7 @@ static const char *TAG = "link";
 #define TASK_PRIO 4 // below rendering: commands are rare and never urgent
 #define TASK_CORE 0
 #define QUEUE_WAIT_MS 100
-#define CAPS "poke,monster,mode,time,status,msg,mood,act"
+#define CAPS "poke,monster,mode,time,status,msg,mood,act,pdc"
 #define STYLES "marquee" // msg.show styles this firmware draws
 
 static QueueHandle_t s_events;
@@ -68,6 +68,10 @@ static void handle_line(const char *line, size_t len)
             n += snprintf(body + n, sizeof(body) - (size_t)n, "%s%s", i ? "," : " acts=", buddy_act_name(i));
         }
         serial_link_send(cmd.seq, body);
+        // The render task also hears of it (a new companion connection: forget what the previous one offered);
+        // it does not reply again.
+        const input_event_t ev = {.type = INPUT_COMMAND, .command = cmd};
+        xQueueSend(s_events, &ev, pdMS_TO_TICKS(QUEUE_WAIT_MS));
         return;
     }
     if (cmd.cmd == LINK_CMD_PING) {

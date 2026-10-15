@@ -101,7 +101,7 @@ static uint8_t look_of(const menu_t *m, const menu_status_t *st, int i, const me
     return look;
 }
 
-static void draw_slot(menu_view_t *v, int i, const menu_item_t *it, menu_layout_t layout, uint8_t look)
+static void draw_slot(menu_view_t *v, int i, const menu_item_t *it, menu_layout_t layout, uint8_t look, int32_t count)
 {
     const gfx_rect_t r = menu_slot_rect(layout, i);
     v->slot_img[i] = (gfx_image_t){(uint16_t)r.w, (uint16_t)r.h, v->slot_px[i]};
@@ -113,10 +113,20 @@ static void draw_slot(menu_view_t *v, int i, const menu_item_t *it, menu_layout_
     const uint8_t ink = flash ? INK_WHITE : active ? INK_CYAN : INK_SILVER;
     if (layout == MENU_LIST) {
         menu_art_icon(&c, (menu_icon_t)it->icon, it->arg, 22, body / 2 + dy);
-        menu_art_text(&c, it->label, 44, (body - 7) / 2 + dy, ink);
+        if (it->action == MENU_DO_PDC) { // two lines: the label, and the counter beneath it in amber
+            const int y = (body - 18) / 2 + dy;
+            menu_art_text(&c, it->label, 44, y, ink);
+            char num[16] = "#?";
+            if (count >= 0) {
+                snprintf(num, sizeof(num), "#%ld", (long)count);
+            }
+            menu_art_text(&c, num, 44, y + 11, INK_AMBER);
+        } else {
+            menu_art_text(&c, it->label, 44, (body - 7) / 2 + dy, ink);
+        }
         if (look & LOOK_SOON) {
             menu_art_tag(&c, r.w - MENU_TAG_W - 6, (body - MENU_TAG_H) / 2 + dy, look & LOOK_HOT);
-        } else {
+        } else if (it->action != MENU_DO_PDC) {
             menu_art_arrow(&c, r.w - 12, (body - MENU_ARROW_GLYPH_H) / 2 + dy, true, true, INK_GREY);
         }
     } else {
@@ -133,15 +143,15 @@ static void draw_slot(menu_view_t *v, int i, const menu_item_t *it, menu_layout_
     redrawn(v, sp);
 }
 
-static void set_slot(menu_view_t *v, int i, const menu_item_t *it, menu_layout_t layout, uint8_t look)
+static void set_slot(menu_view_t *v, int i, const menu_item_t *it, menu_layout_t layout, uint8_t look, int32_t count)
 {
     menu_slot_look_t *s = &v->shown[i];
-    if (s->item == it && (!it || (s->layout == layout && s->look == look))) {
+    if (s->item == it && (!it || (s->layout == layout && s->look == look && s->count == count))) {
         return;
     }
-    *s = (menu_slot_look_t){it, (uint8_t)layout, look};
+    *s = (menu_slot_look_t){it, (uint8_t)layout, look, count};
     if (it) {
-        draw_slot(v, i, it, layout, look);
+        draw_slot(v, i, it, layout, look, count);
     } else {
         set_hidden(&v->slot[i], true);
     }
@@ -318,7 +328,7 @@ static uint32_t apply_close(menu_view_t *v, uint32_t now)
         if (t < (uint32_t)i * MENU_FLIP_MS) {
             return (uint32_t)i * MENU_FLIP_MS - t;
         }
-        set_slot(v, i, NULL, MENU_GRID, 0);
+        set_slot(v, i, NULL, MENU_GRID, 0, -1);
     }
     if (t < MENU_SLOTS * MENU_FLIP_MS) {
         return MENU_SLOTS * MENU_FLIP_MS - t;
@@ -351,7 +361,7 @@ uint32_t menu_view_apply(menu_view_t *v, const menu_t *m, const menu_status_t *s
         }
         const menu_item_t *it = i < n ? items[i] : NULL;
         const uint8_t look = it ? look_of(m, st, i, it, now, &next) : 0;
-        set_slot(v, i, it, layout, look);
+        set_slot(v, i, it, layout, look, it && it->action == MENU_DO_PDC ? st->pdc_count : -1);
         if (it) {
             fresh[n_fresh++] = menu_slot_rect(layout, i);
             active = (look & LOOK_ACTIVE) ? i : active;
@@ -366,7 +376,7 @@ uint32_t menu_view_apply(menu_view_t *v, const menu_t *m, const menu_status_t *s
         const gfx_rect_t old = menu_slot_rect((menu_layout_t)v->shown[i].layout, i);
         for (int j = 0; j < n_fresh; j++) {
             if (gfx_rect_overlaps(old, fresh[j])) {
-                set_slot(v, i, NULL, layout, 0);
+                set_slot(v, i, NULL, layout, 0, -1);
                 break;
             }
         }

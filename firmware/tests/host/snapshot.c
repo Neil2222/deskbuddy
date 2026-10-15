@@ -218,6 +218,31 @@ static bool menu_screens(void)
     st.doing = NULL;
     stage_mood(BUDDY_MOOD_RELAXED, 2000);
 
+    // PDC Manager, offered by the companion: a row on Home, its page with the counter, dimmed while a click is under
+    // way or cooling down, and without a known counter.
+    st.pdc = st.pdc_ready = true;
+    st.pdc_count = 123;
+    menu_open(&s_menu, MENU_HOME, t += 1000);
+    if (!menu_shot("home_pdc", &st, t += 1000)) {
+        return false;
+    }
+    menu_open(&s_menu, MENU_PDC, t += 1000);
+    if (!menu_shot("pdc", &st, t += 1000)) {
+        return false;
+    }
+    st.pdc_ready = false;
+    if (!menu_shot("pdc_wait", &st, t += 1000)) {
+        return false;
+    }
+    st.pdc_ready = true;
+    st.pdc_count = -1;
+    if (!menu_shot("pdc_nocount", &st, t += 1000)) {
+        return false;
+    }
+    st.pdc = st.pdc_ready = false;
+    st.pdc_count = -1;
+    menu_open(&s_menu, MENU_HOME, t += 1000);
+
     // More items than fit: pages (a made-up category; the real ones fit on one page so far).
     static const menu_category_def_t k_cats[MENU_CATEGORY_COUNT] = {
         [MENU_HOME] = {"DESKBUDDY", MENU_LIST, MENU_HOME},
@@ -388,8 +413,7 @@ int main(int argc, char **argv)
         !menu_view_init(&s_menu_view, &s_scene, &s_menu, menu_mem, sizeof(menu_mem), 10) ||
         !office_clock_init(&clock, &s_scene, s_layout.screen, clock_mem, sizeof(clock_mem), 20) ||
         !marquee_init(&marquee, &s_scene, 30) ||
-        !menu_ask_init(&ask, &s_scene, s_layout.stage, s_view.home_y0 - BUDDY_MAX_LIFT * s_view.home_scale,
-                       "PEUKIE ROKEN?", 25)) {
+        !menu_ask_init(&ask, &s_scene, s_layout.stage, s_view.home_y0 - BUDDY_MAX_LIFT * s_view.home_scale, 25)) {
         fprintf(stderr, "scene setup failed\n");
         return 1;
     }
@@ -515,33 +539,47 @@ int main(int argc, char **argv)
     }
 
     // "PEUKIE ROKEN?": hopeful (glancing at NEE, JA being pressed), impatient with the bar red, and sad after no.
+    // "ZE DOEN MAAR WAT?": the confirmation, and his reaction once PDC Manager confirmed the click (with the line on
+    // the sign).
     static const struct {
         buddy_state_t state;
         uint32_t t;
         int pressed;
         const char *name;
     } k_ask[] = {
-        {BUDDY_STATE_ASK, 200, -1, "act_ask_0200"},
-        {BUDDY_STATE_ASK, 900, -1, "act_ask_0900"},
-        {BUDDY_STATE_ASK, 20500, MENU_ANSWER_YES, "act_ask_ja"},
-        {BUDDY_STATE_ASK, 54000, -1, "act_ask_54000"},
-        {BUDDY_STATE_SAD, 1500, -1, "act_sad_1500"},
+        {BUDDY_STATE_ASK, 200, -1, "act_ask_0200"},       {BUDDY_STATE_ASK, 900, -1, "act_ask_0900"},
+        {BUDDY_STATE_ASK, 20500, MENU_ANSWER_YES, "act_ask_ja"}, {BUDDY_STATE_ASK, 54000, -1, "act_ask_54000"},
+        {BUDDY_STATE_SAD, 1500, -1, "act_sad_1500"},      {BUDDY_STATE_CONFIRM, 900, -1, "act_zdmw_confirm"},
+        {BUDDY_STATE_CONFIRM, 12500, MENU_ANSWER_YES, "act_zdmw_ja"}, {BUDDY_STATE_ZDMW, 120, -1, "act_zdmw_0120"},
+        {BUDDY_STATE_ZDMW, 900, -1, "act_zdmw_0900"},     {BUDDY_STATE_ZDMW, 1450, -1, "act_zdmw_1450"},
+        {BUDDY_STATE_ZDMW, 2300, -1, "act_zdmw_2300"},
     };
     const menu_status_t asking = {.mood = BUDDY_MOOD_IDLE, .busy = true, .doing = "asking", .office = true};
+    const menu_status_t fuming = {.mood = BUDDY_MOOD_IDLE, .busy = true, .doing = "fuming", .office = true};
+    const int sign_x = s_layout.stage.x + (s_layout.stage.w - MARQUEE_W) / 2, sign_y = 22;
     for (unsigned i = 0; i < sizeof(k_ask) / sizeof(k_ask[0]); i++) {
-        buddy_pose_t pose = {.state = k_ask[i].state};
-        buddy_activity_pose(k_ask[i].state, k_ask[i].t, &pose);
+        const buddy_state_t state = k_ask[i].state;
+        buddy_pose_t pose = {.state = state};
+        buddy_activity_pose(state, k_ask[i].t, &pose);
         buddy_view_apply(&s_view, &pose, k_ask[i].t);
-        menu_view_apply(&s_menu_view, &s_menu, &asking, 20000 + k_ask[i].t);
+        menu_view_apply(&s_menu_view, &s_menu, state == BUDDY_STATE_ZDMW ? &fuming : &asking, 20000 + k_ask[i].t);
         ask.pressed = (int8_t)k_ask[i].pressed;
-        const bool on = k_ask[i].state == BUDDY_STATE_ASK;
-        menu_ask_apply(&ask, on ? BUDDY_ASK_MS - k_ask[i].t : 0, BUDDY_ASK_MS);
+        const uint32_t total = buddy_activity_ms(state);
+        const char *q = state == BUDDY_STATE_ASK       ? MENU_QUESTION_PEUKIE
+                        : state == BUDDY_STATE_CONFIRM ? MENU_QUESTION_ZDMW
+                                                       : NULL;
+        menu_ask_apply(&ask, q, q ? total - k_ask[i].t : 0, total);
+        if (state == BUDDY_STATE_ZDMW) { // the line goes up with his reaction
+            marquee_start(&marquee, "ZE DOEN MAAR WAT!!! #123", 0);
+            marquee_apply(&marquee, sign_x, sign_y, MARQUEE_INTRO_MS + (k_ask[i].t / 40) * MARQUEE_COL_MS);
+        }
         if (!shot(k_ask[i].name)) {
             return 1;
         }
     }
+    marquee_apply(&marquee, 0, 0, marquee_duration_ms(&marquee)); // over: hidden
     ask.pressed = MENU_ANSWER_NONE;
-    menu_ask_apply(&ask, 0, BUDDY_ASK_MS);
+    menu_ask_apply(&ask, NULL, 0, BUDDY_ASK_MS);
     menu_view_apply(&s_menu_view, &s_menu, &idle, 40000);
     const buddy_pose_t rest = {.eyes = BUDDY_EYES_OPEN};
     buddy_view_apply(&s_view, &rest, 0);

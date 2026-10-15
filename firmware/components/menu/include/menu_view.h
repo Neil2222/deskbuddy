@@ -37,6 +37,7 @@ typedef struct {
     const menu_item_t *item; // NULL: empty
     uint8_t layout;
     uint8_t look;            // see menu_view.c
+    int32_t count;           // the number it shows (the ZDMW counter); -1: none
 } menu_slot_look_t;
 
 typedef struct {

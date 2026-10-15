@@ -1,4 +1,5 @@
 using DeskBuddy.Companion.Device;
+using DeskBuddy.Companion.Pdc;
 using DeskBuddy.Companion.Protocol;
 using DeskBuddy.Companion.UI;
 
@@ -6,7 +7,8 @@ namespace DeskBuddy.Companion;
 
 /// <summary>
 /// The DeskBuddy Control Center: Buddy's face and the connection status on top, activities, the LED-sign message
-/// box, and diagnostics (the protocol and device log) folded away at the bottom.
+/// box, the PDC Manager section (Ze Doen Maar Wat; one row while it is off), and diagnostics (the protocol and
+/// device log) folded away at the bottom.
 /// </summary>
 public sealed class MainForm : Form
 {
@@ -62,6 +64,34 @@ public sealed class MainForm : Form
     private readonly InputFrame _recent;
     private bool _sending;
 
+    // PDC Manager (Ze Doen Maar Wat): a status bar with the on/off switch; the details, the login form or the ZDMW
+    // button only while it is on.
+    private const int ArmSeconds = 4; // the ZDMW button waits this long for the confirming second click
+    private readonly Card _pdcCard;
+    private readonly Panel _pdcGap = Gap();
+    private readonly Panel _pdcBar = new() { Dock = DockStyle.Top, Height = 40 };
+    private readonly FlatButton _pdcToggle, _pdcLogin, _pdcLogout, _zdmw;
+    private readonly Label _pdcSummary = new()
+    {
+        Dock = DockStyle.Fill, ForeColor = Theme.Muted, TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(10, 0, 0, 0),
+        AutoEllipsis = true, UseMnemonic = false,
+    };
+    private readonly TableLayoutPanel _pdcDetails = new() { Dock = DockStyle.Top, Height = 88, ColumnCount = 2, RowCount = 3, Padding = new Padding(0, 4, 0, 0) };
+    private readonly Label _pdcServer = new(), _pdcAccount = new(), _pdcAccess = new();
+    private readonly FlowLayoutPanel _pdcLoginRow = new() { Dock = DockStyle.Top, Height = 46, WrapContents = false, Padding = new Padding(0, 5, 0, 0) };
+    private readonly TextBox _pdcUser = new() { BorderStyle = BorderStyle.None, MaxLength = 100, PlaceholderText = "PDC username", AccessibleName = "PDC username" };
+    private readonly TextBox _pdcPassword = new() { BorderStyle = BorderStyle.None, MaxLength = 200, PlaceholderText = "Password", UseSystemPasswordChar = true, AccessibleName = "PDC password" };
+    private readonly Panel _pdcActionRow = new() { Dock = DockStyle.Top, Height = 46, Padding = new Padding(0, 5, 0, 5) };
+    private readonly Label _zdmwResult = new()
+    {
+        Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(12, 0, 0, 0), AutoEllipsis = true, UseMnemonic = false,
+    };
+    private readonly System.Windows.Forms.Timer _zdmwTimer = new() { Interval = 250 };
+    private DateTime? _zdmwArmedUntil;
+    private DateTime _zdmwArmedAt;
+    private PdcClickResult? _shownClick;
+    private DateTime _shownClickAt;
+
     // Diagnostics.
     private readonly Panel _diagnostics = new() { Dock = DockStyle.Bottom };
     private readonly Panel _diagnosticsBody = new() { Dock = DockStyle.Fill, Visible = false };
@@ -105,19 +135,27 @@ public sealed class MainForm : Form
             Text = "Diagnostics", Glyph = Theme.GlyphChevronRight, Dock = DockStyle.Left, Width = 140,
         };
         _clearLog = Quiet("Clear", null, 72);
+        _pdcToggle = new FlatButton(_theme, ButtonLook.Pill) { Dock = DockStyle.Left, Width = 76, AccessibleName = "PDC Manager integration" };
+        _pdcLogin = Quiet("Log in", null, 90);
+        _pdcLogout = Quiet("Log out", null, 90);
+        _zdmw = new FlatButton(_theme, ButtonLook.Accent) { Text = "Ze doen maar wat!", Dock = DockStyle.Left, Width = 320, AccessibleName = "Ze doen maar wat" };
 
         _connectionCard = new Card(_theme) { Title = "Connection", Dock = DockStyle.Top, Height = 156, Visible = false };
         _connectionGap.Visible = false;
         _activitiesCard = new Card(_theme) { Title = "Activities", Dock = DockStyle.Top, Height = 160 };
         _messagesCard = new Card(_theme) { Title = "Message on Buddy's LED sign", Accent = Theme.Amber, Dock = DockStyle.Top, Height = 124 };
+        _pdcCard = new Card(_theme) { Title = "PDC Manager", Dock = DockStyle.Top, Height = 92 };
 
         BuildConnection();
         BuildActivities();
         BuildMessages();
+        BuildPdc();
         BuildDiagnostics();
 
         // Top to bottom; Dock=Top stacks in reverse order of adding.
         var root = new Panel { Dock = DockStyle.Fill, AutoScroll = true };
+        root.Controls.Add(_pdcCard);
+        root.Controls.Add(_pdcGap);
         root.Controls.Add(_messagesCard);
         root.Controls.Add(_activitiesGap);
         root.Controls.Add(_activitiesCard);
@@ -131,6 +169,7 @@ public sealed class MainForm : Form
 
         _service.Changed += UpdateState;
         _service.Log += AppendLog;
+        _service.Pdc.Changed += UpdatePdc;
         _reactionTimer.Tick += (_, _) =>
         {
             _reactionTimer.Stop();
@@ -140,10 +179,12 @@ public sealed class MainForm : Form
         RefreshPorts();
         ResumeLayout(true);
         UpdateState();
+        UpdatePdc();
         Load += (_, _) =>
         {
             ReflowActivities();
             LayoutMessages();
+            LayoutPdc();
             FitToContent();
         };
         Shown += (_, _) =>
@@ -373,10 +414,239 @@ public sealed class MainForm : Form
         return grew;
     }
 
+    // PDC Manager: [On/Off] and a summary; while on, Server / Account / ZDMW lines and either the login form or the
+    // ZDMW button (two clicks: arm, then send) with its last result and Log out.
+    private void BuildPdc()
+    {
+        _pdcSummary.Font = _theme.Small;
+        _pdcBar.Padding = new Padding(0, 4, 0, 4);
+        _pdcBar.Controls.Add(_pdcSummary);
+        _pdcBar.Controls.Add(_pdcToggle);
+
+        _pdcDetails.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 72));
+        _pdcDetails.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        string[] captions = ["Server", "Account", "ZDMW"];
+        Label[] values = [_pdcServer, _pdcAccount, _pdcAccess];
+        for (var i = 0; i < captions.Length; i++)
+        {
+            _pdcDetails.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
+            var caption = Caption(captions[i], 72);
+            caption.Anchor = AnchorStyles.Left;
+            values[i].AutoSize = true;
+            values[i].Anchor = AnchorStyles.Left;
+            values[i].ForeColor = Theme.Text;
+            values[i].UseMnemonic = false;
+            _pdcDetails.Controls.Add(caption, 0, i);
+            _pdcDetails.Controls.Add(values[i], 1, i);
+        }
+        _pdcDetails.Visible = false;
+
+        foreach (var box in new[] { _pdcUser, _pdcPassword })
+        {
+            box.Font = _theme.Text10;
+            box.ForeColor = Theme.Text;
+            box.TextChanged += (_, _) => UpdatePdc();
+        }
+        foreach (var frame in new[] { new InputFrame(_pdcUser), new InputFrame(_pdcPassword) })
+        {
+            frame.Size = new Size(180, 36);
+            frame.Padding = new Padding(10, 9, 8, 5);
+            frame.Margin = new Padding(0, 0, 8, 0);
+            _pdcLoginRow.Controls.Add(frame);
+        }
+        _pdcLogin.Height = 36;
+        _pdcLoginRow.Controls.Add(_pdcLogin);
+        _pdcLoginRow.Visible = false;
+
+        _pdcLogout.Dock = DockStyle.Right;
+        _pdcActionRow.Controls.Add(_zdmwResult);
+        _pdcActionRow.Controls.Add(_pdcLogout);
+        _pdcActionRow.Controls.Add(_zdmw);
+        _pdcActionRow.Visible = false;
+
+        // Dock=Top stacks in reverse order of adding.
+        _pdcCard.Controls.Add(_pdcActionRow);
+        _pdcCard.Controls.Add(_pdcLoginRow);
+        _pdcCard.Controls.Add(_pdcDetails);
+        _pdcCard.Controls.Add(_pdcBar);
+
+        _pdcToggle.Click += (_, _) => _ = _service.Pdc.SetEnabledAsync(!_service.Pdc.Enabled);
+        _pdcLogin.Click += (_, _) => _ = LoginPdcAsync();
+        _pdcUser.KeyDown += (_, e) =>
+        {
+            if (e.KeyCode == Keys.Enter)
+            {
+                e.SuppressKeyPress = true;
+                _pdcPassword.Focus();
+            }
+        };
+        _pdcPassword.KeyDown += (_, e) =>
+        {
+            if (e.KeyCode == Keys.Enter)
+            {
+                e.SuppressKeyPress = true;
+                if (_pdcLogin.Enabled)
+                {
+                    _ = LoginPdcAsync();
+                }
+            }
+        };
+        _pdcLogout.Click += (_, _) => _service.Pdc.Logout();
+        _zdmw.Click += (_, _) => ZdmwClicked();
+        _zdmwTimer.Tick += (_, _) => UpdatePdc();
+        _tips.SetToolTip(_pdcLogout, "Log out: forgets the stored session on this PC");
+        _tips.SetToolTip(_zdmw, "Telt mee op PDC Manager en zet een bericht in het ZDMW Teams-kanaal. Klik, en klik nogmaals om te versturen.");
+    }
+
+    private async Task LoginPdcAsync()
+    {
+        var user = _pdcUser.Text;
+        var password = _pdcPassword.Text;
+        _pdcPassword.Clear(); // never kept, also not in the box
+        await _service.Pdc.LoginAsync(user, password);
+    }
+
+    // The first click arms the button for a few seconds; a second click (not part of a double-click) sends.
+    private void ZdmwClicked()
+    {
+        var now = DateTime.UtcNow;
+        if (_zdmwArmedUntil is { } until && now < until)
+        {
+            if ((now - _zdmwArmedAt).TotalMilliseconds < SystemInformation.DoubleClickTime)
+            {
+                return; // a double-click is not a confirmation
+            }
+            _zdmwArmedUntil = null;
+            _ = _service.Pdc.ClickAsync(); // the result comes back through Changed
+        }
+        else
+        {
+            _zdmwArmedAt = now;
+            _zdmwArmedUntil = now.AddSeconds(ArmSeconds);
+        }
+        UpdatePdc();
+    }
+
+    private void UpdatePdc()
+    {
+        var pdc = _service.Pdc;
+        var on = pdc.Enabled;
+        var server = pdc.IsDefaultServer ? pdc.BaseUri.Host : $"{pdc.BaseUri.Authority} (test server)";
+        _pdcToggle.Text = on ? "On" : "Off";
+        _pdcToggle.DotColor = !on ? Theme.Faint : pdc.CanClick ? Theme.Green : Theme.Amber;
+        _pdcToggle.Invalidate();
+        _tips.SetToolTip(_pdcToggle, on ? "Switch the PDC Manager integration off" : "Switch the PDC Manager integration on (off: no network traffic at all)");
+        _pdcSummary.Text = on
+            ? $"Ze Doen Maar Wat on {server}: from here or from Buddy's menu"
+            : "Ze Doen Maar Wat: the ZDMW Teams button, from here or from Buddy's menu (off: no network traffic)";
+
+        _pdcServer.Text = pdc.Reach switch
+        {
+            PdcReach.Reachable => $"{server} · reachable",
+            PdcReach.Unreachable => $"{server} · not reachable (off the company network?), checked every minute",
+            PdcReach.Certificate => $"{server} · certificate not trusted",
+            _ => $"{server} · checking…",
+        };
+        _pdcServer.ForeColor = pdc.Reach is PdcReach.Reachable or PdcReach.Unknown ? Theme.Text : Theme.Amber;
+        _pdcAccount.Text = pdc.LoggingIn ? "logging in…" : pdc.Auth switch
+        {
+            PdcAuth.LoggedIn => $"logged in as {pdc.Username}" +
+                                (pdc.DisplayName is { Length: > 0 } name && name != pdc.Username ? $" ({name})" : ""),
+            PdcAuth.Stored => "session stored, checked when the server is reachable",
+            _ => pdc.LoginProblem ?? "login required",
+        };
+        _pdcAccount.ForeColor = pdc.Auth == PdcAuth.LoggedIn || pdc.LoggingIn ? Theme.Text : Theme.Amber;
+        _pdcAccess.Text = pdc.Auth != PdcAuth.LoggedIn ? "–" : (pdc.Access switch
+        {
+            PdcAccess.Write => "write",
+            PdcAccess.Read => "read only (cannot click)",
+            _ => "no access",
+        }) + (pdc.Count is { } count ? $" · count {count}" : "");
+        _pdcAccess.ForeColor = pdc.Auth != PdcAuth.LoggedIn || pdc.Access == PdcAccess.Write ? Theme.Text : Theme.Amber;
+
+        var session = pdc.Auth is PdcAuth.LoggedIn or PdcAuth.Stored;
+        _pdcDetails.Visible = on;
+        _pdcLoginRow.Visible = on && !session;
+        _pdcActionRow.Visible = on && session;
+        if (_pdcUser.Text.Length == 0 && !_pdcUser.Focused && pdc.SavedUsername is { } saved)
+        {
+            _pdcUser.Text = saved;
+        }
+        _pdcLogin.Enabled = on && !pdc.LoggingIn && _pdcUser.Text.Trim().Length > 0 && _pdcPassword.Text.Length > 0;
+        _pdcLogout.Enabled = session;
+
+        // The ZDMW button: armed for ArmSeconds after the first click; off while a click is on its way or cooling down.
+        if (_zdmwArmedUntil is { } until && (DateTime.UtcNow >= until || !pdc.CanClick || pdc.Clicking))
+        {
+            _zdmwArmedUntil = null;
+        }
+        var armed = _zdmwArmedUntil is not null;
+        var cooldown = pdc.CooldownUntil;
+        _zdmw.Enabled = pdc.CanClick && !pdc.Clicking && cooldown is null;
+        _zdmw.Text = pdc.Clicking ? "Versturen…"
+                     : armed ? "Teams-bericht versturen? Klik nogmaals"
+                     : cooldown is { } wait ? $"Ze doen maar wat! ({Math.Ceiling((wait - DateTimeOffset.UtcNow).TotalSeconds):0})"
+                     : "Ze doen maar wat!";
+        _zdmw.Invalidate();
+        if (!ReferenceEquals(pdc.LastClick, _shownClick))
+        {
+            _shownClick = pdc.LastClick;
+            _shownClickAt = DateTime.Now;
+        }
+        if (_shownClick is { } result)
+        {
+            _zdmwResult.Text = $"{_shownClickAt:HH:mm} · {PdcText.Describe(result)}";
+            _zdmwResult.ForeColor = result.Outcome == PdcOutcome.Ok && result.Teams != false ? Theme.Green
+                                    : result.Outcome == PdcOutcome.Ok || result.IsAmbiguous ? Theme.Amber
+                                    : Theme.Red;
+        }
+        else
+        {
+            _zdmwResult.Text = pdc.CanClick ? "Klik, en klik nogmaals om te versturen"
+                               : pdc.Reach != PdcReach.Reachable ? "Niet beschikbaar: PDC Manager niet bereikbaar"
+                               : pdc.Access == PdcAccess.Read ? "Alleen leesrechten voor ZDMW"
+                               : pdc.Auth == PdcAuth.LoggedIn ? "Geen toegang tot ZDMW"
+                               : "Niet beschikbaar";
+            _zdmwResult.ForeColor = Theme.Muted;
+        }
+        if (armed || cooldown is not null)
+        {
+            _zdmwTimer.Start();
+        }
+        else
+        {
+            _zdmwTimer.Stop();
+        }
+
+        var grew = LayoutPdc();
+        if (IsHandleCreated)
+        {
+            GrowWindow(grew);
+        }
+    }
+
+    // One row while off; the details and the login form or the ZDMW row while on. Returns how much the card grew.
+    private int LayoutPdc()
+    {
+        // Top to bottom: bar, details, login form or ZDMW row. A row shown for the first time gets its window then,
+        // which can move it in the z-order (and so in the docking order): put them back.
+        Control[] order = [_pdcActionRow, _pdcLoginRow, _pdcDetails, _pdcBar];
+        for (var i = 0; i < order.Length; i++)
+        {
+            _pdcCard.Controls.SetChildIndex(order[i], i);
+        }
+        var height = _pdcCard.Padding.Vertical + _pdcBar.Height +
+                     (_service.Pdc.Enabled ? _pdcDetails.Height + _pdcActionRow.Height : 0);
+        var grew = height - _pdcCard.Height;
+        _pdcCard.Height = height;
+        return grew;
+    }
+
     // At start the window is exactly as tall as its sections (connection and diagnostics folded away).
     private void FitToContent()
     {
-        var content = _header.Height + _activitiesCard.Height + _activitiesGap.Height + _messagesCard.Height;
+        var content = _header.Height + _activitiesCard.Height + _activitiesGap.Height + _messagesCard.Height +
+                      _pdcGap.Height + _pdcCard.Height;
         ClientSize = new Size(ClientSize.Width, Padding.Vertical + content + _diagnostics.Height);
     }
 
@@ -616,6 +886,7 @@ public sealed class MainForm : Form
     {
         _service.Dispose();
         _reactionTimer.Dispose();
+        _zdmwTimer.Dispose();
         _tips.Dispose();
         base.OnFormClosed(e);
     }

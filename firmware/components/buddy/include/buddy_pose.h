@@ -22,6 +22,8 @@ typedef enum {
     BUDDY_STATE_MEDITATE,  // floating in meditation, until a notification
     BUDDY_STATE_ASK,       // asks a question ("PEUKIE ROKEN?") and waits for an answer (buddy_brain_answer)
     BUDDY_STATE_SAD,       // the answer was no (or none came): briefly sad
+    BUDDY_STATE_CONFIRM,   // asks to confirm a ZDMW click ("ZE DOEN MAAR WAT?"), waits for buddy_brain_answer
+    BUDDY_STATE_ZDMW,      // PDC Manager confirmed the click: exasperated, briefly
 } buddy_state_t;
 
 typedef enum {

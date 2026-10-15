@@ -34,6 +34,8 @@ typedef enum {
     BUDDY_EVENT_STARE = 5,
     BUDDY_EVENT_MEDITATE = 6,
     BUDDY_EVENT_ASK_PEUKIE = 7,    // "PEUKIE ROKEN?": he asks and waits for buddy_brain_answer()
+    BUDDY_EVENT_ASK_ZDMW = 8,      // "ZE DOEN MAAR WAT?": confirm a ZDMW click; buddy_brain_answer() ends it
+    BUDDY_EVENT_ZDMW = 9,          // PDC Manager confirmed the click: his reaction
 } buddy_event_t;
 
 typedef struct {
@@ -59,11 +61,13 @@ bool buddy_brain_event(buddy_brain_t *b, buddy_event_t ev, uint32_t now_ms);
 // True while an activity plays (events are ignored then).
 bool buddy_brain_busy(const buddy_brain_t *b, uint32_t now_ms);
 
-// While he asks (BUDDY_STATE_ASK): ms until he gives up waiting (as if the answer were no); 0 when not asking.
+// While he asks (BUDDY_STATE_ASK or BUDDY_STATE_CONFIRM): ms until he gives up waiting (as if the answer were no);
+// 0 when not asking. The question's full length is buddy_activity_ms(b->state).
 uint32_t buddy_brain_asking(const buddy_brain_t *b, uint32_t now_ms);
 
-// Answers his question. Yes: happy hops, then a smoke break (the peukie mood for BUDDY_SMOKE_BREAK_MS, then back to
-// the mood he was in). No: briefly sad. Returns false when he is not asking (or the answer came too late).
+// Answers his question. Peukie, yes: happy hops, then a smoke break (the peukie mood for BUDDY_SMOKE_BREAK_MS, then
+// back to the mood he was in); no: briefly sad. ZDMW confirmation: either answer returns him to his mood (the caller
+// sends the click on yes). Returns false when he is not asking (or the answer came too late).
 bool buddy_brain_answer(buddy_brain_t *b, bool yes, uint32_t now_ms);
 
 // Drops whatever the character is doing, including a running Monster sequence, and idles from now_ms on (used

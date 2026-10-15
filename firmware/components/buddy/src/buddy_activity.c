@@ -434,6 +434,29 @@ static uint32_t meditate(uint32_t t, buddy_pose_t *p)
 #define A_GLANCE_MS 1800u // a hopeful hop, a glance at NEE, at JA, a blink
 #define A_IMPATIENT (BUDDY_ASK_MS - 10000u)
 
+// The hopeful loop while he waits for NEE or JA: a little hop, a glance at NEE, at JA, a blink. u: ms into the loop.
+static uint32_t glance(uint32_t u, buddy_pose_t *p)
+{
+    if (u < 300) { // hopeful
+        p->lift = buddy_hop(u, 300, 1);
+        p->eyes = BUDDY_EYES_HAPPY;
+        return TICK;
+    }
+    if (u < 800) { // NEE?
+        p->look = -1;
+        return 800 - u;
+    }
+    if (u < 1300) { // JA!
+        p->look = 1;
+        return 1300 - u;
+    }
+    if (u < 1450) {
+        p->eyes = BUDDY_EYES_CLOSED;
+        return 1450 - u;
+    }
+    return A_GLANCE_MS - u;
+}
+
 static uint32_t ask(uint32_t t, buddy_pose_t *p)
 {
     buddy_props_t *pr = &p->props;
@@ -456,25 +479,70 @@ static uint32_t ask(uint32_t t, buddy_pose_t *p)
         p->wobble = (t / 400) % 2 ? 1 : 0;
         return 400 - t % 400;
     }
-    const uint32_t u = (t - A_OFFER) % A_GLANCE_MS;
-    uint32_t next;
-    if (u < 300) { // hopeful
-        p->lift = buddy_hop(u, 300, 1);
-        p->eyes = BUDDY_EYES_HAPPY;
-        next = TICK;
-    } else if (u < 800) { // NEE?
-        p->look = -1;
-        next = 800 - u;
-    } else if (u < 1300) { // JA!
-        p->look = 1;
-        next = 1300 - u;
-    } else if (u < 1450) {
-        p->eyes = BUDDY_EYES_CLOSED;
-        next = 1450 - u;
-    } else {
-        next = A_GLANCE_MS - u;
+    return buddy_min_u32(glance((t - A_OFFER) % A_GLANCE_MS, p), A_IMPATIENT - t);
+}
+
+// --- "ZE DOEN MAAR WAT?" (PDC Manager) ------------------------------------------------------------------------------
+
+// The confirmation before a Teams message goes out: the same hopeful waiting, with a mischievous smirk instead of a
+// cigarette (and no impatience: it is short).
+static uint32_t confirm(uint32_t t, buddy_pose_t *p)
+{
+    p->eyes = BUDDY_EYES_OPEN;
+    p->mouth = BUDDY_MOUTH_SMIRK;
+    p->antenna = BUDDY_ANTENNA_CALM;
+    if (t < A_OFFER) {
+        p->eyes = BUDDY_EYES_WIDE;
+        p->antenna = BUDDY_ANTENNA_EXCITED;
+        return TICK;
     }
-    return buddy_min_u32(next, A_IMPATIENT - t);
+    return glance((t - A_OFFER) % A_GLANCE_MS, p);
+}
+
+#define Z_JOLT 250u    // they did WHAT?
+#define Z_RANT 2150u   // arms in the air, bouncing, fuming
+#define Z_WAVE_MS 220u // the hand flies up and down
+#define Z_HOP_MS 430u
+
+// Sent: "ze doen maar wat!" Exasperated, briefly: a jolt, then a rant with his telescopic hand waving, then a sigh.
+static uint32_t zdmw(uint32_t t, buddy_pose_t *p)
+{
+    buddy_props_t *pr = &p->props;
+    if (t < Z_JOLT) {
+        p->eyes = BUDDY_EYES_WIDE;
+        p->mouth = BUDDY_MOUTH_OPEN;
+        p->antenna = BUDDY_ANTENNA_EXCITED;
+        p->lift = buddy_hop(t, Z_JOLT, 2);
+        return TICK;
+    }
+    if (t < Z_RANT) {
+        const uint32_t u = t - Z_JOLT, w = u % (2 * Z_WAVE_MS);
+        p->eyes = BUDDY_EYES_ANGRY;
+        p->mouth = (u / 300) % 2 ? BUDDY_MOUTH_GRIT : BUDDY_MOUTH_OPEN; // ranting
+        p->antenna = BUDDY_ANTENNA_OVERLOAD;
+        p->tint = BUDDY_TINT_FURY;
+        p->lift = buddy_hop(u % Z_HOP_MS, Z_HOP_MS, 2);
+        p->shake = jitter(u, 120);
+        if (u < Z_WAVE_MS) {
+            hand(pr, BUDDY_HAND_HOME, BUDDY_HAND_SHOW, buddy_ease(u, Z_WAVE_MS));
+        } else if (w < Z_WAVE_MS) {
+            hand(pr, BUDDY_HAND_REST, BUDDY_HAND_SHOW, buddy_ease(w, Z_WAVE_MS));
+        } else {
+            hand(pr, BUDDY_HAND_SHOW, BUDDY_HAND_REST, buddy_ease(w - Z_WAVE_MS, Z_WAVE_MS));
+        }
+        emit(p, 0, BUDDY_PART_ANGER, BUDDY_FROM_ABOVE, 0, 0, (int)((u / 160) & 1u));
+        emit(p, 1, BUDDY_PART_ANGER, BUDDY_FROM_HEAD_L, 0, -(int)(u / 300 % 2), (int)(u / 200 % 2));
+        return TICK;
+    }
+    const uint32_t u = t - Z_RANT; // ...pff.
+    p->eyes = BUDDY_EYES_HALF;
+    p->mouth = u < 250 ? BUDDY_MOUTH_PUFF : BUDDY_MOUTH_FROWN;
+    p->antenna = BUDDY_ANTENNA_CALM;
+    if (u < 250) {
+        hand(pr, BUDDY_HAND_SHOW, BUDDY_HAND_HOME, buddy_ease(u, 250));
+        return TICK;
+    }
+    return BUDDY_ZDMW_MS > t ? BUDDY_ZDMW_MS - t : 1;
 }
 
 static uint32_t sad(uint32_t t, buddy_pose_t *p)
@@ -520,6 +588,10 @@ uint32_t buddy_activity_ms(buddy_state_t state)
         return BUDDY_ASK_MS;
     case BUDDY_STATE_SAD:
         return BUDDY_SAD_MS;
+    case BUDDY_STATE_CONFIRM:
+        return BUDDY_CONFIRM_MS;
+    case BUDDY_STATE_ZDMW:
+        return BUDDY_ZDMW_MS;
     default:
         return 0;
     }
@@ -549,6 +621,12 @@ uint32_t buddy_activity_pose(buddy_state_t state, uint32_t t, buddy_pose_t *pose
     case BUDDY_STATE_SAD:
         next = sad(t, pose);
         break;
+    case BUDDY_STATE_CONFIRM:
+        next = confirm(t, pose);
+        break;
+    case BUDDY_STATE_ZDMW:
+        next = zdmw(t, pose);
+        break;
     default:
         return UINT32_MAX;
     }
@@ -574,6 +652,10 @@ const char *buddy_activity_doing(buddy_state_t state)
         return "asking";
     case BUDDY_STATE_SAD:
         return "sad";
+    case BUDDY_STATE_CONFIRM:
+        return "asking";
+    case BUDDY_STATE_ZDMW:
+        return "fuming";
     default:
         return NULL;
     }

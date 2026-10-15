@@ -21,23 +21,102 @@ static void redrawn(const menu_ask_t *a, gfx_sprite_t *sp)
     gfx_scene_invalidate(a->scene, gfx_sprite_bounds(sp));
 }
 
-// A speech bubble with the question, its tail pointing down at his head.
-static void draw_bubble(menu_ask_t *a)
+#define LINE_GAP 3 // between the two lines of a question
+#define PAD_X 6    // text to the bubble's edge, each side
+
+// A question's lines: up to two, split at '\n'. Returns how many; the lengths are in len[].
+static int lines_of(const char *q, size_t len[2])
 {
-    menu_canvas_t c = {a->bubble_px, MENU_ASK_BUBBLE_W, MENU_ASK_BUBBLE_H};
-    const int body = MENU_ASK_BUBBLE_H - 5, mid = MENU_ASK_BUBBLE_W / 2;
+    const char *nl = strchr(q, '\n');
+    if (!nl) {
+        len[0] = strlen(q);
+        return 1;
+    }
+    len[0] = (size_t)(nl - q);
+    len[1] = strlen(nl + 1);
+    return strchr(nl + 1, '\n') ? 3 : 2;
+}
+
+static int line_width(const char *s, size_t len)
+{
+    char buf[64];
+    if (len >= sizeof(buf)) {
+        return MENU_ASK_BUBBLE_W_MAX + 1;
+    }
+    memcpy(buf, s, len);
+    buf[len] = 0;
+    return menu_art_text_width(buf);
+}
+
+// The bubble around a question: at least MENU_ASK_BUBBLE_W_MIN wide, the tail included in the height.
+static void bubble_size(const char *q, int *w, int *h)
+{
+    size_t len[2] = {0, 0};
+    const int n = lines_of(q, len);
+    int widest = line_width(q, len[0]);
+    if (n > 1) {
+        const int w2 = line_width(strchr(q, '\n') + 1, len[1]);
+        widest = w2 > widest ? w2 : widest;
+    }
+    *w = widest + 2 * PAD_X;
+    *w = *w < MENU_ASK_BUBBLE_W_MIN ? MENU_ASK_BUBBLE_W_MIN : *w;
+    *h = (n > 1 ? 2 * 7 + LINE_GAP : 7) + 9 + 5;
+}
+
+bool menu_ask_fits(const char *question)
+{
+    size_t len[2];
+    int w, h;
+    if (!question || !*question || lines_of(question, len) > 2 || !menu_art_init()) {
+        return false;
+    }
+    bubble_size(question, &w, &h);
+    return w <= MENU_ASK_BUBBLE_W_MAX && h <= MENU_ASK_BUBBLE_H_MAX;
+}
+
+static void text_line(menu_canvas_t *c, const char *s, size_t len, int y)
+{
+    char buf[64];
+    len = len < sizeof(buf) - 1 ? len : sizeof(buf) - 1;
+    memcpy(buf, s, len);
+    buf[len] = 0;
+    menu_art_text(c, buf, (c->w - menu_art_text_width(buf)) / 2, y, INK_OUTLINE);
+}
+
+// A speech bubble with the question, its tail pointing down at his head (centred above it).
+static void draw_bubble(menu_ask_t *a, const char *q)
+{
+    int w, h;
+    bubble_size(q, &w, &h);
+    w = w < MENU_ASK_BUBBLE_W_MAX ? w : MENU_ASK_BUBBLE_W_MAX;
+    h = h < MENU_ASK_BUBBLE_H_MAX ? h : MENU_ASK_BUBBLE_H_MAX;
+    if (a->visible && a->shown_question) {
+        gfx_scene_invalidate(a->scene, gfx_sprite_bounds(&a->bubble)); // the old bubble may have been bigger
+    }
+    a->bubble_img = (gfx_image_t){(uint16_t)w, (uint16_t)h, a->bubble_px};
+    a->bubble.x = a->stage.x + (a->stage.w - w * MENU_ASK_SCALE) / 2;
+    a->bubble.y = a->head_top - h * MENU_ASK_SCALE;
+    menu_canvas_t c = {a->bubble_px, w, h};
+    const int body = h - 5, mid = w / 2;
     menu_art_clear(&c);
-    menu_art_fill(&c, 1, 0, MENU_ASK_BUBBLE_W - 2, body, INK_OUTLINE); // rounded corners: those pixels stay clear
-    menu_art_fill(&c, 0, 1, MENU_ASK_BUBBLE_W, body - 2, INK_OUTLINE);
-    menu_art_fill(&c, 1, 1, MENU_ASK_BUBBLE_W - 2, body - 2, INK_WHITE);
+    menu_art_fill(&c, 1, 0, w - 2, body, INK_OUTLINE); // rounded corners: those pixels stay clear
+    menu_art_fill(&c, 0, 1, w, body - 2, INK_OUTLINE);
+    menu_art_fill(&c, 1, 1, w - 2, body - 2, INK_WHITE);
     for (int r = 0; r < 5; r++) { // the tail
         const int half = 4 - r;
         menu_art_fill(&c, mid - half, body - 1 + r, 2 * half + 1, 1, INK_WHITE);
         menu_art_fill(&c, mid - half, body - 1 + r, 1, 1, INK_OUTLINE);
         menu_art_fill(&c, mid + half, body - 1 + r, 1, 1, INK_OUTLINE);
     }
-    menu_art_text(&c, a->question, (MENU_ASK_BUBBLE_W - menu_art_text_width(a->question)) / 2, (body - 7) / 2,
-                  INK_OUTLINE);
+    size_t len[2] = {0, 0};
+    if (lines_of(q, len) == 1) {
+        text_line(&c, q, len[0], (body - 7) / 2);
+    } else {
+        const int y = (body - 2 * 7 - LINE_GAP) / 2;
+        text_line(&c, q, len[0], y);
+        text_line(&c, strchr(q, '\n') + 1, len[1], y + 7 + LINE_GAP);
+    }
+    a->shown_question = q;
     redrawn(a, &a->bubble);
 }
 
@@ -62,30 +141,28 @@ static void draw_bar(menu_ask_t *a, int filled, bool low)
     redrawn(a, &a->timer);
 }
 
-bool menu_ask_init(menu_ask_t *a, gfx_scene_t *scene, gfx_rect_t stage, int head_top, const char *question, int z)
+bool menu_ask_init(menu_ask_t *a, gfx_scene_t *scene, gfx_rect_t stage, int head_top, int z)
 {
     memset(a, 0, sizeof(*a));
     const int bw = MENU_ASK_BUTTON_W * MENU_ASK_SCALE, bh = MENU_ASK_BUTTON_H * MENU_ASK_SCALE;
-    const int qw = MENU_ASK_BUBBLE_W * MENU_ASK_SCALE, qh = MENU_ASK_BUBBLE_H * MENU_ASK_SCALE;
+    const int qw = MENU_ASK_BUBBLE_W_MAX * MENU_ASK_SCALE, qh = MENU_ASK_BUBBLE_H_MAX * MENU_ASK_SCALE;
     const int tw = MENU_ASK_TIMER_W * MENU_ASK_SCALE, th = MENU_ASK_TIMER_H * MENU_ASK_SCALE;
-    if (!menu_art_init() || !question || menu_art_text_width(question) > MENU_ASK_BUBBLE_W - 6 ||
-        stage.w < 2 * (MARGIN + bw) + tw || head_top - qh < stage.y) {
+    if (!menu_art_init() || stage.w < 2 * (MARGIN + bw) + tw || stage.w < qw || head_top - qh < stage.y) {
         return false;
     }
     a->scene = scene;
-    a->question = question;
+    a->stage = stage;
+    a->head_top = head_top;
     a->target = a->pressed = MENU_ANSWER_NONE;
     a->shown_pressed = -2;
     a->shown_bar = -1;
-    a->bubble_img = (gfx_image_t){MENU_ASK_BUBBLE_W, MENU_ASK_BUBBLE_H, a->bubble_px};
+    a->bubble_img = (gfx_image_t){MENU_ASK_BUBBLE_W_MIN, MENU_ASK_BUBBLE_H_MAX, a->bubble_px};
     a->timer_img = (gfx_image_t){MENU_ASK_TIMER_W, MENU_ASK_TIMER_H, a->timer_px};
     const gfx_palette_t *pal = menu_art_palette(MENU_PAL_NORMAL);
     const gfx_sprite_t blank = {.palette = pal, .scale = MENU_ASK_SCALE, .flags = GFX_SPRITE_HIDDEN};
     const int bottom = stage.y + stage.h - MARGIN * 2 / 3 - bh;
     a->bubble = blank;
     a->bubble.image = &a->bubble_img;
-    a->bubble.x = stage.x + (stage.w - qw) / 2;
-    a->bubble.y = head_top - qh;
     a->timer = blank;
     a->timer.image = &a->timer_img;
     a->timer.x = stage.x + (stage.w - tw) / 2;
@@ -108,24 +185,25 @@ static void cancel(menu_ask_t *a)
     a->target = a->pressed = MENU_ANSWER_NONE;
 }
 
-uint32_t menu_ask_apply(menu_ask_t *a, uint32_t left_ms, uint32_t total_ms)
+uint32_t menu_ask_apply(menu_ask_t *a, const char *question, uint32_t left_ms, uint32_t total_ms)
 {
-    if (!left_ms || !total_ms) {
+    if (!question || !left_ms || !total_ms) {
         if (a->visible) {
             set_hidden(&a->bubble, true);
             set_hidden(&a->button[0], true);
             set_hidden(&a->button[1], true);
             set_hidden(&a->timer, true);
             a->visible = false;
+            a->shown_question = NULL;
             a->shown_pressed = -2;
             a->shown_bar = -1;
             cancel(a);
         }
         return UINT32_MAX;
     }
-    if (!a->visible) {
+    if (!a->visible || question != a->shown_question) {
+        draw_bubble(a, question);
         a->visible = true;
-        draw_bubble(a);
     }
     if (a->pressed != a->shown_pressed) {
         for (int i = 0; i < 2; i++) {
@@ -137,7 +215,8 @@ uint32_t menu_ask_apply(menu_ask_t *a, uint32_t left_ms, uint32_t total_ms)
     }
     left_ms = left_ms < total_ms ? left_ms : total_ms;
     const int filled = (int)(((uint64_t)BAR_W * left_ms + total_ms - 1) / total_ms); // full at the start
-    const bool low = left_ms <= MENU_ASK_LOW_MS;
+    const uint32_t low_ms = total_ms / 3 < MENU_ASK_LOW_MS ? total_ms / 3 : MENU_ASK_LOW_MS; // a short question
+    const bool low = left_ms <= low_ms;
     if (filled * 2 + low != a->shown_bar) {
         a->shown_bar = filled * 2 + low;
         draw_bar(a, filled, low);
@@ -145,8 +224,8 @@ uint32_t menu_ask_apply(menu_ask_t *a, uint32_t left_ms, uint32_t total_ms)
     // Next change: the bar loses a pixel when left_ms reaches (filled - 1) * total / BAR_W.
     const uint32_t step = (uint32_t)((uint64_t)(filled - 1) * total_ms / BAR_W);
     uint32_t next = left_ms > step ? left_ms - step : 1;
-    if (!low && left_ms - MENU_ASK_LOW_MS < next) {
-        next = left_ms - MENU_ASK_LOW_MS;
+    if (!low && left_ms - low_ms < next) {
+        next = left_ms - low_ms;
     }
     return next ? next : 1;
 }

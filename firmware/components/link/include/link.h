@@ -38,7 +38,27 @@ typedef enum {
     LINK_CMD_MSG_SHOW,  // id= [style=] text=
     LINK_CMD_MOOD_SET,  // name= [secs=]
     LINK_CMD_ACT,       // name=: an activity (hello acts=)
+    LINK_CMD_PDC_SET,   // state=on|off [count=]: the PDC Manager integration, as the companion sees it (a lease)
+    LINK_CMD_PDC_RESULT, // id= result= [count=] [teams=]: how a ZDMW click (evt pdc.click) ended
 } link_cmd_t;
+
+#define LINK_PDC_COUNT_MAX 2147483647
+
+// How a ZDMW click ended, as the companion reports it (pdc.result result=). Names are listed in link.c; a
+// well-formed name this firmware does not know counts as UNKNOWN (a newer companion: maybe sent).
+typedef enum {
+    LINK_PDC_OK,          // PDC Manager confirmed it (count, teams)
+    LINK_PDC_AUTH,        // not sent: log in again (in the companion)
+    LINK_PDC_DENIED,      // not sent: no ZDMW write permission
+    LINK_PDC_OFFLINE,     // not sent: PDC Manager could not be reached
+    LINK_PDC_TLS,         // not sent: the server's certificate was rejected
+    LINK_PDC_TIMEOUT,     // no answer in time: maybe sent
+    LINK_PDC_UNKNOWN,     // unexpected answer or connection lost after sending: maybe sent
+    LINK_PDC_COOLDOWN,    // not sent: too soon after the previous click
+    LINK_PDC_BUSY,        // not sent: another click is under way
+    LINK_PDC_UNAVAILABLE, // not sent: the integration is off (or not logged in, or no permission)
+    LINK_PDC_RESULT_COUNT,
+} link_pdc_result_t;
 
 // How a message is presented. Only the marquee exists so far; the wire names are listed in link.c.
 typedef enum {
@@ -75,6 +95,16 @@ typedef struct {
         struct {
             char name[LINK_MOOD_NAME_MAX + 1];
         } act; // ACT
+        struct {
+            bool on;
+            int32_t count; // -1: not given
+        } pdc_set; // PDC_SET
+        struct {
+            uint16_t id; // 1..65535, from evt pdc.click
+            link_pdc_result_t result;
+            int32_t count; // -1: not given
+            int8_t teams;  // the Teams message went out: 1, 0; -1: not given
+        } pdc_result; // PDC_RESULT
     } u;
 } link_command_t;
 

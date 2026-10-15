@@ -20,7 +20,14 @@ static const struct {
     {"hello", LINK_CMD_HELLO},       {"ping", LINK_CMD_PING},       {"status", LINK_CMD_STATUS},
     {"poke", LINK_CMD_POKE},         {"monster", LINK_CMD_MONSTER}, {"mode.set", LINK_CMD_MODE_SET},
     {"time.set", LINK_CMD_TIME_SET}, {"msg.show", LINK_CMD_MSG_SHOW}, {"mood.set", LINK_CMD_MOOD_SET},
-    {"act", LINK_CMD_ACT},
+    {"act", LINK_CMD_ACT},           {"pdc.set", LINK_CMD_PDC_SET}, {"pdc.result", LINK_CMD_PDC_RESULT},
+};
+
+static const char *const PDC_RESULTS[LINK_PDC_RESULT_COUNT] = {
+    [LINK_PDC_OK] = "ok",           [LINK_PDC_AUTH] = "auth",         [LINK_PDC_DENIED] = "denied",
+    [LINK_PDC_OFFLINE] = "offline", [LINK_PDC_TLS] = "tls",           [LINK_PDC_TIMEOUT] = "timeout",
+    [LINK_PDC_UNKNOWN] = "unknown", [LINK_PDC_COOLDOWN] = "cooldown", [LINK_PDC_BUSY] = "busy",
+    [LINK_PDC_UNAVAILABLE] = "unavailable",
 };
 
 static const struct {
@@ -272,6 +279,35 @@ static link_result_t decode_args(link_command_t *c, const arg_t *args, int n)
             return LINK_ERR_ARGS;
         }
         memcpy(c->u.act.name, name, len + 1);
+    } else if (c->cmd == LINK_CMD_PDC_SET) {
+        const char *state = get_arg(args, n, "state", v[0]), *count = get_arg(args, n, "count", v[1]);
+        int64_t v_count = -1;
+        if (!state || (strcmp(state, "on") != 0 && strcmp(state, "off") != 0) ||
+            (find_arg(args, n, "count") && (!count || !parse_int(count, 0, LINK_PDC_COUNT_MAX, &v_count)))) {
+            return LINK_ERR_ARGS;
+        }
+        c->u.pdc_set.on = strcmp(state, "on") == 0;
+        c->u.pdc_set.count = (int32_t)v_count;
+    } else if (c->cmd == LINK_CMD_PDC_RESULT) {
+        const char *id = get_arg(args, n, "id", v[0]), *result = get_arg(args, n, "result", v[1]);
+        const char *count = get_arg(args, n, "count", v[2]), *teams = get_arg(args, n, "teams", v[3]);
+        const size_t len = result ? strlen(result) : 0;
+        int64_t v_id, v_count = -1, v_teams = -1;
+        if (!id || !parse_int(id, 1, 65535, &v_id) || len == 0 || len > LINK_MOOD_NAME_MAX ||
+            strspn(result, "abcdefghijklmnopqrstuvwxyz_") != len ||
+            (find_arg(args, n, "count") && (!count || !parse_int(count, 0, LINK_PDC_COUNT_MAX, &v_count))) ||
+            (find_arg(args, n, "teams") && (!teams || !parse_int(teams, 0, 1, &v_teams)))) {
+            return LINK_ERR_ARGS;
+        }
+        c->u.pdc_result.id = (uint16_t)v_id;
+        c->u.pdc_result.result = LINK_PDC_UNKNOWN; // a newer companion's word: maybe sent
+        for (int i = 0; i < LINK_PDC_RESULT_COUNT; i++) {
+            if (strcmp(PDC_RESULTS[i], result) == 0) {
+                c->u.pdc_result.result = (link_pdc_result_t)i;
+            }
+        }
+        c->u.pdc_result.count = (int32_t)v_count;
+        c->u.pdc_result.teams = (int8_t)v_teams;
     }
     return LINK_OK;
 }

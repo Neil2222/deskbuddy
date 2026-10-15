@@ -26,4 +26,9 @@
                       LogicalName="DeskBuddy.Assets.%(Filename)%(Extension)" />
   </ItemGroup>
 
+  <!-- PDC Manager's own (self-signed) certificate, pinned by Pdc/PdcCertificate.cs. -->
+  <ItemGroup>
+    <EmbeddedResource Include="Pdc\PDCManager.cer" LogicalName="DeskBuddy.Pdc.PDCManager.cer" />
+  </ItemGroup>
+
 </Project>

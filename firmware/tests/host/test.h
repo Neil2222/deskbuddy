@@ -105,7 +105,12 @@ extern int g_test_failed;
     X(ask_yes_is_happy_hops_a_smoke_break_then_his_mood) \
     X(ask_no_or_no_answer_makes_him_briefly_sad)     \
     X(ask_buttons_beside_him_answer_on_release)      \
-    X(ask_redraws_match_full_redraw)
+    X(ask_redraws_match_full_redraw)                 \
+    X(pdc_protocol_lines)                            \
+    X(pdc_lease_and_one_request_per_tap)             \
+    X(pdc_sign_lines)                                \
+    X(pdc_menu_only_while_offered)                   \
+    X(pdc_confirmation_and_reaction)
 
 #define X(name) void test_##name(void);
 TEST_LIST

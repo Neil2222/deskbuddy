@@ -9,6 +9,7 @@ static const menu_category_def_t k_categories[MENU_CATEGORY_COUNT] = {
     [MENU_FOOD] = {"FOOD & DRINK", MENU_GRID, MENU_HOME},
     [MENU_GAMES] = {"GAMES", MENU_GRID, MENU_HOME},
     [MENU_SCHEDULE] = {"SCHEDULE", MENU_GRID, MENU_HOME},
+    [MENU_PDC] = {"PDC", MENU_LIST, MENU_HOME},
 };
 
 #define MOOD(id, label, mood) {"mood." id, label, MENU_MOODS, MENU_ICON_MOOD, MENU_DO_MOOD, mood, false}
@@ -17,6 +18,7 @@ static const menu_item_t k_items[] = {
     {"moods", "MOODS", MENU_HOME, MENU_ICON_MOODS, MENU_DO_OPEN, MENU_MOODS, false},
     {"activities", "ACTIVITIES", MENU_HOME, MENU_ICON_ACTIVITIES, MENU_DO_OPEN, MENU_ACTIVITIES, false},
     {"food", "FOOD & DRINK", MENU_HOME, MENU_ICON_FOOD, MENU_DO_OPEN, MENU_FOOD, false},
+    {"pdc", "PDC", MENU_HOME, MENU_ICON_ZDMW, MENU_DO_OPEN, MENU_PDC, false}, // only while the companion offers it
     {"games", "GAMES", MENU_HOME, MENU_ICON_GAMES, MENU_DO_OPEN, MENU_GAMES, true},
     {"schedule", "SCHEDULE", MENU_HOME, MENU_ICON_SCHEDULE, MENU_DO_OPEN, MENU_SCHEDULE, true},
 
@@ -34,6 +36,8 @@ static const menu_item_t k_items[] = {
     {"activity.stare", "STARE", MENU_ACTIVITIES, MENU_ICON_STARE, MENU_DO_EVENT, BUDDY_EVENT_STARE, false},
     {"activity.meditate", "MEDITATE", MENU_ACTIVITIES, MENU_ICON_MEDITATE, MENU_DO_EVENT, BUDDY_EVENT_MEDITATE, false},
     {"activity.peukie", "PEUKIE?", MENU_ACTIVITIES, MENU_ICON_PEUKIE, MENU_DO_EVENT, BUDDY_EVENT_ASK_PEUKIE, false},
+
+    {"pdc.zdmw", "ZE DOEN MAAR WAT!", MENU_PDC, MENU_ICON_ZDMW, MENU_DO_PDC, 0, false},
 
     {"food.monster", "MONSTER", MENU_FOOD, MENU_ICON_MONSTER, MENU_DO_EVENT, BUDDY_EVENT_DRINK_MONSTER, false},
     {"food.water", "WATER", MENU_FOOD, MENU_ICON_WATER, MENU_DO_EVENT, BUDDY_EVENT_DRINK_WATER, false},

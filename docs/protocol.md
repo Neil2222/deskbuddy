@@ -36,8 +36,10 @@ DeskBuddy and the Windows companion (`companion/`) talk over the board's **UART*
 | `time.set` | `utc=<s> [ms=<0-999>] off=<min> [next=<utc s> next_off=<min>]` | `ok` |
 | `msg.show` | `id=<1-4294967295> [style=marquee] text=<percent-encoded UTF-8>` | `ok` (on the sign now), `ok queued=1` (waits its turn), `ok dup=1` (this id was already taken), `err busy mode=<mode>` (one is already waiting), `err unsupported` (unknown style), `err bad_args` |
 | `mood.set` | `name=<mood> [secs=<1-86400>]` | `ok`, `err unsupported` (a mood this firmware does not have), `err bad_args` |
+| `pdc.set` | `state=on\|off [count=<0-2147483647>]` | `ok` (the PDC Manager lease, see *PDC Manager (ZDMW)*) |
+| `pdc.result` | `id=<1-65535> result=<ok\|auth\|denied\|offline\|tls\|timeout\|unknown\|cooldown\|busy\|unavailable> [count=<n>] [teams=1\|0]` | `ok` (how the click `evt pdc.click id=` ended) |
 
-**Capabilities:** `hello` lists what the firmware supports (`poke,monster,mode,time,status,msg,mood,act`), which message styles it draws (`styles=marquee`), which moods it has (`moods=idle,relaxed,peukie,angry,sleepy,working,happy`) and which activities `act` starts (`acts=water,sneeze,stare,meditate`), each in display order. The companion only enables the matching buttons, so new commands, styles, moods and activities can be added without breaking older companions or firmware.
+**Capabilities:** `hello` lists what the firmware supports (`poke,monster,mode,time,status,msg,mood,act,pdc`), which message styles it draws (`styles=marquee`), which moods it has (`moods=idle,relaxed,peukie,angry,sleepy,working,happy`) and which activities `act` starts (`acts=water,sneeze,stare,meditate`), each in display order. The companion only enables the matching buttons, so new commands, styles, moods and activities can be added without breaking older companions or firmware. Without `pdc` the companion sends no `pdc.*` command at all.
 
 **Activities (`act`)** are short shows on top of Buddy's mood, the same ones the touchscreen menu starts: `water` (a glass of water short-circuits him), `sneeze` (his head flies off), `stare` (a staring contest, the camera close on his face), `meditate` (he floats until a notification drops him). Each plays to its end (2.7 to 7.4 s); meanwhile `poke`, `monster` and `act` get `err busy`, and the mood resumes afterwards. Names are lower-case letters and `_`, at most 15; `monster` and `poke` keep their own commands.
 
@@ -73,6 +75,17 @@ DeskBuddy and the Windows companion (`companion/`) talk over the board's **UART*
 | `evt mode mode=<normal\|office\|monster>` | the mode changed, by touch or by command |
 | `evt mood mood=<mood>` | the mood changed: by `mood.set`, on the touchscreen menu, a timed mood ran out, or a smoke break began or ended |
 | `evt msg id=<id> state=<showing\|done>` | a message went up on the sign / finished |
+| `evt pdc.click id=<1-65535>` | the user confirmed *JA* for Ze Doen Maar Wat on the touchscreen (sent once per click; see below) |
+
+## PDC Manager (ZDMW)
+
+The optional "Ze Doen Maar Wat" button of PDC Manager (`https://pdcmanager`): a counter that also posts a Teams message. DeskBuddy never talks to the network and holds no credentials; the companion does the HTTPS, the login and the session (`companion/DeskBuddy.Companion/Pdc/`), and only offers it while the user switched the integration on (off by default).
+
+- **The lease:** `pdc.set state=on` means: integration on, logged in, PDC Manager reachable, and ZDMW write permission; `count=` is the current ZDMW count (with `state=on`, when known). The companion sends it right after `hello`, on every change of state or count, and repeats it every 10 s while connected; switched off, logged out or closing, it sends `state=off`. The device drops the lease after 30 s without a refresh and on `hello`, so a companion that went away cannot leave the button on.
+- **A click:** after *JA*, the device sends `evt pdc.click id=<n>` once (ids start at a random value on every boot). The companion sends one `POST /zdmw/api/click` and answers with `pdc.result id=<n> result=…`: `count` with `ok` (and whenever it is known), `teams=1|0` only with `ok` (whether the Teams message went out).
+- **Results:** `ok` the server confirmed it. Not sent: `auth` (login required; the companion deletes the session), `denied` (403, no write permission), `offline` (no connection at all), `tls` (certificate refused), `cooldown` (within 5 s of the previous click, from the window or the device), `busy` (another click on its way), `unavailable` (off, not logged in, not reachable or no permission). **Maybe sent:** `timeout` (no answer within 10 s) and `unknown` (connection lost after sending, a server error, an unexpected answer): the server may have counted it and posted to Teams, so these are never shown as "not sent".
+- **Never twice:** the companion never retries a click, and keeps the ids of this device session: the same id again sends no second click (the known result is sent again; still on its way: no answer). The ids are forgotten on `evt boot` and on a new connection.
+- **On the device:** the *PDC* category shows only while the lease holds; a tap asks *ZE DOEN MAAR WAT? / TEAMS-BERICHT VERSTUREN?* (NEE/JA, 15 s, then as if NEE), and only *JA* sends `evt pdc.click`. One click waits for its result at a time, then 5 s from the click before the next; a `pdc.result` for any other id (late, repeated, never sent) is acknowledged and ignored. Without a result within 20 s the device gives up and shows "maybe sent". On `ok` Buddy fumes for about 2.6 s (unless Clock Mode, a zoom or another activity is on) and the sign shows *ZE DOEN MAAR WAT!!! #<count>*; other results show a short line on the sign.
 
 ## Errors
 

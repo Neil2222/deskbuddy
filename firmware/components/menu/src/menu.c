@@ -13,11 +13,18 @@ menu_avail_t menu_item_avail(const menu_item_t *it, const menu_status_t *st)
     if (it->action == MENU_DO_OFFICE && !st->office) {
         return MENU_ITEM_HIDDEN;
     }
+    // The PDC Manager integration exists only while the companion offers it: no dead buttons without it.
+    if ((it->action == MENU_DO_PDC || (it->action == MENU_DO_OPEN && it->arg == MENU_PDC)) && !st->pdc) {
+        return MENU_ITEM_HIDDEN;
+    }
     if (it->soon) {
         return MENU_ITEM_SOON;
     }
-    if (it->action == MENU_DO_EVENT && st->busy) {
+    if ((it->action == MENU_DO_EVENT || it->action == MENU_DO_PDC) && st->busy) {
         return MENU_ITEM_BUSY;
+    }
+    if (it->action == MENU_DO_PDC && !st->pdc_ready) {
+        return MENU_ITEM_BUSY; // a click is under way, or just went out (cooldown)
     }
     return MENU_ITEM_READY;
 }

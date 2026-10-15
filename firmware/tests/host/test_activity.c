@@ -19,6 +19,7 @@ static const struct {
     {BUDDY_EVENT_SNEEZE, BUDDY_STATE_SNEEZE, BUDDY_SNEEZE_MS, "sneezing"},
     {BUDDY_EVENT_STARE, BUDDY_STATE_STARE, BUDDY_STARE_MS, "staring"},
     {BUDDY_EVENT_MEDITATE, BUDDY_STATE_MEDITATE, BUDDY_MEDITATE_MS, "meditating"},
+    {BUDDY_EVENT_ZDMW, BUDDY_STATE_ZDMW, BUDDY_ZDMW_MS, "fuming"}, // PDC Manager confirmed a click
 };
 #define N_ACTS (int)(sizeof(k_acts) / sizeof(k_acts[0]))
 
@@ -202,7 +203,8 @@ void test_activity_redraws_match_full_redraw_on_the_stage(void)
     int back = 0, frames = 0, bad = 0, max_area = 0, act = 0, outside = 0;
     uint32_t start = 500;
     bool closeup_seen = false;
-    const uint32_t end = 500 + BUDDY_WATER_MS + BUDDY_SNEEZE_MS + BUDDY_STARE_MS + BUDDY_MEDITATE_MS + 4 * 600 + 1000;
+    const uint32_t end = 500 + BUDDY_WATER_MS + BUDDY_SNEEZE_MS + BUDDY_STARE_MS + BUDDY_MEDITATE_MS + BUDDY_ZDMW_MS +
+                         N_ACTS * 600 + 1000;
     for (uint32_t t = 0, k = 0; t < end; k++) {
         if (act < N_ACTS && t >= start && !buddy_brain_busy(&brain, t)) {
             CHECK(buddy_brain_event(&brain, k_acts[act].ev, t));

@@ -91,6 +91,12 @@ bool buddy_brain_event(buddy_brain_t *b, buddy_event_t ev, uint32_t now_ms)
     case BUDDY_EVENT_ASK_PEUKIE:
         enter(b, BUDDY_STATE_ASK, now_ms);
         return true;
+    case BUDDY_EVENT_ASK_ZDMW:
+        enter(b, BUDDY_STATE_CONFIRM, now_ms);
+        return true;
+    case BUDDY_EVENT_ZDMW:
+        enter(b, BUDDY_STATE_ZDMW, now_ms);
+        return true;
     default:
         return false;
     }
@@ -126,14 +132,21 @@ void buddy_brain_set_mood(buddy_brain_t *b, buddy_mood_t mood, uint32_t duration
 
 uint32_t buddy_brain_asking(const buddy_brain_t *b, uint32_t now_ms)
 {
-    const uint32_t t = now_ms - b->state_start;
-    return b->state == BUDDY_STATE_ASK && t < BUDDY_ASK_MS ? BUDDY_ASK_MS - t : 0;
+    if (b->state != BUDDY_STATE_ASK && b->state != BUDDY_STATE_CONFIRM) {
+        return 0;
+    }
+    const uint32_t t = now_ms - b->state_start, total = buddy_activity_ms(b->state);
+    return t < total ? total - t : 0;
 }
 
 bool buddy_brain_answer(buddy_brain_t *b, bool yes, uint32_t now_ms)
 {
     if (!buddy_brain_asking(b, now_ms)) {
         return false;
+    }
+    if (b->state == BUDDY_STATE_CONFIRM) { // either way he goes back to his mood; the caller sends (or not)
+        buddy_brain_rest(b, now_ms);
+        return true;
     }
     if (!yes) {
         enter(b, BUDDY_STATE_SAD, now_ms);

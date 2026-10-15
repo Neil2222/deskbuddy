@@ -20,13 +20,14 @@ firmware/components/display/  Application-owned frame buffers, scanout fill, buf
 firmware/components/board/    Board support: I2C, IO expander, RGB panel, GT911 touch, backlight
 firmware/bringup/             Bring-up firmware: test pattern, touch dot, performance benchmarks (hardware regression)
 firmware/tests/host/          Host-side unit tests and PNG snapshot tool (no ESP32 needed)
-companion/                    Windows companion app (C#, .NET 10, WinForms): DeskBuddy Control Center (activities, LED-sign messages, clock sync)
+companion/                    Windows companion app (C#, .NET 10, WinForms): DeskBuddy Control Center (activities, LED-sign messages, clock sync, optional PDC Manager ZDMW button)
 assets/buddy/                 Buddy's real pixel art exported for the companion (faces, can, moon, app icons); made by host-test -Icons
 tools/common.ps1              Pinned ESP-IDF and .NET versions, tool paths and serial-port resolution
 tools/setup-idf.ps1           One-time ESP-IDF install
 tools/setup-dotnet.ps1        One-time per-user .NET SDK install (no administrator rights)
 tools/idf.ps1                 Runs idf.py in the pinned environment (auto-detects the port)
 tools/companion.ps1           Builds and starts the companion app; -Publish makes the double-clickable exe
+tools/pdc-fake-server.py      Local stand-in for PDC Manager's ZDMW (no Teams) to try the companion's PDC integration
 tools/host-test.ps1           Builds and runs the host tests with MSVC
 tools/flash-backup.ps1        Full 16 MB flash backup / verify / restore
 docs/                         Hardware findings, measured results, serial protocol
@@ -61,7 +62,7 @@ tools\idf.ps1 -C firmware\bringup -p COM7 flash       # bring-up regression firm
 
 - **Touch:** tap the robot for a surprise and happy hops. Everything else is in the **menu** in the control panel on the right (below).
 - **Menu:** a pixel-art panel next to Buddy, built for a finger.
-  - **Home** lists the categories: *Moods*, *Activities*, *Food & Drink*; *Games* and *Schedule* are planned and carry a SOON tag. *Back* (top left) goes up a level.
+  - **Home** lists the categories: *Moods*, *Activities*, *Food & Drink*; *Games* and *Schedule* are planned and carry a SOON tag. *PDC* appears after *Food & Drink* only while the companion offers its PDC Manager integration (then *Schedule* moves to a second page). *Back* (top left) goes up a level.
   - **Moods:** all seven as tiles with Buddy's face; a tap switches at once. The current mood has a cyan rim and a blinking light, also when it was set by the companion (and the companion follows changes made here).
   - **Activities:** *Surprise!* (the tap reaction), *Clock* (Clock Mode), *Sneeze*, *Stare*, *Meditate* and *Peukie?*. **Food & Drink:** *Monster* (he drinks a can through a cable plugged into his head, about 7 s) and *Water*; coffee, lunch and snacks are planned (SOON). While an activity plays, the others are dimmed and the footer says what he is doing.
   - **Using it:** a button sinks in under the finger and acts when the finger is lifted on it; sliding off cancels. Categories with more items than fit get pages: arrows in the footer, or swipe sideways. The header shows the page title and Buddy's head in his current mood; the footer says what he is up to.
@@ -73,6 +74,7 @@ tools\idf.ps1 -C firmware\bringup -p COM7 flash       # bring-up regression firm
   - **Meditate:** eyes closed, he floats up and hovers, sparkles drifting by; the sign: *OMMMM...*. A notification jolts him (wide eyes, strobing antenna) and he drops to the ground with a thud. About 7.4 s.
   - **Peukie?:** he asks *PEUKIE ROKEN?* in a speech bubble, holding out a cigarette, and looks hopefully from *NEE* (bottom left of the stage) to *JA* (bottom right); a bar between them runs down (red in the last 10 s) and towards the end he gets impatient. *JA*: happy hops, then a smoke break (the *peukie* mood for 2 minutes, then back to the mood he had). *NEE*, or no answer within a minute: he takes the cigarette back, hangs his head and a tear rolls down (3 s). Answered on the touchscreen only.
   - His sign lines only go up when the sign is free; a message from the companion takes the sign over.
+- **PDC → Ze doen maar wat!** (only while the companion's optional PDC Manager integration is on, logged in and allowed to click; the counter shows below the label): a tap makes Buddy ask *ZE DOEN MAAR WAT? / TEAMS-BERICHT VERSTUREN?* with *NEE* and *JA* (15 s, then as if NEE). Only *JA* sends anything: the click goes over USB to the companion, which posts it to PDC Manager (every click is a real Teams message). When PDC Manager confirms it, Buddy fumes for about 2.6 s (angry eyes, a red face, a waving hand, anger marks) and the sign shows *ZE DOEN MAAR WAT!!! #123* with the real count; otherwise the sign says what went wrong, and never "not sent" when it may have been sent. One click at a time, then 5 s before the next. The board never holds a login: see the companion below and [docs/protocol.md](docs/protocol.md).
 - **Moods** (chosen in the menu, in the companion, or by any program over USB: `mood.set`, see [docs/protocol.md](docs/protocol.md)): how Buddy is, as a looping animation; he starts in *idle* after every power-up. Whichever side changes it, the other follows.
   - **Idle:** the original Buddy, breathing and blinking.
   - **Relaxed:** calm and content: a broad smile, half-closed eyes, breathing at half idle's pace, a long contented blink now and then, sometimes an unhurried look aside.
@@ -110,7 +112,7 @@ tools\idf.ps1 -C firmware\bringup -p COM7 flash       # bring-up regression firm
 ```powershell
 tools\setup-dotnet.ps1       # once: .NET 10 SDK -> %LOCALAPPDATA%\Microsoft\dotnet (no administrator rights)
 tools\companion.ps1          # build and start
-tools\companion.ps1 -Test    # unit tests (message encoding, frames)
+tools\companion.ps1 -Test    # unit tests (message encoding, frames, PDC Manager integration against a fake server)
 tools\companion.ps1 -Publish # companion\publish\DeskBuddy.Companion.exe: one self-contained file (~47 MB) to double-click
 ```
 
@@ -121,6 +123,7 @@ tools\companion.ps1 -Publish # companion\publish\DeskBuddy.Companion.exe: one se
 - **Clock:** synced on connect, when the board restarts, every hour, and when Windows' time or time zone changes or the laptop wakes up. Daylight-saving switches happen on time even while the companion is not running.
 - **Activities:** tiles for modes (Buddy, Clock; the one that is on is outlined), actions (Surprise!, Sneeze, Stare, Meditate), Food & Drink (Monster, Water) and moods (Idle, Relaxed, Peukie, Angry, Sleepy, Working, Happy, with Buddy's face for each; the current one is outlined, and the header face shows it too). After an action the header shows Buddy's face for it for a moment. They come from the list in `companion/DeskBuddy.Companion/Activities.cs`: a new firmware command, mood or activity is one entry there, and its tile is enabled only when the board announces it (`caps=`, `moods=`, `acts=`).
 - **Messages:** type up to 100 characters and press Enter or *Send*: he jumps and the text scrolls across an amber LED sign above him (below the clock in Clock Mode, which stays on), one LED at a time, about 4 characters a second. Short messages repeat so they stay up at least 8 s; a full-length one takes about 28 s. A message sent during a Monster sequence or while another one is up waits its turn (one at a time). Accents show without accents, emoji as a box. The last 10 messages are listed under *Recent* (double-click or Enter to reuse); the list appears with the first message.
+- **PDC Manager (Ze Doen Maar Wat), optional, off by default:** the *PDC Manager* section switches it *On*; it then shows whether `https://pdcmanager` is reachable (off the company network it just says so and checks again every minute), who is logged in, the ZDMW permission and count, a login form when needed (the password is never stored; the session is kept DPAPI-encrypted in `%APPDATA%\DeskBuddy\pdc-session.bin`, settings in `settings.json`), *Log out*, and the *Ze doen maar wat!* button: click, then click again within 4 s to post the ZDMW Teams message. The same click can come from Buddy's touchscreen menu (firmware with the `pdc` capability). One click at a time, at least 5 s apart, never retried; a result without an answer says *maybe sent*. Off means no network traffic at all. PDC Manager's own certificate is pinned (`Pdc/PDCManager.cer`). To try it without Teams: `python tools\pdc-fake-server.py` and start the companion with `DESKBUDDY_PDC_URL=http://127.0.0.1:8765` (only loopback addresses are taken); details in the script. Protocol side: [docs/protocol.md](docs/protocol.md#pdc-manager-zdmw).
 - **Flashing while it runs:** `tools\idf.ps1 ... flash` / `monitor` signals the companion to let go of the port and reconnects it afterwards. Other serial tools (for example PuTTY) need *Disconnect* first: Windows lets only one program open a COM port.
 - **Without the companion** DeskBuddy works as before; only the clock stays *CLOCK NOT SET* after a power-up until the companion connects.
 - Protocol: [docs/protocol.md](docs/protocol.md).

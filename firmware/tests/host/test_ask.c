@@ -114,14 +114,23 @@ void test_ask_buttons_beside_him_answer_on_release(void)
     CHECK(gfx_scene_init(&scene, W, H, layout_background, &layout, s_strip, 16 * 1024, ALIGN));
     CHECK(buddy_view_init(&view, &scene, layout.stage, 10, 0));
     const int head_top = view.home_y0 - BUDDY_MAX_LIFT * view.home_scale;
-    CHECK(!menu_ask_init(&ask, &scene, layout.stage, head_top, "A QUESTION FAR TOO LONG FOR IT", 25));
-    CHECK(menu_ask_init(&ask, &scene, layout.stage, head_top, "PEUKIE ROKEN?", 25));
-    CHECK_EQ(menu_ask_apply(&ask, 0, BUDDY_ASK_MS), UINT32_MAX);
+    // The questions fit their bubble (one or two lines); too long, or three lines, does not.
+    CHECK(menu_ask_fits(MENU_QUESTION_PEUKIE) && menu_ask_fits(MENU_QUESTION_ZDMW));
+    CHECK(!menu_ask_fits("A QUESTION FAR, FAR TOO LONG FOR EVEN THE WIDEST BUBBLE"));
+    CHECK(!menu_ask_fits("ONE\nTWO\nTHREE") && !menu_ask_fits(""));
+    CHECK(menu_ask_init(&ask, &scene, layout.stage, head_top, 25));
+    CHECK_EQ(menu_ask_apply(&ask, MENU_QUESTION_PEUKIE, 0, BUDDY_ASK_MS), UINT32_MAX);
     CHECK(gfx_rect_is_empty(gfx_sprite_bounds(&ask.bubble)));
     CHECK_EQ(menu_ask_touch(&ask, MENU_TOUCH_DOWN, 100, 550), MENU_ANSWER_NONE); // hidden: not there
     CHECK(!menu_ask_holding(&ask));
 
-    CHECK(menu_ask_apply(&ask, BUDDY_ASK_MS, BUDDY_ASK_MS) > 0);
+    // The two-line confirmation: a wider, taller bubble, still on the stage and above his head.
+    CHECK(menu_ask_apply(&ask, MENU_QUESTION_ZDMW, BUDDY_CONFIRM_MS, BUDDY_CONFIRM_MS) > 0);
+    const gfx_rect_t wide = gfx_sprite_bounds(&ask.bubble);
+    CHECK(gfx_rect_contains_rect(layout.stage, wide) && wide.y + wide.h <= head_top);
+    CHECK(wide.h > 21 * MENU_ASK_SCALE && wide.w > MENU_ASK_BUBBLE_W_MIN * MENU_ASK_SCALE);
+
+    CHECK(menu_ask_apply(&ask, MENU_QUESTION_PEUKIE, BUDDY_ASK_MS, BUDDY_ASK_MS) > 0);
     int nx, ny, yx, yy, bx, by;
     const gfx_rect_t no = centre(&ask.button[MENU_ANSWER_NO], &nx, &ny);
     const gfx_rect_t yes = centre(&ask.button[MENU_ANSWER_YES], &yx, &yy);
@@ -131,6 +140,7 @@ void test_ask_buttons_beside_him_answer_on_release(void)
     CHECK(gfx_rect_contains_rect(layout.stage, bubble) && gfx_rect_contains_rect(layout.stage, bar));
     CHECK(nx < view.home_x0 && yx > view.home_x0 + view.art->w * view.home_scale);
     CHECK(bubble.y + bubble.h <= head_top);
+    CHECK(bubble.w == MENU_ASK_BUBBLE_W_MIN * MENU_ASK_SCALE && bubble.h == 21 * MENU_ASK_SCALE); // as approved
     CHECK(!gfx_rect_overlaps(bar, no) && !gfx_rect_overlaps(bar, yes));
     buddy_brain_t brain;
     asking(&brain, BUDDY_MOOD_IDLE);
@@ -167,13 +177,14 @@ void test_ask_buttons_beside_him_answer_on_release(void)
     CHECK_EQ(menu_ask_touch(&ask, MENU_TOUCH_UP, bx, by), MENU_ANSWER_NONE);
     // Hidden halfway through a touch: the touch is gone with it.
     menu_ask_touch(&ask, MENU_TOUCH_DOWN, yx, yy);
-    menu_ask_apply(&ask, 0, BUDDY_ASK_MS);
+    menu_ask_apply(&ask, MENU_QUESTION_PEUKIE, 0, BUDDY_ASK_MS);
     CHECK(!menu_ask_holding(&ask));
     CHECK_EQ(menu_ask_touch(&ask, MENU_TOUCH_UP, yx, yy), MENU_ANSWER_NONE);
 }
 
 // The render loop's way: he asks, the bar runs down (amber, then red), buttons sink in and come up, and the question
-// goes when he is answered. Every buffer equals a full redraw; the bar redraws when it loses a pixel, not every frame.
+// goes when he is answered; then the two-line ZDMW confirmation (another bubble size) is asked and declined. Every
+// buffer equals a full redraw; the bar redraws when it loses a pixel, not every frame.
 void test_ask_redraws_match_full_redraw(void)
 {
     static gfx_scene_t scene;
@@ -185,8 +196,7 @@ void test_ask_redraws_match_full_redraw(void)
     layout = layout_compute(W, H, 65, false, ALIGN);
     CHECK(gfx_scene_init(&scene, W, H, layout_background, &layout, s_strip, 16 * 1024, ALIGN));
     CHECK(buddy_view_init(&view, &scene, layout.stage, 10, 0));
-    CHECK(menu_ask_init(&ask, &scene, layout.stage, view.home_y0 - BUDDY_MAX_LIFT * view.home_scale, "PEUKIE ROKEN?",
-                        25));
+    CHECK(menu_ask_init(&ask, &scene, layout.stage, view.home_y0 - BUDDY_MAX_LIFT * view.home_scale, 25));
     gfx_dirty_init(&changes, W, H, ALIGN);
     gfx_dirty_init(&redraw, W, H, ALIGN);
     gfx_dirty_init(&all, W, H, ALIGN);
@@ -200,8 +210,8 @@ void test_ask_redraws_match_full_redraw(void)
     asking(&brain, BUDDY_MOOD_HAPPY);
     int nx = 0, ny = 0, yx = 0, yy = 0; // the buttons' centres, once they show (the first frame)
     int back = 0, frames = 0, bad = 0, wakes = 0, red = 0;
-    bool answered = false, gone = false;
-    const uint32_t end = 1000 + BUDDY_ASK_MS + 2000;
+    bool answered = false, gone = false, confirming = false, declined = false;
+    const uint32_t confirm_at = 1000 + BUDDY_ASK_MS + 4000, end = confirm_at + 8000;
     for (uint32_t t = 1000; t < end;) {
         // The question shows up; NEE is pressed and slid off at 20 s, JA tapped in the last 5 s.
         if (t >= 21000 && t < 21400) {
@@ -215,11 +225,25 @@ void test_ask_redraws_match_full_redraw(void)
                 answered = true;
             }
         }
+        if (!confirming && t >= confirm_at) {
+            CHECK(buddy_brain_event(&brain, BUDDY_EVENT_ASK_ZDMW, t));
+            confirming = true;
+        }
+        if (confirming && !declined && t >= confirm_at + 3000) { // NEE: nothing is sent, he just carries on
+            if (!menu_ask_holding(&ask)) {
+                menu_ask_touch(&ask, MENU_TOUCH_DOWN, nx, ny);
+            } else if (menu_ask_touch(&ask, MENU_TOUCH_UP, nx, ny) == MENU_ANSWER_NO) {
+                CHECK(buddy_brain_answer(&brain, false, t));
+                declined = true;
+            }
+        }
         buddy_pose_t pose;
         uint32_t next = buddy_brain_tick(&brain, t, &pose);
         const uint32_t view_next = buddy_view_apply(&view, &pose, t);
         next = view_next < next ? view_next : next;
-        const uint32_t ask_next = menu_ask_apply(&ask, buddy_brain_asking(&brain, t), BUDDY_ASK_MS);
+        const char *q = brain.state == BUDDY_STATE_CONFIRM ? MENU_QUESTION_ZDMW : MENU_QUESTION_PEUKIE;
+        const uint32_t left = buddy_brain_asking(&brain, t);
+        const uint32_t ask_next = menu_ask_apply(&ask, left ? q : NULL, left, buddy_activity_ms(brain.state));
         next = ask_next < next ? ask_next : next;
         if (frames == 0) {
             centre(&ask.button[MENU_ANSWER_NO], &nx, &ny);
@@ -241,7 +265,8 @@ void test_ask_redraws_match_full_redraw(void)
         wakes++;
         t += next < 1500 ? next : 1500;
     }
-    CHECK(answered && gone && red);
+    CHECK(answered && gone && red && confirming && declined && !ask.visible);
+    CHECK_EQ(brain.state, BUDDY_STATE_IDLE);
     CHECK_EQ(bad, 0);
     CHECK(frames > 100);
     printf("    question: %d frames, %d wakes\n", frames, wakes);

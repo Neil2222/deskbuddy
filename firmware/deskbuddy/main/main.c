@@ -36,6 +36,7 @@
 #include "office_clock.h"
 #include "office_switch.h"
 #include "office_zoom.h"
+#include "pdc.h"
 #include "serial_link.h"
 #include "sdkconfig.h"
 
@@ -131,8 +132,10 @@ static void verify_frame(const gfx_surface_t *frame, perf_t *perf)
 // Buddy's zoom into Office Mode and back (office_zoom.h); all Office Mode requests go here.
 static office_zoom_t s_zoom;
 
-// Buddy's question on the stage ("PEUKIE ROKEN?"), shown while the brain asks it.
+// Buddy's questions on the stage ("PEUKIE ROKEN?", the ZDMW confirmation), shown while the brain asks one.
 static menu_ask_t s_ask;
+static const char k_ask_peukie[] = MENU_QUESTION_PEUKIE;
+static const char k_ask_zdmw[] = MENU_QUESTION_ZDMW;
 
 // No scene change under way or asked for: neither Buddy's zoom nor the scene switch.
 static bool scene_settled(const office_switch_t *screen)
@@ -175,12 +178,16 @@ static void perf_log(const perf_t *p, int64_t window_us)
 #endif
 }
 
+// The PDC Manager integration as the companion offers it (pdc.h); the companion does the HTTP.
+static pdc_t s_pdc;
+
 // What the menu shows depends on Buddy; the brain owns his state (reading the mood also ends a timed one).
 static menu_status_t menu_status(buddy_brain_t *brain, bool has_office, uint32_t now)
 {
     const bool busy = buddy_brain_busy(brain, now);
     return (menu_status_t){buddy_brain_mood(brain, now), brain->state == BUDDY_STATE_MONSTER, busy,
-                           busy ? buddy_activity_doing(brain->state) : NULL, has_office};
+                           busy ? buddy_activity_doing(brain->state) : NULL, has_office, pdc_available(&s_pdc, now),
+                           pdc_ready(&s_pdc, now), s_pdc.count};
 }
 
 // Carries out what a tap in the menu asks for, the way the companion's commands do (so `evt mood` and `evt mode`
@@ -203,6 +210,11 @@ static void run_menu_action(const menu_result_t *r, buddy_brain_t *brain, uint32
     case MENU_DO_OFFICE:
         office_zoom_request(&s_zoom, true); // he zooms into the clock
         ESP_LOGI(TAG, "Clock Mode on");
+        break;
+    case MENU_DO_PDC: // first the confirmation: every click is a real Teams message
+        if (pdc_ready(&s_pdc, now) && buddy_brain_event(brain, BUDDY_EVENT_ASK_ZDMW, now)) {
+            ESP_LOGI(TAG, "ZDMW: asking for confirmation");
+        }
         break;
     default:
         break;
@@ -264,8 +276,11 @@ static void msg_start(uint32_t id, const char *text, const office_switch_t *scre
                       uint32_t now)
 {
     marquee_start(&s_msg.sign, text, now);
-    s_msg.caption = false;
     s_msg.showing_id = id;
+    s_msg.caption = id == 0; // a line of the device's own (show_line): no events, no jump
+    if (s_msg.caption) {
+        return;
+    }
     if (!screen->office) {
         buddy_brain_event(brain, BUDDY_EVENT_POKE, now); // he jumps when a message comes in
     }
@@ -273,6 +288,51 @@ static void msg_start(uint32_t id, const char *text, const office_switch_t *scre
     char body[48];
     snprintf(body, sizeof(body), "evt msg id=%" PRIu32 " state=showing", id);
     serial_link_send(0, body);
+}
+
+// A line of the device's own on the sign (a ZDMW outcome): now if the sign is free, or as the waiting message.
+// Companion message ids start at 1, so id 0 marks it.
+static void show_line(const char *text, const office_switch_t *screen, buddy_brain_t *brain, bool lit, uint32_t now)
+{
+    if (!s_msg.ready) {
+        return;
+    }
+    if (msg_can_start(screen, brain, lit)) {
+        msg_start(0, text, screen, brain, now);
+    } else if (!s_msg.queued) {
+        s_msg.queued = true;
+        s_msg.queued_id = 0;
+        snprintf(s_msg.queued_text, sizeof(s_msg.queued_text), "%s", text);
+    }
+}
+
+// How a ZDMW click ended (the companion's pdc.result, or no answer): Buddy's reaction if it went out, and a line.
+static void pdc_outcome(link_pdc_result_t result, int32_t count, int teams, const office_switch_t *screen,
+                        buddy_brain_t *brain, bool lit, uint32_t now)
+{
+    char text[PDC_TEXT_MAX];
+    pdc_text(text, sizeof(text), result, count, teams);
+    ESP_LOGI(TAG, "ZDMW: %s", text);
+    // Exasperated, briefly; not during the zoom, in Clock Mode or another activity (busy: the line still shows).
+    if (result == LINK_PDC_OK && !screen->office && scene_settled(screen)) {
+        buddy_brain_event(brain, BUDDY_EVENT_ZDMW, now);
+    }
+    show_line(text, screen, brain, lit, now);
+}
+
+// JA on "ZE DOEN MAAR WAT?": one click, one id, one evt pdc.click; the companion sends it to PDC Manager.
+static void zdmw_send(const office_switch_t *screen, buddy_brain_t *brain, uint32_t now)
+{
+    const uint16_t id = pdc_send(&s_pdc, now);
+    if (!id) { // the companion stopped offering it, or a click is still under way / cooling down
+        pdc_outcome(pdc_available(&s_pdc, now) ? LINK_PDC_BUSY : LINK_PDC_UNAVAILABLE, -1, -1, screen, brain, true,
+                    now);
+        return;
+    }
+    char body[32];
+    snprintf(body, sizeof(body), "evt pdc.click id=%u", (unsigned)id);
+    serial_link_send(0, body);
+    ESP_LOGI(TAG, "ZDMW: click %u confirmed (JA), handed to the companion", (unsigned)id);
 }
 
 // Runs a companion command (on the render task, which owns the character and the scene) and replies.
@@ -366,7 +426,26 @@ static void run_command(const link_command_t *c, buddy_brain_t *brain, office_sw
         }
         break;
     }
-    default: // hello and ping are answered by the serial task
+    case LINK_CMD_HELLO: // answered by the serial task; a new connection forgets what the previous one offered
+        pdc_reset(&s_pdc);
+        return;
+    case LINK_CMD_PDC_SET:
+        if (c->u.pdc_set.on != pdc_available(&s_pdc, now)) {
+            ESP_LOGI(TAG, "PDC Manager %s (companion)", c->u.pdc_set.on ? "available" : "unavailable");
+        }
+        pdc_set(&s_pdc, c->u.pdc_set.on, c->u.pdc_set.count, now);
+        break;
+    case LINK_CMD_PDC_RESULT:
+        // Only the click we are waiting for counts: a late or repeated result changes nothing (at most one outcome).
+        if (pdc_result(&s_pdc, c->u.pdc_result.id, c->u.pdc_result.result, c->u.pdc_result.count, now)) {
+            serial_link_send(c->seq, body); // the reply first
+            pdc_outcome(c->u.pdc_result.result, c->u.pdc_result.count, c->u.pdc_result.teams, screen, brain, lit,
+                        now);
+            return;
+        }
+        ESP_LOGI(TAG, "ZDMW: result for click %u ignored (not waiting for it)", (unsigned)c->u.pdc_result.id);
+        break;
+    default: // ping is answered by the serial task
         strcpy(body, "err unknown_cmd");
         break;
     }
@@ -425,7 +504,7 @@ static void render_task(void *arg)
         ESP_LOGW(TAG, "no touchscreen menu (the panel is too small, or no memory)");
     }
     const int head_top = view.home_y0 - BUDDY_MAX_LIFT * view.home_scale;
-    if (!menu_ask_init(&s_ask, &s_scene, s_layout.stage, head_top, "PEUKIE ROKEN?", 25)) {
+    if (!menu_ask_init(&s_ask, &s_scene, s_layout.stage, head_top, 25)) {
         ESP_LOGW(TAG, "Buddy cannot ask questions (they do not fit the stage)");
     }
     // The glyph cache is only read when the clock redraws (rarely): PSRAM.
@@ -442,6 +521,7 @@ static void render_task(void *arg)
     }
 
     buddy_brain_init(&brain, t_start, esp_random());
+    pdc_init(&s_pdc, (uint16_t)esp_random()); // click ids start somewhere new on every boot
     gfx_scene_invalidate(&s_scene, s_layout.screen); // both buffers start black: first two frames are full
     ESP_LOGI(TAG, "stage %dx%d at x=%d, panel %dx%d at x=%d; character scale %d at (%d,%d)", s_layout.stage.w,
              s_layout.stage.h, s_layout.stage.x, s_layout.panel.w, s_layout.panel.h, s_layout.panel.x, view.scale,
@@ -451,6 +531,7 @@ static void render_task(void *arg)
     int64_t perf_since = esp_timer_get_time();
     int64_t pending_touch_us = 0; // interrupt time of a touch whose reaction is not on screen yet
     uint32_t presented = 0;
+    bool pdc_was = false; // the companion offered PDC Manager last time round (to log when that ends)
     bool backlight = false; // board_init leaves the backlight off
     uint32_t wait_ms = 0;
     const char *mode = NULL; // last mode reported to the companion
@@ -497,8 +578,15 @@ static void render_task(void *arg)
                                           : ev.type == INPUT_MOVE ? MENU_TOUCH_MOVE
                                                                   : MENU_TOUCH_UP;
                 const menu_answer_t answer = menu_ask_touch(&s_ask, type, ev.x, ev.y);
+                const bool confirming = brain.state == BUDDY_STATE_CONFIRM; // which question it answers
                 if (answer != MENU_ANSWER_NONE && buddy_brain_answer(&brain, answer == MENU_ANSWER_YES, t)) {
-                    ESP_LOGI(TAG, "peukie? %s", answer == MENU_ANSWER_YES ? "ja" : "nee");
+                    if (!confirming) {
+                        ESP_LOGI(TAG, "peukie? %s", answer == MENU_ANSWER_YES ? "ja" : "nee");
+                    } else if (answer == MENU_ANSWER_YES) {
+                        zdmw_send(&screen, &brain, t);
+                    } else {
+                        ESP_LOGI(TAG, "ZDMW: cancelled (NEE), nothing sent");
+                    }
                 }
                 if (menu_ask_holding(&s_ask)) {
                     if (ev.type == INPUT_DOWN && !pending_touch_us) {
@@ -621,6 +709,26 @@ static void render_task(void *arg)
             perf_since = esp_timer_get_time();
         }
 
+        // PDC Manager: when the companion stops offering it, nothing about it stays on screen (a confirmation, its
+        // page); a click that got no answer at all is given up (maybe it was sent).
+        const bool pdc_now = pdc_available(&s_pdc, now);
+        if (!pdc_now) {
+            if (pdc_was) {
+                ESP_LOGI(TAG, "PDC Manager no longer offered (the lease ran out, or a new companion connection)");
+            }
+            if (brain.state == BUDDY_STATE_CONFIRM) {
+                buddy_brain_rest(&brain, now);
+                ESP_LOGI(TAG, "ZDMW: confirmation withdrawn (the companion no longer offers PDC Manager)");
+            }
+            if (menu.category == MENU_PDC) {
+                menu_open(&menu, MENU_HOME, now);
+            }
+        }
+        pdc_was = pdc_now;
+        if (pdc_expired(&s_pdc, now)) {
+            pdc_outcome(LINK_PDC_TIMEOUT, -1, -1, &screen, &brain, presented >= 2, now);
+        }
+
         uint32_t next;
         if (screen.office) {
             struct tm tm;
@@ -653,8 +761,12 @@ static void render_task(void *arg)
         }
         // The question shows while he asks it: not during the zoom or in Clock Mode.
         const uint32_t ask_left = !screen.office && !zoom.animate ? buddy_brain_asking(&brain, now) : 0;
-        const uint32_t ask_next = menu_ask_apply(&s_ask, ask_left, BUDDY_ASK_MS);
+        const char *question = brain.state == BUDDY_STATE_CONFIRM ? k_ask_zdmw : k_ask_peukie;
+        const uint32_t ask_next =
+            menu_ask_apply(&s_ask, ask_left ? question : NULL, ask_left, buddy_activity_ms(brain.state));
         next = ask_next < next ? ask_next : next;
+        const uint32_t pdc_wake = pdc_next(&s_pdc, now); // the lease, the cooldown, a click without answer
+        next = pdc_wake < next ? pdc_wake : next;
         next = step.next_ms < next ? step.next_ms : next;
         next = step.redrawn ? 0 : next; // the zoom carries on (and a waiting message goes up) right away
         next = !light_ok && next > BACKLIGHT_RETRY_MS ? BACKLIGHT_RETRY_MS : next;

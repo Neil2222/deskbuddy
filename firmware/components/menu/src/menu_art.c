@@ -353,6 +353,7 @@ void menu_art_icon_size(menu_icon_t icon, uint8_t arg, int *w, int *h)
     case MENU_ICON_STARE:
     case MENU_ICON_MEDITATE:
     case MENU_ICON_PEUKIE:
+    case MENU_ICON_ZDMW:
         *w = MENU_FACE_W;
         *h = MENU_FACE_H;
         return;
@@ -390,6 +391,9 @@ void menu_art_icon(menu_canvas_t *c, menu_icon_t icon, uint8_t arg, int cx, int 
         return;
     case MENU_ICON_PEUKIE: // the question offers a smoke: his smoking face
         menu_art_face(c, buddy_mood_face(BUDDY_MOOD_PEUKIE), false, cx, cy);
+        return;
+    case MENU_ICON_ZDMW: // his reaction to it: exasperated
+        menu_art_face(c, (buddy_face_t){BUDDY_EYES_ANGRY, BUDDY_MOUTH_GRIT, true, false}, false, cx, cy);
         return;
     case MENU_ICON_MONSTER: {
         const gfx_image_t *can = &buddy_art_get()->props.can[BUDDY_CAN_LEVELS - 1];

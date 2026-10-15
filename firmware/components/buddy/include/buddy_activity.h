@@ -14,6 +14,10 @@
 //   ask       "PEUKIE ROKEN?": he holds out a cigarette and looks hopefully from NEE to JA (the buttons are drawn by
 //             the touchscreen menu, menu_ask.h); impatient towards the end. buddy_brain_answer() ends it: yes is
 //             happy hops and a smoke break (the peukie mood), no (or a minute without an answer) makes him sad
+//   confirm   "ZE DOEN MAAR WAT?": the same waiting (a smirk, no cigarette) before a ZDMW click goes to PDC Manager
+//             through the companion (menu_ask.h shows the question; pdc.h owns the request). NEE or 15 s: nothing
+//   zdmw      PDC Manager confirmed the click: a jolt, then a rant (angry eyes, red face, waving hand, bouncing,
+//             anger marks), then a sigh. About 2.6 s
 //
 // Pure logic: no rendering, no clock of its own. Adding one: a buddy_state_t, a buddy_event_t, its length and pose
 // function here, and an item in the touchscreen menu (menu_items.c).
@@ -37,6 +41,8 @@ extern "C" {
 #define BUDDY_ASK_MS 60000u          // "PEUKIE ROKEN?": how long he waits for an answer (then: as if no)
 #define BUDDY_SAD_MS 3000u           // after no
 #define BUDDY_SMOKE_BREAK_MS 120000u // after yes: the peukie mood for this long, then back to his mood
+#define BUDDY_CONFIRM_MS 15000u      // "ZE DOEN MAAR WAT?": how long the confirmation waits (then: as if NEE)
+#define BUDDY_ZDMW_MS 2600u          // PDC Manager confirmed the click: his exasperated reaction
 
 // Lines Buddy puts on the LED sign (buddy_pose_t.say).
 typedef enum {

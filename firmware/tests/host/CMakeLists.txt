@@ -17,7 +17,8 @@ file(GLOB CORE_SRCS CONFIGURE_DEPENDS
      ${COMPONENTS_DIR}/office/src/*.c
      ${COMPONENTS_DIR}/link/src/*.c
      ${COMPONENTS_DIR}/marquee/src/*.c
-     ${COMPONENTS_DIR}/menu/src/*.c)
+     ${COMPONENTS_DIR}/menu/src/*.c
+     ${COMPONENTS_DIR}/pdc/src/*.c)
 
 if(MSVC)
     set(WARNINGS /W4 /WX)
@@ -41,7 +42,8 @@ target_include_directories(deskbuddy_core PUBLIC
     ${COMPONENTS_DIR}/office/include
     ${COMPONENTS_DIR}/link/include
     ${COMPONENTS_DIR}/marquee/include
-    ${COMPONENTS_DIR}/menu/include)
+    ${COMPONENTS_DIR}/menu/include
+    ${COMPONENTS_DIR}/pdc/include)
 target_compile_options(deskbuddy_core PRIVATE ${WARNINGS})
 if(NOT MSVC)
     target_link_libraries(deskbuddy_core PUBLIC m)
@@ -49,7 +51,7 @@ endif()
 
 add_executable(host_tests main.c test_util.c test_dirty.c test_scene.c test_repair.c test_anim.c test_buddy.c
                test_monster.c test_mood.c test_office.c test_link.c test_marquee.c test_menu.c test_zoom.c
-               test_activity.c test_ask.c)
+               test_activity.c test_ask.c test_pdc.c)
 target_link_libraries(host_tests PRIVATE deskbuddy_core)
 target_compile_options(host_tests PRIVATE ${WARNINGS})
 
