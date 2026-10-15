@@ -7,15 +7,19 @@ namespace DeskBuddy.Companion.Schedule;
 /// <summary>
 /// The schedule on disk: schedule.json in the companion's folder (%APPDATA%\DeskBuddy by default), readable and
 /// editable by hand:
-///   {"version": 1, "enabled": true,
+///   {"version": 2, "live": false, "paused_until": null,
 ///    "days": {"mon": [{"id": "…", "name": "Smoke break", "start": "10:00", "end": "10:12", "mood": "peukie",
-///                      "plans": "smoke", "reminder": false, "enabled": true}], "tue": [], …}}
+///                      "plans": "smoke", "action": "ask_peukie", "reminder": false, "enabled": true}], "tue": [], …}}
+/// <c>live</c>: the Companion applies it to Buddy (absent, as in version 1 files: off; version 1's "enabled" is not
+/// taken over, so nothing goes live without the user switching it on). <c>paused_until</c>: an ISO time, "resume"
+/// (until resumed) or null.
 /// Written atomically; the previous version is kept as schedule.json.bak. A damaged file is set aside
 /// (schedule.json.damaged-…) and the backup is used instead, so nothing is lost silently.
 /// </summary>
 public sealed class ScheduleStore
 {
-    public const int Version = 1;
+    public const int Version = 2;
+    private const string UntilResumed = "resume";
     private static readonly string[] DayKeys = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"]; // by DayOfWeek
 
     public string Path { get; }
@@ -76,14 +80,21 @@ public sealed class ScheduleStore
                     ["end"] = DayTime.Format(b.End),
                     ["mood"] = b.Mood,
                     ["plans"] = b.Plans,
+                    ["action"] = b.Action,
                     ["reminder"] = b.Reminder,
                     ["enabled"] = b.Enabled,
                 });
             }
             days[DayKeys[(int)day]] = blocks;
         }
-        var root = new JsonObject { ["version"] = Version, ["enabled"] = schedule.Enabled, ["days"] = days };
-        return root.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
+        var paused = schedule.PausedUntil is not { } until ? null
+            : until == WeekSchedule.UntilResumed ? UntilResumed : until.ToString("O", System.Globalization.CultureInfo.InvariantCulture);
+        var root = new JsonObject { ["version"] = Version, ["live"] = schedule.Live, ["paused_until"] = paused, ["days"] = days };
+        // Readable by hand: times keep their '+' (the default encoder writes \u002B).
+        return root.ToJsonString(new JsonSerializerOptions
+        {
+            WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        });
     }
 
     /// <summary>
@@ -101,7 +112,7 @@ public sealed class ScheduleStore
         {
             return (null, $"unreadable ({e.Message})");
         }
-        var schedule = WeekSchedule.Empty.WithEnabled(Bool(root["enabled"]) ?? true);
+        var schedule = WeekSchedule.Empty.WithLive(Bool(root["live"]) ?? false).WithPause(Pause(Text(root["paused_until"])));
         var dropped = 0;
         var days = root["days"] as JsonObject;
         foreach (var day in WeekSchedule.Week)
@@ -142,10 +153,16 @@ public sealed class ScheduleStore
             End = end,
             Mood = NullIfEmpty(Text(o["mood"])),
             Plans = NullIfEmpty(Text(o["plans"])),
+            Action = NullIfEmpty(Text(o["action"])),
             Reminder = Bool(o["reminder"]) ?? false,
             Enabled = Bool(o["enabled"]) ?? true,
         };
     }
+
+    private static DateTimeOffset? Pause(string? text) =>
+        text == UntilResumed ? WeekSchedule.UntilResumed
+        : DateTimeOffset.TryParse(text, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.RoundtripKind, out var t) ? t
+        : null;
 
     private static (WeekSchedule?, string?) Read(string path)
     {

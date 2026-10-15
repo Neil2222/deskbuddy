@@ -155,18 +155,22 @@ public sealed class MainForm : Form
         _buddyPage = AddPage(nav, "Buddy", "His mode and his mood: they stay until changed", Theme.GlyphBuddy, BuildBuddyPage());
         AddPage(nav, "Activities", "Short shows on top of his mood; it carries on afterwards", Theme.GlyphActivities, BuildActivitiesPage());
         _schedule = new SchedulePage(_theme, _art, _tips, AppendLog, Pdc.PdcStore.DefaultDirectory);
-        var schedulePage = AddPage(nav, "Schedule", "Buddy's week: a mood per block, and what you plan to do (not applied to Buddy yet)",
+        var schedulePage = AddPage(nav, "Schedule", "Buddy's week: a mood per block, an action at its start, and what you plan to do",
                                    Theme.GlyphSchedule, _schedule);
         _schedule.Changed += () =>
         {
-            var on = _schedule.Schedule.Enabled && !_schedule.Schedule.IsEmpty;
-            if (schedulePage.Nav.ShowDot != on)
+            var schedule = _schedule.Schedule;
+            _service.ActiveSchedule = schedule; // the live scheduler follows every edit, pause and switch
+            var on = schedule.Live && !schedule.IsEmpty;
+            var color = schedule.IsPaused(DateTimeOffset.Now) ? Theme.Amber : Theme.Green;
+            if (schedulePage.Nav.ShowDot != on || schedulePage.Nav.DotColor != color)
             {
                 schedulePage.Nav.ShowDot = on;
-                schedulePage.Nav.DotColor = Theme.Green;
+                schedulePage.Nav.DotColor = color;
                 schedulePage.Nav.Invalidate();
             }
         };
+        _schedule.ResumeRequested += _service.ResumeSchedule;
         _messagePage = AddPage(nav, "Message", "Text that scrolls across his LED sign", Theme.GlyphMessage, BuildMessagePage());
         _pdcPage = AddPage(nav, "PDC Manager", "The ZDMW Teams button, from here or from Buddy's menu", Theme.GlyphPdc, BuildPdcPage());
         _devicePage = AddPage(nav, "Device", "Connection, the desktop simulator and the protocol log", Theme.GlyphDevice, BuildDevicePage());

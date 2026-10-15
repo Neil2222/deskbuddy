@@ -294,23 +294,38 @@ public sealed class HistoryLedger
         return _inFlight;
     }
 
-    /// <summary>The Companion is about to send <c>act name=<paramref name="action"/> iid=<paramref name="iid"/></c>.</summary>
-    public void Requested(uint iid, string action, string origin, DateTimeOffset at)
+    /// <summary>
+    /// The Companion is about to send <c>act name=<paramref name="action"/> iid=<paramref name="iid"/></c>
+    /// (<paramref name="schedule"/>: for a scheduled occurrence). Needs a connection (the device's identity).
+    /// </summary>
+    public void Requested(uint iid, string action, string origin, DateTimeOffset at, ScheduleRef? schedule = null)
     {
         if (_current is { } cur)
         {
-            var r = new RequestEntry(Guid.CreateVersion7(at).ToString(), cur.Dev, cur.Boot, iid, action, origin, at);
+            var r = new RequestEntry(Guid.CreateVersion7(at).ToString(), cur.Dev, cur.Boot, iid, action, origin, at, schedule);
             _journalEntries.Add(r);
             _journalOut.Add(HistoryCodec.ToJson(r, _source, _installation, _zone));
             _changed = true;
         }
     }
 
+    /// <summary>A scheduled occurrence did not run (connected or not).</summary>
+    public void Skipped(ScheduleRef schedule, string action, string reason, DateTimeOffset at)
+    {
+        var s = new SkipEntry(schedule, action, reason, at, _current?.Dev, _current?.Boot);
+        _journalEntries.Add(s);
+        _journalOut.Add(HistoryCodec.ToJson(s, _source, _installation, _zone));
+        _changed = true;
+    }
+
+    /// <summary>How the device answered request <paramref name="iid"/>; recorded for the device of the request, even when
+    /// the link has gone meanwhile.</summary>
     public void RequestAnswered(uint iid, string result, DateTimeOffset at)
     {
-        if (_current is { } cur)
+        var request = _journalEntries.OfType<RequestEntry>().LastOrDefault(r => r.Iid == iid);
+        if ((request is null ? _current : (request.Dev, request.Boot)) is { } key)
         {
-            var r = new RequestResultEntry(cur.Dev, cur.Boot, iid, result, at);
+            var r = new RequestResultEntry(key.Dev, key.Boot, iid, result, at);
             _journalEntries.Add(r);
             _journalOut.Add(HistoryCodec.ToJson(r, _source, _installation, _zone));
             _changed = true;

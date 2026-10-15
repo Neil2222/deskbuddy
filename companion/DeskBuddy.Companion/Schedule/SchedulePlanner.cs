@@ -25,10 +25,6 @@ public static class SchedulePlanner
 {
     public static ScheduleSnapshot Resolve(WeekSchedule schedule, DateTime local)
     {
-        if (!schedule.Enabled)
-        {
-            return ScheduleSnapshot.None;
-        }
         var minute = local.Hour * 60 + local.Minute;
         var covering = Layers(schedule[local.DayOfWeek]).Select(l => l.Block).Where(b => b.Enabled && b.Covers(minute)).ToImmutableArray();
         return new ScheduleSnapshot(covering.LastOrDefault(b => b.Mood is not null), covering.LastOrDefault(b => b.Plans is not null), covering);
@@ -40,10 +36,6 @@ public static class SchedulePlanner
     /// </summary>
     public static DateTime? NextMoodChange(WeekSchedule schedule, DateTime local)
     {
-        if (!schedule.Enabled)
-        {
-            return null;
-        }
         var current = Resolve(schedule, local).Mood;
         var today = local.Date;
         var candidates = new SortedSet<DateTime>();

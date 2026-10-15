@@ -37,6 +37,7 @@ public sealed class HistoryRecorder : IDisposable
                 {
                     Interlocked.Exchange(ref _lastIid, (int)_ledger.MaxRequestIid); // continue above the last one used
                 }
+                IsLoaded = true;
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException)
             {
@@ -47,6 +48,10 @@ public sealed class HistoryRecorder : IDisposable
 
     public HistorySource Source { get; }
     public HistorySnapshot Snapshot => _ledger.Snapshot;
+
+    /// <summary>The files have been read: <see cref="Snapshot"/> holds what was there (the scheduler waits for it).</summary>
+    public bool IsLoaded { get => Volatile.Read(ref _loaded); private set => Volatile.Write(ref _loaded, value); }
+    private bool _loaded;
 
     /// <summary>A <c>log.since</c> should be sent; answer with <see cref="ReplayAnswered"/> or <see cref="ReplayFailed"/>.</summary>
     public event Action<FetchRequest>? FetchNeeded;
@@ -77,7 +82,9 @@ public sealed class HistoryRecorder : IDisposable
 
     public void ReplayAnswered(FetchRequest request, Frame reply) => Post(now => _ledger.ReplayAnswered(request, reply, now));
     public void ReplayFailed(FetchRequest request, string reason) => Post(now => _ledger.ReplayFailed(request, reason, now));
-    public void Requested(uint iid, string action, string origin) => Post(now => _ledger.Requested(iid, action, origin, now));
+    public void Requested(uint iid, string action, string origin, ScheduleRef? schedule = null) =>
+        Post(now => _ledger.Requested(iid, action, origin, now, schedule));
+    public void Skipped(ScheduleRef schedule, string action, string reason) => Post(now => _ledger.Skipped(schedule, action, reason, now));
     public void RequestAnswered(uint iid, string result) => Post(now => _ledger.RequestAnswered(iid, result, now));
 
     /// <summary>Re-checks whether a postponed <c>log.since</c> is due (call every second or so).</summary>

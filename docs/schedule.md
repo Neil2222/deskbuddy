@@ -123,10 +123,28 @@ there is nothing to deduplicate. A record holds:
 - A MY DAY "Smoke" is a separate record: a different source of evidence.
 - Moods and Buddy's shows are never activities. `ended_at` stays empty until there is an explicit end.
 
-## 4. When an action runs (ActionScheduler, P6)
+## 4. Live scheduling (P6: `CompanionService.Schedule.cs`, `ActionScheduler`, `MoodDirector`)
+
+**Off until switched on.** The Schedule header's switch (*Off* / *Live*, stored as `live` in `schedule.json`
+version 2) is off by default; a version 1 file's `enabled` is not taken over, so an existing schedule never goes
+live by itself. Off: no scheduled mood or action is sent and nothing is recorded. Switching it on applies the
+current scheduled mood (like *Resume*); occurrences planned before that moment that day are left alone.
+
+**Moods** go through `MoodDirector` (§1 rules: latest-started layer wins, a block without mood does not hide the one
+below, no forced idle, a manual choice holds until the next actual transition or *Resume*, unchanged boundaries do
+not end it, the repeated DST hour does not fire twice). What counts as manual: `evt mood src=touch`, and `src=cmd`
+that is not the schedule's own `mood.set` (a mood tile, another tool). `src=timer` and the end of a smoke break let
+the director restore what it wants. On connect the device's mood is respected (a non-default mood counts as the
+user's choice); transitions missed while away are not replayed. After a device restart the desired mood is applied.
+
+**Actions:** a block may start one of `ask_peukie`, `sneeze`, `stare`, `meditate`, `focus`, `water`
+(`ScheduledActions`; never Monster, PDC, Teams, messages or anything with an external effect) at its start time,
+through the firmware's `act` (the question is the same 60 s question as on the touchscreen). A planned smoke break or
+an action never sets a mood; a block without mood inherits the one below.
 
 **Occurrence id:** `<block id>/<local date>`.
-- One action per block per day: a restart, the repeated DST hour or a reconnect cannot run it twice.
+- One action per block per day: a restart, the repeated DST hour or a reconnect cannot run it twice (the first
+  02:30 of the fall-back night counts).
 - A block starting in the skipped DST hour runs at the first existing minute.
 - Moving the block later the same day, before it ran, keeps the id, so it runs at the new time. Once it ran, it does
   not run again that day.
@@ -136,22 +154,34 @@ animations.
 
 | Situation | Decision |
 |---|---|
-| Schedule off, paused or away | Skip now (`skipped:paused` etc.) |
+| Schedule off | Nothing (not tracked, not recorded) |
+| Paused | `skipped:paused` |
 | Device not connected | Wait; if it connects within the grace period, run; else `skipped:offline` |
-| Device busy (Clock Mode or its zoom, Monster, an activity, another question, screen dark) | Retry every 10 s within the grace period; else `skipped:busy:<mode>`. Clock Mode and the zoom are never interrupted |
-| Companion was not running at the start time | On start: `skipped:companion_off` for today's passed occurrences, never run late |
-| PC was asleep through the start time | On wake: `skipped:asleep` |
+| Device busy (Clock Mode or its zoom, Monster, an activity, another question, screen dark) | `err busy` from the device: retry every 10 s within the grace period; else `skipped:busy:<mode>`. Nothing is ever interrupted |
+| Firmware without caps `track` + `log` or without the act | `skipped:unsupported` (unavailable, not refused) |
+| Missed before the Companion started | `skipped:companion_off` once a device connects; never run late |
+| The clock jumped over it (PC asleep) | `skipped:asleep` |
 | Otherwise | Run now |
 
-Old questions are never queued after an absence: past the grace period an occurrence is only ever recorded as
-skipped. A mood override does not block actions (moods and actions are independent).
+**Exactly once:** the `request` line (with `occurrence`, `block`, `planned`, `planned_utc`, `iid`, `origin:
+scheduled`) is written and flushed *before* `act` is sent. An occurrence with a request is never sent again unless
+its last answer was `busy` or `not_connected` (certainly not run; retried within the grace period, with the same
+iid); a request without an answer (a crash), `no_reply` or `lost` is uncertain and is never resent (the interaction
+then reads `unconfirmed` unless the device's events, replayed later, tell what happened). While a request is in
+flight the occurrence cannot also be skipped. Records go to the journal of the device connected (or connected last);
+before the first connection nothing is recorded, so simulator runs and board history never mix.
 
-**Pause / Away (P6 minimal, P7 presets):** one control in the Schedule header with *1 hour*, *rest of today*,
-*until I resume* and *N days (holiday)*.
-- Stored as `pausedUntil` in `schedule.json`.
-- While paused: no actions (recorded as `skipped:paused`) and no scheduled mood transitions. Resuming applies the
-  current scheduled mood, like *Resume schedule*.
-- Paused days are excluded from all statistics.
+Old questions are never queued after an absence: past the grace period an occurrence is only ever recorded as
+skipped. A mood override does not block actions (moods and actions are independent). Skipped, refused and
+unconfirmed prompts say nothing about the user.
+
+**Pause:** *Pause…* in the Schedule header: *for 1 hour*, *for the rest of today*, *until I resume*, *for days
+(holiday)* (2, 3, 5, 7 or 14, today counting as the first). Stored as `paused_until` (an ISO time or `resume`) in
+`schedule.json`, so it survives restarts.
+- While paused: no actions (recorded as `skipped:paused`) and no scheduled mood transitions. *Resume* (or the pause
+  running out) applies the current scheduled mood and ends a manual choice; nothing missed is done afterwards.
+- The header shows *Live* (green dot), *Off*, or paused (amber dot, *Resume*), and the status line says until when.
+- Paused days are excluded from all statistics (P7).
 
 ## 4b. Reliability and later synchronisation (requirements, binding for P5 on)
 
@@ -241,6 +271,6 @@ could repeat after a crash, and its result would be lost. So the journals come b
 | **P4** Protocol + firmware (done, on `feature/schedule`) | `act iid=`, `ask_peukie` in `acts=`, `evt act shown/done`, `status act=`, `evt mood src=`, `evt did`, MY DAY page, caps `track,did`; the Companion needs no change (it ignores unknown events and lists no `ask_peukie` tile) | 93 host tests incl. the application end to end on a fake platform; the simulator smoke-tested over TCP; firmware builds without warnings; on the board (`2a0c261`): question by command, JA / NEE / timeout distinct, Clock Mode interrupts and refuses, MY DAY all seven, Clock zoom unchanged (0 resyncs), Companion connects |
 | **P4.1** Recorded events (done, on `feature/schedule`) | Identity `(dev, boot, seq)` (MAC / machine hash, 64-bit boot id from a true entropy source), event time `t=` or `up=`, the last 64 events in PSRAM, `log.since` replay (2 lines per frame, reply after the last, `lost=` on overflow), cap `log`; no flash writes; `evt did n=` replaced by `seq=` | 97 host tests; simulator; on the board (`29f5c80`): 20/20 automated checks over the UART (identity, new boot per restart, `up=`/`t=`, reconnect replay, identical repeat, overflow `lost=4`, 64 events in 1.31 s at 27.9 fps with 0 resyncs) and the user's JA / NEE / MY DAY replayed identically |
 | **P5** History (done, on `feature/schedule`) | `device-events.jsonl` (canonical, keyed), checkpoints, `companion-events.jsonl` (requests with iid), `installation.json`, all with `.sim` twins; replay after hello and on holes, gaps and boot ends; interactions and activities derived (`HistoryDeriver`); worker thread (`HistoryRecorder`); Activities tiles send `act … iid=`; restart during the handshake; `boot_end seen_live` | 21 unit tests (live, replay, duplicates, out of order, holes, overflow, unexplained loss, wire loss, boot end seen live / while away, restarts during the handshake, bounded retries, crash before checkpoint, checkpoint ahead of the log, torn line, uptime-only time, outcomes, origins, MY DAY, one JA smoke break, shows and moods no activity, simulator isolation); end to end with the simulator: 12 events, nothing missing or doubled; on the board (`29f5c80`, Companion `bdc8eb6`): the 13 buffered P4.1 events recovered with their original seq, iids, times and outcomes; reconnect and two Companion restarts added nothing; a new MY DAY tap and a touch question that timed out stored live and kept after a restart (18 events, 18 keys); YES → one linked smoke, NO / TIMEOUT / shows → none |
-| **P6** Live scheduling | MoodDirector wired; ActionScheduler (occurrences, grace, availability, skips); `action` in the editor (schedule v2); Pause | In the simulator: a block a minute ahead sends one `mood.set`; `ask_peukie` asks once and records yes, no or timeout; Clock Mode gives `skipped:busy:office` and is not interrupted; a disconnect past grace gives `skipped:offline`; a restart does not ask again |
+| **P6** Live scheduling (done, on `feature/schedule`) | Live switch (off by default, schedule v2), MoodDirector wired (manual = `src=touch` or a foreign `src=cmd`; settle on `src=timer` / end of a break; connect, boot), `ActionScheduler` (occurrence ids, grace, busy retries, offline / companion_off / asleep / paused / unsupported skips, in-flight guard, DST), the `request` journaled and flushed before `act`, occurrence state rebuilt from the journal on restart, `action` in the editor, Pause presets and Resume | 18 new tests (scheduler: off, once, busy every 10 s then `busy:office`, 3 vs 1 min grace, connect within grace, companion_off / offline / asleep, restart, pause and resume, switched on mid-day, not sent after all, answer after the deadline, DST fall-back and spring-forward, past midnight, allowlist; history: scheduled correlation and one smoke break, decided after a restart, busy-then-skipped, answer after the link went; store v2) on top of the MoodDirector tests; end to end in the simulator with the real clock (blocks a few minutes ahead): companion_off, scheduled `working`, JA → yes + one smoke, NEE → no, a manual Happy kept over a moodless boundary, Clock Mode → `busy:office` without interrupting, disconnected → `offline`, Companion restart → nothing repeated |
 | **P7** History + polish | History page (today, this week, outcomes), Away presets, optional reminders, DPI pass (125/150 %), regression tests | Screenshots at 3 DPIs; history matches the journals |
 | Future | PatternAnalyzer, SuggestionEngine, edit provenance | Separate approval |

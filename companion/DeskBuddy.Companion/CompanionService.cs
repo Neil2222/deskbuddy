@@ -14,7 +14,7 @@ public enum LogKind { Info, Warning, Sent, Received, Device }
 /// steps aside while an ESP-IDF tool (tools/idf.ps1 flash or monitor) needs the port.
 /// All members are used on the UI thread; link callbacks are posted to it.
 /// </summary>
-public sealed class CompanionService : IDisposable
+public sealed partial class CompanionService : IDisposable
 {
     private const string PortHoldMutex = @"Local\DeskBuddy.PortHold"; // held by tools/idf.ps1
     private static readonly TimeSpan ReplyTimeout = TimeSpan.FromSeconds(2);
@@ -134,17 +134,17 @@ public sealed class CompanionService : IDisposable
         }
         var iid = history.NextIid();
         history.Requested(iid, act, "companion");
-        var (done, result) = await SendActionAsync(label, $"act name={act} iid={iid}");
+        var (done, result, _) = await SendActionAsync(label, $"act name={act} iid={iid}");
         history.RequestAnswered(iid, result);
         return done;
     }
 
-    // Result: ok, dup, busy, unsupported, err:<code>, no_reply, lost, not_connected.
-    private async Task<(bool Done, string Result)> SendActionAsync(string label, string body)
+    // Result: ok, dup, busy, unsupported, err:<code>, no_reply, lost, not_connected; Reply: the device's answer, if any.
+    private async Task<(bool Done, string Result, Frame? Reply)> SendActionAsync(string label, string body)
     {
         if (_link is not { } link || !IsConnected)
         {
-            return (false, "not_connected");
+            return (false, "not_connected", null);
         }
         try
         {
@@ -152,19 +152,19 @@ public sealed class CompanionService : IDisposable
             if (reply.IsOk)
             {
                 Write(LogKind.Info, $"{label}: done");
-                return (true, reply.Arg("dup") == "1" ? "dup" : "ok");
+                return (true, reply.Arg("dup") == "1" ? "dup" : "ok", reply);
             }
             Write(LogKind.Warning, $"{label}: refused ({reply.Name}{Describe(reply)})");
-            return (false, reply.Name is "busy" or "unsupported" ? reply.Name : $"err:{reply.Name}");
+            return (false, reply.Name is "busy" or "unsupported" ? reply.Name : $"err:{reply.Name}", reply);
         }
         catch (TimeoutException)
         {
             Write(LogKind.Warning, $"{label}: no answer from DeskBuddy");
-            return (false, "no_reply");
+            return (false, "no_reply", null);
         }
         catch (Exception e) when (e is IOException or OperationCanceledException)
         {
-            return (false, "lost"); // reported by the link
+            return (false, "lost", null); // reported by the link
         }
     }
 
@@ -242,6 +242,7 @@ public sealed class CompanionService : IDisposable
     {
         var now = DateTime.UtcNow;
         _ = Pdc.TickAsync(); // no network at all while the integration is off
+        ScheduleTick(); // also while not connected: a due action waits, or is recorded as skipped
         // The hold concerns serial ports only; a simulator connection (TCP) carries on while a tool flashes.
         var simulator = _link?.IsSimulator ?? SelectedPort == DeviceLink.SimulatorName;
         var held = Mutex.TryOpenExisting(PortHoldMutex, out var hold) && !simulator;
@@ -367,6 +368,7 @@ public sealed class CompanionService : IDisposable
             Write(LogKind.Info, $"Connected to DeskBuddy on {port} (firmware {Firmware}, protocol {hello.Arg("proto")})");
             await SyncClockAsync("connected");
             await RefreshStatusAsync();
+            ScheduleConnected();
             Pdc.ResetDeviceIds(); // the board may have restarted while disconnected
             _pdcLease.Reset();
             SendPdcLease();
@@ -380,7 +382,7 @@ public sealed class CompanionService : IDisposable
     private void Attach(DeviceLink link)
     {
         _link = link;
-        var history = _history = HistoryFor(link.IsSimulator);
+        var history = _history = _lastHistory = HistoryFor(link.IsSimulator);
         link.LogLine += line => Post(() => Write(LogKind.Device, line));
         link.Traffic += (line, sent) => Post(() => Write(sent ? LogKind.Sent : LogKind.Received, line));
         link.BadFrame += text => Post(() => Write(LogKind.Warning, text));
@@ -412,6 +414,7 @@ public sealed class CompanionService : IDisposable
             break;
         case "mood":
             Mood = DeviceMood.From(frame, Mood);
+            ScheduleMoodEvent(frame);
             Changed?.Invoke();
             break;
         case "msg":
@@ -493,6 +496,7 @@ public sealed class CompanionService : IDisposable
     {
         await SyncClockAsync("device restarted");
         await RefreshStatusAsync();
+        ScheduleBooted();
     }
 
     // The board's and the simulator's histories, each in its own files; created on first use.

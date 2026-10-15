@@ -53,12 +53,27 @@ public sealed record GapEntry(string Dev, string Boot, uint From, uint To, DateT
 public sealed record BootEndEntry(string Dev, string Boot, uint After, bool SeenLive, DateTimeOffset ReceivedUtc)
     : LogEntry(Dev, Boot, ReceivedUtc);
 
-/// <summary>An activity the Companion asked the device to start (companion-events.jsonl), written before sending.</summary>
+/// <summary>
+/// Which scheduled occurrence a request or skip belongs to: <see cref="Occurrence"/> is
+/// <c>&lt;block id&gt;/&lt;local date&gt;</c>; the planned time as the wall clock showed it and as an instant.
+/// </summary>
+public sealed record ScheduleRef(string Occurrence, Guid Block, DateTime PlannedLocal, DateTimeOffset PlannedUtc);
+
+/// <summary>
+/// An activity the Companion asked the device to start (companion-events.jsonl), written (and flushed) before sending.
+/// <see cref="Schedule"/>: set for origin "scheduled".
+/// </summary>
 public sealed record RequestEntry(string Id, string Dev, string Boot, uint Iid, string Action, string Origin,
-                                  DateTimeOffset AtUtc);
+                                  DateTimeOffset AtUtc, ScheduleRef? Schedule = null);
 
 /// <summary>How the device answered a request: ok, dup, busy, unsupported, err:&lt;code&gt;, no_reply, lost.</summary>
 public sealed record RequestResultEntry(string Dev, string Boot, uint Iid, string Result, DateTimeOffset AtUtc);
+
+/// <summary>
+/// A scheduled occurrence that did not run: paused, offline, busy:&lt;mode&gt;, companion_off, asleep, missed or
+/// unsupported. Written whether or not a device is connected (<see cref="Dev"/>/<see cref="Boot"/> then null).
+/// </summary>
+public sealed record SkipEntry(ScheduleRef Schedule, string Action, string Reason, DateTimeOffset AtUtc, string? Dev, string? Boot);
 
 /// <summary>JSON lines of the history files. Unknown fields are ignored; a line that does not parse is skipped.</summary>
 public static class HistoryCodec
@@ -141,38 +156,82 @@ public static class HistoryCodec
         }
     }
 
-    public static JsonObject ToJson(RequestEntry r, string source, string installation, TimeZoneInfo zone) => new()
+    public static JsonObject ToJson(RequestEntry r, string source, string installation, TimeZoneInfo zone)
     {
-        ["v"] = Version, ["kind"] = "request", ["id"] = r.Id, ["dev"] = r.Dev, ["boot"] = r.Boot, ["iid"] = r.Iid,
-        ["action"] = r.Action, ["origin"] = r.Origin, ["src"] = source, ["at_utc"] = Iso(r.AtUtc),
-        ["at"] = Iso(TimeZoneInfo.ConvertTime(r.AtUtc, zone)), ["tz"] = zone.Id, ["inst"] = installation,
-    };
+        var o = new JsonObject
+        {
+            ["v"] = Version, ["kind"] = "request", ["id"] = r.Id, ["dev"] = r.Dev, ["boot"] = r.Boot, ["iid"] = r.Iid,
+            ["action"] = r.Action, ["origin"] = r.Origin,
+        };
+        if (r.Schedule is { } s)
+        {
+            Schedule(o, s);
+        }
+        return Stamp(o, r.AtUtc, source, installation, zone);
+    }
 
-    public static JsonObject ToJson(RequestResultEntry r, string source, string installation, TimeZoneInfo zone) => new()
+    public static JsonObject ToJson(RequestResultEntry r, string source, string installation, TimeZoneInfo zone) => Stamp(new()
     {
-        ["v"] = Version, ["kind"] = "request_result", ["dev"] = r.Dev, ["boot"] = r.Boot, ["iid"] = r.Iid,
-        ["result"] = r.Result, ["src"] = source, ["at_utc"] = Iso(r.AtUtc),
-        ["at"] = Iso(TimeZoneInfo.ConvertTime(r.AtUtc, zone)), ["tz"] = zone.Id, ["inst"] = installation,
-    };
+        ["v"] = Version, ["kind"] = "request_result", ["dev"] = r.Dev, ["boot"] = r.Boot, ["iid"] = r.Iid, ["result"] = r.Result,
+    }, r.AtUtc, source, installation, zone);
 
-    /// <summary>A companion journal line: a <see cref="RequestEntry"/>, a <see cref="RequestResultEntry"/> or null.</summary>
+    public static JsonObject ToJson(SkipEntry s, string source, string installation, TimeZoneInfo zone)
+    {
+        var o = new JsonObject { ["v"] = Version, ["kind"] = "skip", ["dev"] = s.Dev, ["boot"] = s.Boot, ["action"] = s.Action, ["reason"] = s.Reason };
+        Schedule(o, s.Schedule);
+        return Stamp(o, s.AtUtc, source, installation, zone);
+    }
+
+    /// <summary>A companion journal line: a <see cref="RequestEntry"/>, <see cref="RequestResultEntry"/>, <see cref="SkipEntry"/> or null.</summary>
     public static object? CompanionFromJson(JsonObject o)
     {
         var dev = Str(o["dev"]);
         var boot = Str(o["boot"]);
-        var iid = UInt(o["iid"]);
         var at = Time(o["at_utc"]);
-        if (dev is null || boot is null || iid is null or 0 || at is null)
+        if (at is null)
+        {
+            return null;
+        }
+        if (Str(o["kind"]) == "skip")
+        {
+            return ScheduleFrom(o) is { } s && Str(o["action"]) is { } a && Str(o["reason"]) is { } reason
+                ? new SkipEntry(s, a, reason, at.Value, dev, boot) : null;
+        }
+        var iid = UInt(o["iid"]);
+        if (dev is null || boot is null || iid is null or 0)
         {
             return null;
         }
         return Str(o["kind"]) switch
         {
             "request" when Str(o["id"]) is { } id && Str(o["action"]) is { } action && Str(o["origin"]) is { } origin =>
-                new RequestEntry(id, dev, boot, iid.Value, action, origin, at.Value),
+                new RequestEntry(id, dev, boot, iid.Value, action, origin, at.Value, ScheduleFrom(o)),
             "request_result" when Str(o["result"]) is { } result => new RequestResultEntry(dev, boot, iid.Value, result, at.Value),
             _ => null,
         };
+    }
+
+    private static void Schedule(JsonObject o, ScheduleRef s)
+    {
+        o["occurrence"] = s.Occurrence;
+        o["block"] = s.Block.ToString();
+        o["planned"] = s.PlannedLocal.ToString("yyyy-MM-dd'T'HH:mm", CultureInfo.InvariantCulture);
+        o["planned_utc"] = Iso(s.PlannedUtc.ToUniversalTime());
+    }
+
+    private static ScheduleRef? ScheduleFrom(JsonObject o) =>
+        Str(o["occurrence"]) is { } occ && Guid.TryParse(Str(o["block"]), out var block) && Time(o["planned_utc"]) is { } utc &&
+        DateTime.TryParseExact(Str(o["planned"]), "yyyy-MM-dd'T'HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out var local)
+            ? new ScheduleRef(occ, block, local, utc) : null;
+
+    private static JsonObject Stamp(JsonObject o, DateTimeOffset atUtc, string source, string installation, TimeZoneInfo zone)
+    {
+        o["src"] = source;
+        o["at_utc"] = Iso(atUtc.ToUniversalTime());
+        o["at"] = Iso(TimeZoneInfo.ConvertTime(atUtc, zone));
+        o["tz"] = zone.Id;
+        o["inst"] = installation;
+        return o;
     }
 
     /// <summary>

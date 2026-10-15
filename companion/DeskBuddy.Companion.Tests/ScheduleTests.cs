@@ -74,14 +74,6 @@ public class ScheduleTests
     }
 
     [Fact]
-    public void A_switched_off_schedule_asks_for_nothing()
-    {
-        var s = Day(DayOfWeek.Wednesday, B("08:30", "12:00", "working")).WithEnabled(false);
-        Assert.Null(SchedulePlanner.Resolve(s, At("09:00")).Mood);
-        Assert.Null(SchedulePlanner.NextMoodChange(s, At("07:00")));
-    }
-
-    [Fact]
     public void The_next_change_skips_boundaries_where_the_mood_stays_the_same()
     {
         var s = Day(DayOfWeek.Wednesday, B("08:30", "12:00", "working"), B("12:00", "17:00", "working"),
@@ -250,15 +242,6 @@ public class ScheduleTests
         Assert.Equal("sleepy", d.Tick(night, At("03:00", sunday), "idle"));
     }
 
-    [Fact]
-    public void Switching_the_schedule_off_sends_nothing_and_on_again_applies_it()
-    {
-        var d = new MoodDirector();
-        d.Tick(Workday, At("09:00"), "working");
-        Assert.Null(d.Tick(Workday.WithEnabled(false), At("09:01"), "working"));
-        Assert.Equal("working", d.Tick(Workday, At("09:02"), "happy"));
-    }
-
     // ---- edits ----
 
     [Fact]
@@ -312,18 +295,23 @@ public class ScheduleTests
         {
             var store = new ScheduleStore(dir);
             Assert.True(store.Load().Schedule.IsEmpty);
-            var first = Day(DayOfWeek.Monday, B("08:30", "24:00", "working", "work") with { Name = "Werk", Reminder = true });
+            var first = Day(DayOfWeek.Monday, B("08:30", "24:00", "working", "work") with { Name = "Werk", Reminder = true, Action = "ask_peukie" });
             store.Save(first);
-            store.Save(first.WithEnabled(false).Put(DayOfWeek.Sunday, B("10:00", "11:00", enabled: false)));
+            var paused = new DateTimeOffset(2026, 10, 17, 0, 0, 0, TimeSpan.FromHours(2));
+            store.Save(first.WithLive(true).WithPause(paused).Put(DayOfWeek.Sunday, B("10:00", "11:00", enabled: false)));
 
             var (loaded, warning) = store.Load();
             Assert.Null(warning);
-            Assert.False(loaded.Enabled);
+            Assert.True(loaded.Live);
+            Assert.Equal(paused, loaded.PausedUntil);
             var block = Assert.Single(loaded[DayOfWeek.Monday]);
             Assert.Equal(first[DayOfWeek.Monday][0], block);
+            Assert.Equal("ask_peukie", block.Action);
             Assert.False(Assert.Single(loaded[DayOfWeek.Sunday]).Enabled);
             Assert.True(File.Exists(store.BackupPath));
-            Assert.True(ScheduleStore.FromJson(File.ReadAllText(store.BackupPath)).Schedule!.Enabled);
+            Assert.False(ScheduleStore.FromJson(File.ReadAllText(store.BackupPath)).Schedule!.Live);
+            store.Save(loaded.WithPause(WeekSchedule.UntilResumed));
+            Assert.Equal(WeekSchedule.UntilResumed, store.Load().Schedule.PausedUntil);
         }
         finally
         {
@@ -360,10 +348,14 @@ public class ScheduleTests
             {"version": 1, "enabled": true, "days": {"wed": [
               {"id": "6f1c2c1e-0000-4000-8000-000000000001", "start": "08:30", "end": "12:00", "mood": "working", "future": 1},
               {"id": "6f1c2c1e-0000-4000-8000-000000000002", "start": "13:00", "end": "12:00"},
+              {"id": "6f1c2c1e-0000-4000-8000-000000000003", "start": "13:00", "end": "14:00", "action": "monster"},
               {"id": "not-a-guid", "start": "13:00", "end": "14:00"}]}}
             """;
         var (schedule, problem) = ScheduleStore.FromJson(json);
         Assert.Equal("working", Assert.Single(schedule![DayOfWeek.Wednesday]).Mood);
-        Assert.Equal("2 invalid block(s) left out", problem);
+        Assert.Equal("3 invalid block(s) left out", problem); // Monster cannot be scheduled
+        Assert.False(schedule.Live); // a version 1 "enabled": true never switches the live schedule on
+        Assert.Null(schedule.PausedUntil);
+        Assert.False(WeekSchedule.Empty.Live);
     }
 }

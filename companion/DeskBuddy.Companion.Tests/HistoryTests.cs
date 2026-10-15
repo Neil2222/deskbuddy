@@ -386,7 +386,7 @@ public sealed class HistoryTests : IDisposable
         Assert.Equal((false, InteractionOutcome.Interrupted), (i[16].Shown, i[16].Outcome));
         Assert.Equal((false, InteractionOutcome.Unknown), (i[17].Shown, i[17].Outcome));
         Assert.Equal((false, InteractionOutcome.NotStarted), (i[18].Shown, i[18].Outcome));
-        Assert.Equal((false, InteractionOutcome.Unknown), (i[19].Shown, i[19].Outcome));
+        Assert.Equal((false, InteractionOutcome.Unconfirmed), (i[19].Shown, i[19].Outcome)); // sent, no reply: maybe, maybe not
         Assert.Equal(T0.AddSeconds(5), i[13].ShownAt?.Utc);
         Assert.Equal(T0.AddSeconds(6), i[13].EndedAt?.Utc);
         Assert.True(i[11].IsQuestion);
@@ -455,6 +455,97 @@ public sealed class HistoryTests : IDisposable
         l.Commit();
         Assert.Equal(2, l.Snapshot.Interactions.Count);
         Assert.Empty(l.Snapshot.Activities);
+    }
+
+    // ---- scheduled actions (P6) ----
+
+    private static readonly Guid Block = Guid.Parse("6f1c2c1e-0000-4000-8000-0000000000aa");
+
+    private static ScheduleRef Occ(string date) =>
+        new($"{Block}/{date}", Block, DateTime.Parse($"{date}T10:00"), DateTimeOffset.Parse($"{date}T08:00:00Z"));
+
+    [Fact]
+    public void A_scheduled_question_is_linked_to_its_occurrence_and_a_ja_is_one_smoke_break()
+    {
+        var l = Open();
+        l.ReplayAnswered(Connect(l), Reply(B1, 0, 0), T0);
+        l.Requested(51, "ask_peukie", "scheduled", T0, Occ("2026-10-16"));
+        l.RequestAnswered(51, "ok", T0);
+        Live(l, Shown(1, 51), Done(2, 51, "yes"));
+        l.Commit();
+
+        var again = Open(); // all of it from the files
+        var o = Assert.Single(again.Snapshot.Occurrences);
+        Assert.Equal(($"{Block}/2026-10-16", Block, 51u, "ok", true), (o.Id, o.BlockId, o.Iid, o.LastResult, o.Decided));
+        Assert.Equal(new DateTime(2026, 10, 16, 10, 0, 0), o.PlannedLocal);
+        var i = Assert.Single(again.Snapshot.Interactions);
+        Assert.Equal((o.InteractionId, InteractionOrigin.Scheduled, true, InteractionOutcome.Yes), (i.Id, i.Origin, i.Shown, i.Outcome));
+        var smoke = Assert.Single(again.Snapshot.Activities);
+        Assert.Equal(("smoke", $"interaction:{i.Id}"), (smoke.Type, smoke.Via));
+        var line = File.ReadAllLines(Path.Combine(_dir, "companion-events.jsonl")).First(x => x.Contains("\"kind\":\"request\""));
+        Assert.Contains("\"origin\":\"scheduled\"", line);
+        Assert.Contains($"\"occurrence\":\"{Block}/2026-10-16\"", line);
+        Assert.Contains("\"planned\":\"2026-10-16T10:00\"", line);
+        Assert.Contains("\"planned_utc\":\"2026-10-16T08:00:00.0000000+00:00\"", line);
+    }
+
+    [Fact]
+    public void What_an_occurrence_is_after_a_restart_decides_whether_it_may_run_again()
+    {
+        var l = Open();
+        l.ReplayAnswered(Connect(l), Reply(B1, 0, 0), T0);
+        l.Requested(61, "sneeze", "scheduled", T0, Occ("2026-10-16")); // written, then the Companion died: no answer
+        l.Requested(62, "sneeze", "scheduled", T0, Occ("2026-10-17"));
+        l.RequestAnswered(62, "busy", T0); // Clock Mode: may be retried within the grace period
+        l.Requested(63, "sneeze", "scheduled", T0, Occ("2026-10-18"));
+        l.RequestAnswered(63, "busy", T0);
+        l.RequestAnswered(63, "ok", T0); // a retry got through
+        l.Requested(64, "sneeze", "scheduled", T0, Occ("2026-10-19"));
+        l.RequestAnswered(64, "no_reply", T0); // uncertain: never again
+        l.Disconnected();
+        l.Skipped(Occ("2026-10-20"), "sneeze", "offline", T0); // recorded without a device
+        l.Commit();
+
+        var o = Open().Snapshot.Occurrences.ToDictionary(x => x.Id[^10..]);
+        Assert.True(o["2026-10-16"].Decided);
+        Assert.False(o["2026-10-17"].Decided);
+        Assert.True(o["2026-10-18"].Decided);
+        Assert.True(o["2026-10-19"].Decided);
+        Assert.Equal(("offline", true, (string?)null), (o["2026-10-20"].Skipped, o["2026-10-20"].Decided, o["2026-10-20"].Dev));
+        var i = Open().Snapshot.Interactions.ToDictionary(x => x.Iid);
+        Assert.Equal(InteractionOutcome.NotStarted, i[62].Outcome);
+        Assert.Equal(InteractionOutcome.Unknown, i[63].Outcome); // accepted, nothing heard yet: not shown
+        Assert.False(i[63].Shown);
+        Assert.Equal(InteractionOutcome.Unconfirmed, i[64].Outcome);
+        Assert.Empty(Open().Snapshot.Activities); // skipped, refused or unconfirmed prompts say nothing about you
+    }
+
+    [Fact]
+    public void An_answer_that_comes_after_the_link_went_is_still_recorded_for_its_device()
+    {
+        var l = Open();
+        l.ReplayAnswered(Connect(l), Reply(B1, 0, 0), T0);
+        l.Requested(71, "water", "scheduled", T0, Occ("2026-10-16"));
+        l.Disconnected();
+        l.RequestAnswered(71, "lost", T0);
+        l.Commit();
+        var o = Assert.Single(Open().Snapshot.Occurrences);
+        Assert.Equal(("lost", Dev, B1), (o.LastResult, o.Dev, o.Boot));
+    }
+
+    [Fact]
+    public void Busy_until_the_grace_period_ran_out_is_skipped_and_stays_decided_after_a_restart()
+    {
+        var l = Open();
+        l.ReplayAnswered(Connect(l), Reply(B1, 0, 0), T0);
+        l.Requested(81, "sneeze", "scheduled", T0, Occ("2026-10-16"));
+        l.RequestAnswered(81, "busy", T0); // Clock Mode, retried...
+        l.RequestAnswered(81, "busy", T0);
+        l.Skipped(Occ("2026-10-16"), "sneeze", "busy:office", T0); // ...until the grace period ended
+        l.Commit();
+        var o = Assert.Single(Open().Snapshot.Occurrences);
+        Assert.Equal(("busy:office", 81u, true), (o.Skipped, o.Iid, o.Decided));
+        Assert.Equal(InteractionOutcome.NotStarted, Assert.Single(Open().Snapshot.Interactions).Outcome);
     }
 
     // ---- sources ----

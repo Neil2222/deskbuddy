@@ -603,6 +603,10 @@ public sealed class DayTimeline : Control
         {
             detail += $" · plans: {ActivityTypes.Label(plans)}";
         }
+        if (b.Action is { } action)
+        {
+            detail += $" · at start: {ScheduledActions.Label(action)}";
+        }
         if (!b.Enabled)
         {
             detail += " · off";

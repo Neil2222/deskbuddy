@@ -29,9 +29,10 @@ public sealed class SchedulePage : Panel
     private int? _scrollTo; // a minute of the day to bring into view once the timeline is visible and laid out
 
     // Header.
-    private readonly FlatButton _toggle, _newBlock, _copy, _undo;
+    private readonly FlatButton _toggle, _pause, _newBlock, _copy, _undo;
     private readonly Label _status = new() { Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, AutoEllipsis = true, UseMnemonic = false };
     private readonly ContextMenuStrip _copyMenu;
+    private readonly ContextMenuStrip _pauseMenu = new();
 
     // Week and day.
     private readonly WeekStrip _week;
@@ -58,9 +59,12 @@ public sealed class SchedulePage : Panel
     private readonly FlatButton _split;
     private readonly List<(FlatButton Tile, string? Mood)> _moodTiles = [];
     private readonly Picker _plans;
+    private readonly Picker _action;
     private readonly FlatButton _enabled, _duplicate, _delete;
 
     public event Action? Changed; // the schedule or the status line changed (the sidebar may show it)
+    /// <summary>The user asked to follow the schedule again (Resume): the Companion ends a manual mood choice too.</summary>
+    public event Action? ResumeRequested;
 
     public SchedulePage(Theme theme, BuddyArt art, ToolTip tips, Action<LogKind, string> log, string directory)
     {
@@ -70,7 +74,8 @@ public sealed class SchedulePage : Panel
         _log = log;
         _store = new ScheduleStore(directory);
 
-        _toggle = new FlatButton(theme, ButtonLook.Pill) { Dock = DockStyle.Left, Width = 132, AccessibleName = "Schedule on or off" };
+        _toggle = new FlatButton(theme, ButtonLook.Pill) { Dock = DockStyle.Left, Width = 104, AccessibleName = "Live schedule on or off" };
+        _pause = new FlatButton(theme, ButtonLook.Quiet) { Dock = DockStyle.Left, Width = 96, AccessibleName = "Pause or resume the schedule" };
         _newBlock = new FlatButton(theme, ButtonLook.Accent) { Text = "New block", Glyph = Theme.GlyphAdd, Dock = DockStyle.Right, Width = 136 };
         _copy = new FlatButton(theme, ButtonLook.Quiet) { Dock = DockStyle.Right, Width = 150, Glyph = Theme.GlyphCopy };
         _undo = new FlatButton(theme, ButtonLook.Quiet) { Text = "Undo delete", Dock = DockStyle.Right, Width = 116, Visible = false };
@@ -83,6 +88,7 @@ public sealed class SchedulePage : Panel
         _endFrame = new InputFrame(_end) { Width = 74, Height = 34, Padding = new Padding(8, 8, 8, 4), Margin = new Padding(8, 0, 8, 0) };
         _split = new FlatButton(theme, ButtonLook.Quiet) { Text = "Split over two days", Dock = DockStyle.Right, Width = 150 };
         _plans = new Picker(theme) { Dock = DockStyle.Top, Height = 32, AccessibleName = "Planned activity" };
+        _action = new Picker(theme) { Dock = DockStyle.Top, Height = 32, AccessibleName = "Scheduled action" };
         _enabled = new FlatButton(theme, ButtonLook.Pill) { Width = 70, Height = 30, Margin = new Padding(0, 0, 10, 0), AccessibleName = "Block on or off" };
         _duplicate = new FlatButton(theme, ButtonLook.Quiet) { Text = "Duplicate", Width = 92, Height = 30, Margin = new Padding(0, 0, 4, 0) };
         _delete = new FlatButton(theme, ButtonLook.Quiet) { Text = "Delete", Width = 74, Height = 30, Margin = new Padding(0) };
@@ -170,6 +176,8 @@ public sealed class SchedulePage : Panel
         _status.ForeColor = Theme.Muted;
         _status.Padding = new Padding(12, 0, 0, 0);
         row.Controls.Add(_status); // fills the middle
+        row.Controls.Add(_pause);
+        row.Controls.Add(new Panel { Dock = DockStyle.Left, Width = 6 });
         row.Controls.Add(_toggle);
         row.Controls.Add(_undo);
         row.Controls.Add(new Panel { Dock = DockStyle.Right, Width = 6 });
@@ -181,11 +189,38 @@ public sealed class SchedulePage : Panel
 
     private void BuildHeader()
     {
-        _toggle.Click += (_, _) => Save(_schedule.WithEnabled(!_schedule.Enabled));
+        _toggle.Click += (_, _) => Save(_schedule.WithLive(!_schedule.Live));
+        _pause.Click += (_, _) =>
+        {
+            if (_schedule.IsPaused(DateTimeOffset.Now))
+            {
+                Save(_schedule.WithPause(null));
+                ResumeRequested?.Invoke();
+            }
+            else
+            {
+                _pauseMenu.Show(_pause, new Point(0, _pause.Height));
+            }
+        };
         _newBlock.Click += (_, _) => AddBlock(ScheduleEdits.NewAt(NewBlockStart()));
         _undo.Click += (_, _) => UndoDelete();
         _copy.Click += (_, _) => OpenCopyMenu();
-        _tips.SetToolTip(_toggle, "Off: the schedule is kept, but asks Buddy for nothing");
+        _tips.SetToolTip(_toggle, "Live: Buddy follows the schedule (its moods and actions). Off: the schedule is kept, but asks Buddy for nothing");
+        _tips.SetToolTip(_pause, "Pause: no scheduled moods or actions until then; nothing missed is done afterwards");
+        _pauseMenu.Renderer = new DarkMenuRenderer();
+        _pauseMenu.BackColor = Theme.Input;
+        _pauseMenu.ForeColor = Theme.Text;
+        _pauseMenu.Items.Add("For 1 hour", null, (_, _) => Save(_schedule.WithPause(DateTimeOffset.Now.AddHours(1))));
+        _pauseMenu.Items.Add("For the rest of today", null, (_, _) => Save(_schedule.WithPause(LocalMidnight(1))));
+        _pauseMenu.Items.Add("Until I resume", null, (_, _) => Save(_schedule.WithPause(WeekSchedule.UntilResumed)));
+        var days = new ToolStripMenuItem("For days (holiday)") { ForeColor = Theme.Text };
+        foreach (var n in new[] { 2, 3, 5, 7, 14 })
+        {
+            days.DropDownItems.Add($"{n} days (today and the next {n - 1})", null, (_, _) => Save(_schedule.WithPause(LocalMidnight(n))));
+        }
+        days.DropDown.BackColor = Theme.Input;
+        days.DropDown.ForeColor = Theme.Text;
+        _pauseMenu.Items.Add(days);
         _tips.SetToolTip(_newBlock, "A new hour-long block after the selected one (or at the next quarter)");
 
         _copyMenu.Renderer = new DarkMenuRenderer();
@@ -266,6 +301,20 @@ public sealed class SchedulePage : Panel
         };
         _tips.SetToolTip(_plans, "What you intend to do in this block. A plan, not a record: nothing is logged because of it");
 
+        _action.Items.Add(new PlanChoice(null, "No action"));
+        foreach (var action in ScheduledActions.All)
+        {
+            _action.Items.Add(new PlanChoice(action.Id, action.Label));
+        }
+        _action.Picked += (_, _) =>
+        {
+            if (!_binding && _action.SelectedItem is PlanChoice choice)
+            {
+                Edit(b => b with { Action = choice.Id });
+            }
+        };
+        _tips.SetToolTip(_action, "Buddy does this once, at the block's start time (when the schedule is live). Questions wait up to 3 minutes for him to be free, shows 1 minute; otherwise it is skipped");
+
         var actions = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 38, WrapContents = false, Padding = new Padding(0, 6, 0, 0) };
         actions.Controls.AddRange([_enabled, _duplicate, _delete]);
         _enabled.Click += (_, _) => Edit(b => b with { Enabled = !b.Enabled });
@@ -280,7 +329,7 @@ public sealed class SchedulePage : Panel
         _tips.SetToolTip(_enabled, "Off: the block stays in the schedule but does nothing");
 
         Stack(_editor, Caption("Name"), nameFrame, Caption("Time"), timeRow, _problemRow, Caption("Mood"), moods,
-              Caption("Plans"), _plans, actions);
+              Caption("Plans"), _plans, Caption("Action at the start"), _action, actions);
         NativeLook.DarkScrollBars(_editor);
         _inspector.Controls.Add(_editor);
         _inspector.Controls.Add(_empty);
@@ -354,9 +403,6 @@ public sealed class SchedulePage : Panel
         _dayCard.Invalidate();
         _copy.Text = $"Copy {DayName(_day)[..3]} to…";
         _copy.Invalidate();
-        _toggle.Text = _schedule.Enabled ? "Schedule on" : "Schedule off";
-        _toggle.DotColor = _schedule.Enabled ? Theme.Green : Theme.Faint;
-        _toggle.Invalidate();
         RefreshNow();
         BindEditor();
     }
@@ -375,15 +421,27 @@ public sealed class SchedulePage : Panel
         var active = today ? snapshot.Covering.Select(b => b.Id).ToImmutableHashSet() : [];
         _timeline.Show(_schedule[_day], _selected, active, today ? now.Hour * 60 + now.Minute : null);
         _status.Text = StatusText(now, snapshot);
-        _status.ForeColor = _schedule.Enabled ? Theme.Muted : Theme.Faint;
+        var paused = _schedule.IsPaused(DateTimeOffset.Now);
+        _status.ForeColor = _schedule.Live && !paused ? Theme.Muted : Theme.Faint;
+        _toggle.Text = _schedule.Live ? "Live" : "Off";
+        _toggle.DotColor = !_schedule.Live ? Theme.Faint : paused ? Theme.Amber : Theme.Green;
+        _toggle.Invalidate();
+        _pause.Visible = _schedule.Live;
+        _pause.Text = paused ? "Resume" : "Pause…";
+        _pause.Invalidate();
         Changed?.Invoke();
     }
 
     private string StatusText(DateTime now, ScheduleSnapshot snapshot)
     {
-        if (!_schedule.Enabled)
+        if (!_schedule.Live)
         {
-            return "Off: the schedule asks Buddy for nothing.";
+            return "Off: asks Buddy for nothing. Switch to Live to apply it.";
+        }
+        if (_schedule.PausedUntil is { } until && DateTimeOffset.Now < until)
+        {
+            return until == WeekSchedule.UntilResumed ? "Paused until you resume: no scheduled moods or actions."
+                : $"Paused until {until.ToLocalTime():ddd HH:mm}: no scheduled moods or actions.";
         }
         var text = $"Now {now:HH:mm} · " + (snapshot.MoodBlock is { } block
             ? $"{MoodLabel(block.Mood!)} ({Describe(block)})"
@@ -405,6 +463,9 @@ public sealed class SchedulePage : Panel
         (b.Name.Length > 0 ? b.Name + " " : "") + $"{DayTime.Format(b.Start)}–{DayTime.Format(b.End)}";
 
     private static string DayName(DayOfWeek day) => day.ToString();
+
+    // The start of the local day `days` from today: "rest of today" is 1, "N days" is N (today counts as the first).
+    private static DateTimeOffset LocalMidnight(int days) => new(DateTime.Today.AddDays(days));
 
     private ScheduleBlock? SelectedBlock() => _selected is { } id ? _schedule[_day].FirstOrDefault(b => b.Id == id) : null;
 
@@ -439,6 +500,7 @@ public sealed class SchedulePage : Panel
                 _plans.Items.Add(new PlanChoice(unknown, unknown)); // written by a newer version: shown as it is
                 _plans.SelectedIndex = _plans.Items.Count - 1;
             }
+            _action.SelectedIndex = Math.Max(0, _action.Items.FindIndex(i => i is PlanChoice c && c.Id == block.Action));
             _enabled.Text = block.Enabled ? "On" : "Off";
             _enabled.DotColor = block.Enabled ? Theme.Green : Theme.Faint;
             _enabled.Invalidate();
@@ -659,6 +721,7 @@ public sealed class SchedulePage : Panel
         {
             _clock.Dispose();
             _copyMenu.Dispose();
+            _pauseMenu.Dispose();
         }
         base.Dispose(disposing);
     }

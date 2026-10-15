@@ -6,7 +6,8 @@ namespace DeskBuddy.Companion.Schedule;
 /// <summary>
 /// One block of a day: from <see cref="Start"/> to <see cref="End"/> (minutes since local midnight, end exclusive,
 /// 24:00 allowed as the end). It may set Buddy's mood, name a planned activity (an intention, never a record that
-/// it happened), both, or neither. Blocks do not cross midnight: the editor splits such a block in two.
+/// it happened), start one of Buddy's actions at its start time, any of these, or none. Blocks do not cross midnight:
+/// the editor splits such a block in two.
 /// </summary>
 public sealed record ScheduleBlock
 {
@@ -18,6 +19,8 @@ public sealed record ScheduleBlock
     public string? Mood { get; init; }
     /// <summary>An activity type id (<see cref="ActivityTypes"/>): what you plan to do; null: nothing planned.</summary>
     public string? Plans { get; init; }
+    /// <summary>One of <see cref="ScheduledActions"/>, started once at the block's start time; null: none.</summary>
+    public string? Action { get; init; }
     /// <summary>Stored for the reminders step; not used yet.</summary>
     public bool Reminder { get; init; }
     public bool Enabled { get; init; } = true;
@@ -70,8 +73,9 @@ public static class DayTime
 }
 
 /// <summary>
-/// Buddy's week: the blocks of each day (in list order; see <see cref="SchedulePlanner"/> for which one applies) and
-/// the global switch. Immutable: every edit returns a new schedule.
+/// Buddy's week: the blocks of each day (in list order; see <see cref="SchedulePlanner"/> for which one applies), whether
+/// the Companion applies it to Buddy (<see cref="Live"/>, off until the user switches it on) and a pause. Immutable:
+/// every edit returns a new schedule.
 /// </summary>
 public sealed class WeekSchedule
 {
@@ -82,15 +86,23 @@ public sealed class WeekSchedule
         DayOfWeek.Saturday, DayOfWeek.Sunday,
     ];
 
-    public static readonly WeekSchedule Empty = new(true, Enumerable.Repeat(ImmutableArray<ScheduleBlock>.Empty, 7).ToArray());
+    /// <summary><see cref="PausedUntil"/> for "until I resume".</summary>
+    public static readonly DateTimeOffset UntilResumed = DateTimeOffset.MaxValue;
+
+    public static readonly WeekSchedule Empty = new(false, null, Enumerable.Repeat(ImmutableArray<ScheduleBlock>.Empty, 7).ToArray());
 
     private readonly ImmutableArray<ScheduleBlock>[] _days; // indexed by DayOfWeek
 
-    public bool Enabled { get; }
+    /// <summary>The Companion applies the schedule to Buddy (moods and actions). Off by default.</summary>
+    public bool Live { get; }
 
-    private WeekSchedule(bool enabled, ImmutableArray<ScheduleBlock>[] days)
+    /// <summary>Paused until then (<see cref="UntilResumed"/>: until resumed); null: not paused.</summary>
+    public DateTimeOffset? PausedUntil { get; }
+
+    private WeekSchedule(bool live, DateTimeOffset? pausedUntil, ImmutableArray<ScheduleBlock>[] days)
     {
-        Enabled = enabled;
+        Live = live;
+        PausedUntil = pausedUntil;
         _days = days;
     }
 
@@ -98,13 +110,17 @@ public sealed class WeekSchedule
 
     public bool IsEmpty => _days.All(d => d.IsEmpty);
 
-    public WeekSchedule WithEnabled(bool enabled) => new(enabled, _days);
+    public bool IsPaused(DateTimeOffset now) => PausedUntil is { } until && now < until;
+
+    public WeekSchedule WithLive(bool live) => new(live, PausedUntil, _days);
+
+    public WeekSchedule WithPause(DateTimeOffset? until) => new(Live, until, _days);
 
     public WeekSchedule WithDay(DayOfWeek day, IEnumerable<ScheduleBlock> blocks)
     {
         var days = (ImmutableArray<ScheduleBlock>[])_days.Clone();
         days[(int)day] = [.. blocks];
-        return new WeekSchedule(Enabled, days);
+        return new WeekSchedule(Live, PausedUntil, days);
     }
 
     /// <summary>Replaces the block with the same id on that day, or adds it at the end.</summary>
@@ -152,6 +168,10 @@ public sealed class WeekSchedule
         if (block.Mood is { } mood && !IsName(mood) || block.Plans is { } plans && !IsName(plans))
         {
             return "Mood and activity names are lower-case letters and '_'.";
+        }
+        if (block.Action is { } action && !ScheduledActions.IsAllowed(action))
+        {
+            return $"'{action}' cannot be scheduled.";
         }
         return null;
     }
