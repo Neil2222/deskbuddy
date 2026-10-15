@@ -1,8 +1,9 @@
 // The application (components/app) end to end, as the board and the simulator run it, on a fake platform: a clock
 // the test moves, frame buffers in memory, and the lines it sends to the companion collected. Commands go in as
 // protocol lines, touches as touch events. Covers what the companion relies on: evt act (shown, then exactly one
-// outcome; no and timeout distinct; an interruption never an answer), act retries, status act=, evt did (MY DAY), and
-// evt mood src=. One application for all tests in this file (it is a singleton, like on the board), run in order.
+// outcome; no and timeout distinct; an interruption never an answer), act retries, status act=, evt did (MY DAY),
+// evt mood src=, and the recorded events' identity, time and replay (log.since). One application for all tests in this
+// file (it is a singleton, like on the board), run in order.
 #include <inttypes.h>
 #include <stdarg.h>
 #include <stdlib.h>
@@ -19,6 +20,8 @@
 #include "test.h"
 
 enum { W = 1024, H = 600, ALIGN = 32 };
+enum { KEPT = 64 };                    // APP_EVENTS_KEPT
+#define BOOT "abababababababab"        // the boot id from app_port_random_fill() below
 
 // ---- the fake platform ----
 
@@ -38,6 +41,8 @@ void app_port_wall_get(int64_t *sec, uint32_t *usec)
 }
 void app_port_wall_set(int64_t sec, uint32_t usec) { s_wall_us = sec * 1000000 + usec; }
 const char *app_port_version(void) { return "test"; }
+const char *app_port_device_id(void) { return "test-dev"; }
+void app_port_random_fill(void *buf, size_t len) { memset(buf, 0xab, len); }
 void *app_port_alloc(size_t size, app_mem_t kind)
 {
     (void)kind;
@@ -82,6 +87,30 @@ static int count(const char *text)
         n++;
     }
     return n;
+}
+
+// The body of the first line sent that contains text (without "<DB1 n " and the checksum); "" if there is none.
+static const char *line_with(const char *text)
+{
+    static char body[200];
+    body[0] = '\0';
+    const char *p = strstr(s_out, text);
+    if (!p) {
+        return body;
+    }
+    while (p > s_out && p[-1] != '\n') {
+        p--;
+    }
+    p = strchr(strchr(p, ' ') + 1, ' ') + 1; // past "<DB1 " and the seq
+    const char *end = strstr(p, " #");
+    snprintf(body, sizeof(body), "%.*s", (int)(end - p), p);
+    return body;
+}
+
+static uint32_t seq_in(const char *body)
+{
+    const char *p = strstr(body, " seq=");
+    return p ? (uint32_t)strtoul(p + 5, NULL, 10) : 0;
 }
 
 // Runs the application loop for ms of fake time, as the board's render task does.
@@ -170,6 +199,7 @@ static bool start(void)
 
     const app_config_t config = {.width = W, .height = H, .stage_percent = 65};
     s_now_us = 1000000;
+    app_link_boot(); // as the board's link task and the simulator do first: the device and boot ids
     if (!app_init(&config)) {
         return false;
     }
@@ -185,7 +215,7 @@ void test_app_hello_offers_tracking_and_the_question(void)
     CHECK(start());
     clear_out();
     command(1, "hello");
-    CHECK(sent("caps=poke,monster,mode,time,status,msg,mood,act,pdc,track,did "));
+    CHECK(sent("caps=poke,monster,mode,time,status,msg,mood,act,pdc,track,did,log "));
     CHECK(sent("acts=water,sneeze,stare,meditate,focus,ask_peukie"));
     clear_out();
     command(2, "status");
@@ -317,11 +347,12 @@ void test_app_my_day_and_mood_sources(void)
     run(600);
     tap_slot(MENU_GRID, 2); // COFFEE
     run(100);
-    CHECK_EQ(count("evt did item=myday.coffee n=12345"), 1);
+    const uint32_t coffee = seq_in(line_with("evt did item=myday.coffee seq="));
+    CHECK(coffee > 0);
     run(1000);
     tap_slot(MENU_GRID, 1); // MEETING
     run(100);
-    CHECK_EQ(count("evt did item=myday.meeting n=12346"), 1);
+    CHECK_EQ(seq_in(line_with("evt did item=myday.meeting seq=")), coffee + 1);
     CHECK_EQ(count("evt did"), 2);
     CHECK(!sent("evt act")); // he cheers; it is not one of his shows
     tap_back();
@@ -337,4 +368,112 @@ void test_app_my_day_and_mood_sources(void)
     CHECK(sent("evt mood mood=sleepy src=cmd"));
     CHECK(sent("evt mood mood=idle src=timer"));
     CHECK(!sent("evt did"));
+}
+
+// Every recorded event can be told apart from any other: hello names the device and this boot, each event has its
+// seq; and its time is UTC only once the companion has set the clock, never made up from the uptime.
+void test_app_events_carry_identity_and_time(void)
+{
+    CHECK(start());
+    clear_out();
+    command(40, "hello");
+    CHECK(sent(" dev=test-dev boot=" BOOT " #"));
+
+    clear_out();
+    command(41, "act name=sneeze iid=901");
+    run(4000);
+    const uint32_t shown = seq_in(line_with("evt act iid=901 name=sneeze state=shown"));
+    CHECK(shown > 0);
+    CHECK(strstr(line_with("evt act iid=901 name=sneeze state=shown"), " up=") != NULL);
+    CHECK(!sent(" t="));
+    CHECK_EQ(seq_in(line_with("evt act iid=901 state=done")), shown + 1);
+
+    command(42, "time.set utc=1792000000 ms=250 off=120");
+    clear_out();
+    command(43, "act name=sneeze iid=902");
+    run(4000);
+    CHECK(strstr(line_with("evt act iid=902 name=sneeze state=shown"), " t=1792000000250") != NULL);
+    CHECK(!sent(" up="));
+    CHECK_EQ(seq_in(line_with("evt act iid=902 name=sneeze state=shown")), shown + 2);
+}
+
+// log.since: the events after the companion's last stored one, the same lines again (replay=1), then the reply. A
+// second replay repeats them exactly (so storing them twice is harmless); another boot gets all of this one.
+void test_app_events_replay_after_a_reconnect(void)
+{
+    CHECK(start());
+    clear_out();
+    command(50, "act name=sneeze iid=903");
+    run(4000);
+    char done[200];
+    snprintf(done, sizeof(done), "%s", line_with("evt act iid=903 state=done"));
+    const uint32_t last = seq_in(done);
+    CHECK(last > 3 && last < KEPT); // all of this boot is still kept
+
+    for (uint32_t round = 0; round < 2; round++) {
+        clear_out();
+        char line[80], text[240];
+        snprintf(line, sizeof(line), "log.since boot=" BOOT " seq=%" PRIu32, last - 3);
+        command(51 + round, line);
+        CHECK(!sent("ok boot=")); // the reply comes after the events
+        run(200);
+        CHECK_EQ(count(" replay=1"), 3);
+        snprintf(text, sizeof(text), "%s replay=1 #", done);
+        const char *again = strstr(s_out, text);
+        CHECK(again != NULL);
+        snprintf(text, sizeof(text), " seq=%" PRIu32 " ", last - 3);
+        CHECK(!sent(text)); // the companion has that one
+        snprintf(text, sizeof(text), "<DB1 %" PRIu32 " ok boot=" BOOT " last=%" PRIu32 " lost=0 #", 51 + round, last);
+        const char *reply = strstr(s_out, text);
+        CHECK(reply != NULL && again != NULL && reply > again);
+    }
+
+    clear_out();
+    command(53, "log.since seq=0");
+    command(54, "log.since seq=0"); // one replay at a time
+    CHECK(sent("<DB1 54 err busy"));
+    run(2000);
+    CHECK(sent("<DB1 53 ok boot=" BOOT));
+
+    clear_out();
+    command(55, "log.since boot=00000000000000ff seq=2"); // a boot before the last restart
+    run(2000);
+    CHECK_EQ(count(" replay=1"), (int)last);
+    char reply[80];
+    snprintf(reply, sizeof(reply), "<DB1 55 ok boot=" BOOT " last=%" PRIu32 " lost=0 #", last);
+    CHECK(sent(reply));
+}
+
+// More events than are kept while the companion was away: the newest KEPT come back, and the reply says how many of
+// the ones it asked for are gone.
+void test_app_events_replay_reports_what_was_lost(void)
+{
+    CHECK(start());
+    clear_out();
+    tap_slot(MENU_LIST, 3); // MY DAY
+    run(600);
+    tap_slot(MENU_GRID, 2); // COFFEE: the companion stores this one, then goes away
+    run(300);
+    const uint32_t stored = seq_in(line_with("evt did item=myday.coffee"));
+    for (int i = 0; i < KEPT + 9; i++) {
+        tap_slot(MENU_GRID, 2);
+        run(300);
+    }
+    CHECK_EQ(count("evt did item=myday.coffee"), KEPT + 10);
+    const uint32_t last = stored + KEPT + 9;
+    tap_back();
+    run(600);
+
+    clear_out();
+    char line[80], text[80];
+    snprintf(line, sizeof(line), "log.since boot=" BOOT " seq=%" PRIu32, stored);
+    command(60, line);
+    run(3000);
+    CHECK_EQ(count(" replay=1"), KEPT);
+    snprintf(text, sizeof(text), " seq=%" PRIu32 " ", last - KEPT + 1); // the oldest kept
+    CHECK(sent(text));
+    snprintf(text, sizeof(text), " seq=%" PRIu32 " ", last - KEPT);
+    CHECK(!sent(text));
+    snprintf(text, sizeof(text), "<DB1 60 ok boot=" BOOT " last=%" PRIu32 " lost=9 #", last);
+    CHECK(sent(text));
 }

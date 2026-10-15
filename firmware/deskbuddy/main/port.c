@@ -5,12 +5,14 @@
 
 #include "app_port.h"
 #include "board.h"
+#include "bootloader_random.h"
 #include "display.h"
 #include "esp_app_desc.h"
 #include "esp_cache.h"
 #include "esp_err.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_mac.h"
 #include "esp_random.h"
 #include "esp_timer.h"
 #include "sdkconfig.h"
@@ -25,6 +27,15 @@ int64_t app_port_time_us(void)
 uint32_t app_port_random(void)
 {
     return esp_random();
+}
+
+// Without Wi-Fi or Bluetooth the hardware RNG only gets true noise while the SAR ADC entropy source is on; nothing
+// else uses the ADC (or the radio), so it can be switched on just for this.
+void app_port_random_fill(void *buf, size_t len)
+{
+    bootloader_random_enable();
+    esp_fill_random(buf, len);
+    bootloader_random_disable();
 }
 
 void app_port_wall_get(int64_t *sec, uint32_t *usec)
@@ -44,6 +55,17 @@ void app_port_wall_set(int64_t sec, uint32_t usec)
 const char *app_port_version(void)
 {
     return esp_app_get_description()->version;
+}
+
+const char *app_port_device_id(void)
+{
+    static char id[13];
+    if (!id[0]) {
+        uint8_t mac[6] = {0};
+        esp_efuse_mac_get_default(mac); // the factory MAC: the same on every boot
+        snprintf(id, sizeof(id), "%02x%02x%02x%02x%02x%02x", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    }
+    return id;
 }
 
 void app_port_send(const char *line, size_t len)

@@ -20,7 +20,7 @@ extern "C" {
 
 #define LINK_PROTO 1
 #define LINK_LINE_MAX 768  // longest received line, including the newline (a message with percent-encoded text)
-#define LINK_REPLY_MAX 256 // longest line the device sends (hello lists capabilities, styles, moods and activities)
+#define LINK_REPLY_MAX 320 // longest line the device sends (hello: capabilities, styles, moods, activities, dev, boot)
 #define LINK_TEXT_MAX_CHARS 100 // msg.show text: Unicode code points...
 #define LINK_TEXT_MAX_BYTES 200 // ...and UTF-8 bytes
 #define LINK_MOOD_NAME_MAX 15    // mood.set name and act name: lower-case letters and '_' (the device decides
@@ -40,6 +40,7 @@ typedef enum {
     LINK_CMD_ACT,       // name= [iid=]: an activity (hello acts=); iid identifies it in its evt act events
     LINK_CMD_PDC_SET,   // state=on|off [count=]: the PDC Manager integration, as the companion sees it (a lease)
     LINK_CMD_PDC_RESULT, // id= result= [count=] [teams=]: how a ZDMW click (evt pdc.click) ended
+    LINK_CMD_LOG_SINCE, // [boot=] seq=: replays the recorded events after seq (see app_events.h)
 } link_cmd_t;
 
 #define LINK_PDC_COUNT_MAX 2147483647
@@ -106,6 +107,11 @@ typedef struct {
             int32_t count; // -1: not given
             int8_t teams;  // the Teams message went out: 1, 0; -1: not given
         } pdc_result; // PDC_RESULT
+        struct {
+            bool has_boot;
+            uint64_t boot; // the boot (hello boot=) seq counts in; another one means: everything of this boot
+            uint32_t seq;  // the last event the companion has stored (0: none)
+        } log_since; // LOG_SINCE
     } u;
 } link_command_t;
 

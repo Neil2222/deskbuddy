@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "app_events.h"
 #include "app_log.h"
 #include "app_port.h"
 #include "buddy_activity.h"
@@ -23,8 +24,10 @@ void app_link_send(uint32_t seq, const char *body)
 
 void app_link_boot(void)
 {
-    char body[64];
-    snprintf(body, sizeof(body), "evt boot proto=%d fw=%s", LINK_PROTO, app_port_version());
+    app_events_identity();
+    char body[128];
+    snprintf(body, sizeof(body), "evt boot proto=%d fw=%s dev=%s boot=%s", LINK_PROTO, app_port_version(),
+             app_events_device(), app_events_boot());
     app_link_send(0, body);
 }
 
@@ -56,6 +59,9 @@ static void handle_line(const char *line, size_t len, app_link_deliver_fn delive
         }
         for (int i = 0; i < BUDDY_ACTS && n > 0 && (size_t)n < sizeof(body); i++) {
             n += snprintf(body + n, sizeof(body) - (size_t)n, "%s%s", i ? "," : " acts=", buddy_act_name(i));
+        }
+        if (n > 0 && (size_t)n < sizeof(body)) {
+            snprintf(body + n, sizeof(body) - (size_t)n, " dev=%s boot=%s", app_events_device(), app_events_boot());
         }
         app_link_send(ev.command.seq, body);
         // The application also hears of it (a new companion connection: forget what the previous one offered); it

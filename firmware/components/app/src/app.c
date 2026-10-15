@@ -8,6 +8,7 @@
 #include <string.h>
 #include <time.h>
 
+#include "app_events.h"
 #include "app_link.h"
 #include "app_log.h"
 #include "app_port.h"
@@ -52,6 +53,16 @@ static gfx_scene_t s_scene;
 static uint32_t now_ms(void)
 {
     return (uint32_t)(app_port_time_us() / 1000);
+}
+
+// Sends a recorded event (evt act, evt did): numbered and kept for log.since (app_events.h), with the UTC time it
+// happened if the clock has been set, else only the time since start.
+static void record(const char *body)
+{
+    int64_t sec;
+    uint32_t usec;
+    app_port_wall_get(&sec, &usec);
+    app_events_send(body, office_time_valid((time_t)sec), sec * 1000 + usec / 1000, now_ms());
 }
 
 static int64_t max64(int64_t a, int64_t b)
@@ -221,7 +232,7 @@ static void ia_finish(const buddy_brain_t *b, uint32_t now)
     s_ia.state = IA_DONE;
     char body[64];
     snprintf(body, sizeof(body), "evt act iid=%" PRIu32 " state=done result=%s", s_ia.iid, s_ia.result);
-    app_link_send(0, body);
+    record(body);
     APP_LOGI(TAG, "interaction %" PRIu32 " (%s): %s", s_ia.iid, s_ia.name, s_ia.result);
 }
 
@@ -255,7 +266,7 @@ static void ia_update(const buddy_brain_t *b, bool presented, bool visible, uint
         char body[80];
         snprintf(body, sizeof(body), "evt act iid=%" PRIu32 " name=%s state=shown src=%s", s_ia.iid, s_ia.name,
                  s_ia.touch ? "touch" : "cmd");
-        app_link_send(0, body);
+        record(body);
     }
 }
 
@@ -271,7 +282,6 @@ static void brain_rest(buddy_brain_t *b, uint32_t now)
 // Why the mood changed, for evt mood src=: set where it is changed on purpose, used once by the next report.
 static const char *s_mood_src;
 static bool s_smoke_break; // a smoke break (JA to the question) is under way: its start and end are src=break
-static uint32_t s_did_n;   // evt did n=: counts up from a random start on every boot
 
 // Carries out what a tap in the menu asks for, the way the companion's commands do (so `evt mood` and `evt mode`
 // tell the companion, whichever side changed it).
@@ -557,6 +567,13 @@ static void run_command(const link_command_t *c, buddy_brain_t *brain, office_sw
         }
         APP_LOGI(TAG, "ZDMW: result for click %u ignored (not waiting for it)", (unsigned)c->u.pdc_result.id);
         break;
+    case LINK_CMD_LOG_SINCE:
+        // The reply follows the replayed events (app_frame sends a few per frame).
+        if (app_events_replay_start(c->seq, c->u.log_since.has_boot, c->u.log_since.boot, c->u.log_since.seq)) {
+            return;
+        }
+        strcpy(body, "err busy");
+        break;
     default: // ping is answered by the link
         strcpy(body, "err unknown_cmd");
         break;
@@ -662,10 +679,10 @@ bool app_init(const app_config_t *config)
         APP_LOGW(TAG, "no room in the scene for the message marquee");
     }
 
+    app_events_init();
     buddy_brain_init(&s.brain, t_start, app_port_random());
     pdc_init(&s_pdc, (uint16_t)app_port_random()); // click ids start somewhere new on every boot
-    s_did_n = app_port_random();                   // as do evt did's n=...
-    s_ia.next_own = app_port_random();              // ...and the device's own interaction ids
+    s_ia.next_own = app_port_random();              // as do the device's own interaction ids
     gfx_scene_invalidate(&s_scene, s_layout.screen); // both buffers start black: first two frames are full
     APP_LOGI(TAG, "stage %dx%d at x=%d, panel %dx%d at x=%d; character scale %d at (%d,%d)", s_layout.stage.w,
              s_layout.stage.h, s_layout.stage.x, s_layout.panel.w, s_layout.panel.h, s_layout.panel.x, s.view.scale,
@@ -685,8 +702,8 @@ bool app_init(const app_config_t *config)
 static void myday(const menu_item_t *it, uint32_t now)
 {
     char body[64];
-    snprintf(body, sizeof(body), "evt did item=%s n=%" PRIu32, it->id, s_did_n++);
-    app_link_send(0, body);
+    snprintf(body, sizeof(body), "evt did item=%s", it->id);
+    record(body);
     APP_LOGI(TAG, "MY DAY: %s", it->id);
     if (!s.screen.office && scene_settled(&s.screen)) {
         buddy_brain_event(&s.brain, BUDDY_EVENT_POKE, now);
@@ -1034,6 +1051,9 @@ uint32_t app_frame(void)
 
     // The interaction (evt act): shown once a presented frame shows it, done once the brain has moved on.
     ia_update(&s.brain, presented, s_ia.bstate == BUDDY_STATE_ASK ? ask_left != 0 : !s.screen.office, now);
+    // log.since: a few replayed events per frame, so a long replay never holds up the screen (the board's console
+    // blocks while it sends).
+    const bool replaying = app_events_replay_step();
 
     const int64_t t = app_port_time_us();
     if (s_cfg.perf_log_s > 0 && t - s.perf_since >= s_cfg.perf_log_s * 1000000LL) {
@@ -1046,5 +1066,8 @@ uint32_t app_frame(void)
     const uint32_t spent = now_ms() - now;
     uint32_t wait_ms = next > spent && s.presented != 1 ? next - spent : 0;
     wait_ms = demo_wait(wait_ms);
+    if (replaying && wait_ms > 20) {
+        wait_ms = 20;
+    }
     return wait_ms > MAX_SLEEP_MS ? MAX_SLEEP_MS : wait_ms;
 }

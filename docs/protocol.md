@@ -28,7 +28,7 @@ The desktop simulator (`tools/simulator.ps1`) carries the same byte stream, fram
 
 | Command | Arguments | Reply |
 |---|---|---|
-| `hello` | | `ok proto=1 fw=<version> caps=<list> styles=<list> moods=<list> acts=<list>` |
+| `hello` | | `ok proto=1 fw=<version> caps=<list> styles=<list> moods=<list> acts=<list> dev=<device id> boot=<16 hex>` (`dev`, `boot`: cap `log`, see *Recorded events*) |
 | `ping` | | `ok` |
 | `status` | | `ok mode=<normal\|office\|monster> mood=<mood> time=<set\|unset> msg=<showing\|idle> queued=<0\|1> uptime=<s> act=<none\|iid:state[:result]>` (`office`: Clock Mode, see below; `act=`: the last interaction, see *Interactions*) |
 | `poke` | | `ok`, or `err busy mode=<mode>` (Clock Mode, an activity running (Monster, water, sneeze, stare, meditate, focus, the peukie question), a zoom under way, screen not up yet) |
@@ -40,8 +40,9 @@ The desktop simulator (`tools/simulator.ps1`) carries the same byte stream, fram
 | `mood.set` | `name=<mood> [secs=<1-86400>]` | `ok`, `err unsupported` (a mood this firmware does not have), `err bad_args` |
 | `pdc.set` | `state=on\|off [count=<0-2147483647>]` | `ok` (the PDC Manager lease, see *PDC Manager (ZDMW)*) |
 | `pdc.result` | `id=<1-65535> result=<ok\|auth\|denied\|offline\|tls\|timeout\|unknown\|cooldown\|busy\|unavailable> [count=<n>] [teams=1\|0]` | `ok` (how the click `evt pdc.click id=` ended) |
+| `log.since` | `[boot=<16 hex>] seq=<0-4294967295>` | the recorded events after `seq` again (`replay=1`), then `ok boot=<16 hex> last=<seq> lost=<n>`; `err busy` while a replay is under way (see *Recorded events*) |
 
-**Capabilities:** `hello` lists what the firmware supports (`poke,monster,mode,time,status,msg,mood,act,pdc,track,did`), which message styles it draws (`styles=marquee`), which moods it has (`moods=idle,relaxed,peukie,angry,sleepy,working,happy`) and which activities `act` starts (`acts=water,sneeze,stare,meditate,focus,ask_peukie`), each in display order. The companion only enables the matching buttons, so new commands, styles, moods and activities can be added without breaking older companions or firmware. Without `pdc` the companion sends no `pdc.*` command at all. `track`: `act iid=`, `evt act`, `status act=` and `evt mood src=`; `did`: `evt did` (MY DAY).
+**Capabilities:** `hello` lists what the firmware supports (`poke,monster,mode,time,status,msg,mood,act,pdc,track,did,log`), which message styles it draws (`styles=marquee`), which moods it has (`moods=idle,relaxed,peukie,angry,sleepy,working,happy`) and which activities `act` starts (`acts=water,sneeze,stare,meditate,focus,ask_peukie`), each in display order. The companion only enables the matching buttons, so new commands, styles, moods and activities can be added without breaking older companions or firmware. Without `pdc` the companion sends no `pdc.*` command at all. `track`: `act iid=`, `evt act`, `status act=` and `evt mood src=`; `did`: `evt did` (MY DAY); `log`: `dev=`/`boot=`, `seq=`/`t=`/`up=` and `log.since` (*Recorded events*).
 
 **Activities (`act`)** are short shows on top of Buddy's mood, the same ones the touchscreen menu starts: `water` (a glass of water short-circuits him), `sneeze` (his head flies off), `stare` (a staring contest, the camera close on his face), `meditate` (he floats until a notification drops him), `focus` (he builds a plan in his head until someone asks for "1 sec": POOF; older firmware answers `err unsupported`). Each plays to its end (2.7 to 9 s); meanwhile `poke`, `monster` and `act` get `err busy`, and the mood resumes afterwards. Names are lower-case letters and `_`, at most 15; `monster` and `poke` keep their own commands.
 
@@ -51,11 +52,19 @@ The desktop simulator (`tools/simulator.ps1`) carries the same byte stream, fram
 - `iid`: the companion's id (it uses 1–2147483647). Without one, and for touches, the device picks one with the top bit set (2147483648 and up), so the two never collide. The same `iid` again gets `ok dup=1 state=…` and starts nothing.
 - `evt act iid=<n> name=<activity> state=shown src=<cmd|touch>`: sent once a frame showing it has been presented: for the question, the question itself is on screen. A command's `ok` only means it started.
 - `evt act iid=<n> state=done result=<r>`: exactly once. `yes` / `no`: JA / NEE; `timeout`: the minute ran out (on screen the same as *no*, but a different fact); `done`: a show played to its end; `interrupted`: cut off (Clock Mode, a restart of his mood): never an answer. Started but never shown and then cut off is `interrupted` without a `shown` before it.
-- `status … act=<iid>:<started|shown|done>[:<result>]`: the last interaction, so a companion that missed an event (a reconnect) learns how it ended; `act=none` after a restart of the device. Events are sent once and never repeated.
+- `status … act=<iid>:<started|shown|done>[:<result>]`: the last interaction, so a companion that missed an event (a reconnect) learns how it ended; `act=none` after a restart of the device. Missed events themselves come back with `log.since` (cap `log`).
 
 **Why the mood changed (`evt mood … src=`, cap `track`):** `cmd` (`mood.set`), `touch` (the Moods page), `break` (a smoke break starting or ending), `timer` (a timed mood ran out).
 
-**MY DAY (`evt did`, cap `did`):** the touchscreen page where you tell Buddy what you are doing: `evt did item=<id> n=<counter>` per tap, `id` one of `myday.work`, `myday.meeting`, `myday.coffee`, `myday.water`, `myday.smoke`, `myday.stretch`, `myday.lunch` (after `myday.`: the companion's activity types). `n` counts up from a random start on every boot, so a repeated event is recognisable and a new tap never is. Sent for touches only; Buddy's shows (Activities, Food & Drink), moods and the question's answer never send it.
+**MY DAY (`evt did`, cap `did`):** the touchscreen page where you tell Buddy what you are doing: `evt did item=<id>` per tap (plus `seq=` and the time, see *Recorded events*), `id` one of `myday.work`, `myday.meeting`, `myday.coffee`, `myday.water`, `myday.smoke`, `myday.stretch`, `myday.lunch` (after `myday.`: the companion's activity types). Every tap is a new event (a new `seq`); a replayed one has the same `seq`. Sent for touches only; Buddy's shows (Activities, Food & Drink), moods and the question's answer never send it. (P4 firmware sent `n=<counter>` instead of `seq=`.)
+
+**Recorded events (cap `log`).** The events the companion keeps as history, `evt act` and `evt did`, survive a companion that was away (closed, the cable unplugged while the board stays powered, a reconnect):
+- **Identity:** `(dev, boot, seq)`. `dev` (in `hello` and `evt boot`) is stable: the board's factory MAC (`441bf68d1178`), `sim-<12 hex>` for the simulator on a machine. `boot` is a random 64-bit number chosen at every start of the firmware (16 hex digits). `seq` counts up from 1 within a boot, one per recorded event. Together they name an event uniquely and for good; neither `boot` nor `seq` alone does.
+- **Time:** each recorded event ends in ` seq=<n> t=<UTC ms>` once the clock has been set (`time.set`; the board keeps time across companion absences, not across restarts), or ` seq=<n> up=<ms since start>` before that. An `up=` event has no date: the device never derives one, and a companion must keep it as "time unknown, n ms after the start of boot X" rather than guess.
+- **Kept:** the last 64 recorded events, in RAM (PSRAM on the board). Nothing is written to flash, so a restart or power cut loses what was not yet fetched; a new `boot` shows that it happened.
+- **Replay:** `log.since boot=<b> seq=<n>` sends the kept events with seq > n, exactly the lines that went out (same seq, same time) with ` replay=1` added, then `ok boot=<current> last=<seq> lost=<k>`. The reply comes after the last replayed line, so a companion that has the reply has the lot. `lost`: events after n that are no longer kept (overflow): their number is known, their content is not. For another `boot` (or none), the replay starts at the beginning of the current boot (`lost` = events of this boot no longer kept); events of the earlier boot that were never fetched are gone, and how many is unknown. The device sends two replayed lines per frame, so the screen keeps its pace (64 events: about half a second).
+- **Duplicates:** an event can arrive twice (live and replayed, or two replays); the companion stores by `(dev, boot, seq)`, so the second copy changes nothing. Live events go out as before during a replay.
+- **Gaps:** a jump in the live `seq` means events were missed (a line lost): ask `log.since` for the ones after the last one stored.
 
 **Clock Mode is `office` on the wire.** It was first called Office Mode; `status`, `evt mode` and `mode.set` keep that name, so existing companions and scripts work unchanged. `mode.set mode=clock` is accepted as an alias (firmware from 2026-10-15 on; older firmware answers `err bad_args`, so clients that must work with any firmware send `office`).
 
@@ -83,14 +92,14 @@ The desktop simulator (`tools/simulator.ps1`) carries the same byte stream, fram
 
 | Event | When |
 |---|---|
-| `evt boot proto=1 fw=<version>` | the firmware started (the companion re-sends the time) |
+| `evt boot proto=1 fw=<version> dev=<device id> boot=<16 hex>` | the firmware started (the companion re-sends the time; `dev`, `boot`: cap `log`) |
 | `evt mode mode=<normal\|office\|monster>` | the mode changed, by touch or by command |
 | `evt mood mood=<mood> src=<cmd\|touch\|break\|timer>` | the mood changed: by `mood.set`, on the touchscreen menu, a smoke break began or ended, or a timed mood ran out (`src`: firmware with `track`) |
 | `evt msg id=<id> state=<showing\|done>` | a message went up on the sign / finished |
 | `evt pdc.click id=<1-65535>` | the user confirmed *JA* for Ze Doen Maar Wat on the touchscreen (sent once per click; see below) |
-| `evt act iid=<n> name=<activity> state=shown src=<cmd\|touch>` | an activity (a show or the question) is on screen (see *Interactions*) |
-| `evt act iid=<n> state=done result=<yes\|no\|timeout\|done\|interrupted>` | how it ended, exactly once |
-| `evt did item=<myday.…> n=<counter>` | a MY DAY tap: what you are doing (see *MY DAY*) |
+| `evt act iid=<n> name=<activity> state=shown src=<cmd\|touch> seq=<n> t=<ms>\|up=<ms>` | an activity (a show or the question) is on screen (see *Interactions*; `seq`, `t`, `up`: *Recorded events*) |
+| `evt act iid=<n> state=done result=<yes\|no\|timeout\|done\|interrupted> seq=<n> t=<ms>\|up=<ms>` | how it ended, exactly once (a replay repeats it with `replay=1`) |
+| `evt did item=<myday.…> seq=<n> t=<ms>\|up=<ms>` | a MY DAY tap: what you are doing (see *MY DAY*) |
 
 ## PDC Manager (ZDMW)
 

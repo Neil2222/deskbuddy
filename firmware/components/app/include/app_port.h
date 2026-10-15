@@ -18,6 +18,9 @@ int64_t app_port_time_us(void);
 // A random number (seeds Buddy's behaviour and the first PDC click id).
 uint32_t app_port_random(void);
 
+// Random bytes from a true entropy source, for ids that must never repeat (the boot id). Called once per start.
+void app_port_random_fill(void *buf, size_t len);
+
 // Wall-clock time, UTC: seconds since 1970 and microseconds into the second. Starts near 1970 after power-up (no
 // RTC); the companion sets it (time.set).
 void app_port_wall_get(int64_t *sec, uint32_t *usec);
@@ -25,6 +28,10 @@ void app_port_wall_set(int64_t sec, uint32_t usec);
 
 // Firmware version, as the companion sees it (hello fw=, evt boot fw=).
 const char *app_port_version(void);
+
+// A stable id of this device, the same after every restart (hello dev=): lower-case letters, digits and '-', at most
+// 23 characters. The board: its MAC; the simulator: one per machine.
+const char *app_port_device_id(void);
 
 // Sends one complete line to the companion (a frame from link_format, newline included), in one piece: log lines
 // must never end up inside it. Safe from any thread.

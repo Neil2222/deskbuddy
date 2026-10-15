@@ -79,6 +79,7 @@ extern int g_test_failed;
     X(link_parses_messages)                          \
     X(link_rejects_bad_messages)                     \
     X(link_parses_moods)                             \
+    X(link_parses_log_since)                         \
     X(marquee_text_policy)                           \
     X(marquee_stays_long_enough_then_hides)          \
     X(marquee_shows_the_text_scrolling_left)         \
@@ -118,7 +119,10 @@ extern int g_test_failed;
     X(app_question_by_command_reports_yes_no_and_timeout) \
     X(app_an_interrupted_question_is_never_an_answer) \
     X(app_shows_and_touches_report_their_own_ids)    \
-    X(app_my_day_and_mood_sources)
+    X(app_my_day_and_mood_sources)                   \
+    X(app_events_carry_identity_and_time)            \
+    X(app_events_replay_after_a_reconnect)           \
+    X(app_events_replay_reports_what_was_lost)
 
 #define X(name) void test_##name(void);
 TEST_LIST

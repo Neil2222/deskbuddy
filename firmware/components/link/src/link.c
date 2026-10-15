@@ -21,6 +21,7 @@ static const struct {
     {"poke", LINK_CMD_POKE},         {"monster", LINK_CMD_MONSTER}, {"mode.set", LINK_CMD_MODE_SET},
     {"time.set", LINK_CMD_TIME_SET}, {"msg.show", LINK_CMD_MSG_SHOW}, {"mood.set", LINK_CMD_MOOD_SET},
     {"act", LINK_CMD_ACT},           {"pdc.set", LINK_CMD_PDC_SET}, {"pdc.result", LINK_CMD_PDC_RESULT},
+    {"log.since", LINK_CMD_LOG_SINCE},
 };
 
 static const char *const PDC_RESULTS[LINK_PDC_RESULT_COUNT] = {
@@ -89,6 +90,22 @@ static bool all(const char *p, size_t len, bool (*ok)(char))
         }
     }
     return true;
+}
+
+// Exactly 16 hex digits (a boot id), as 64 bits.
+static bool parse_hex64(const char *s, uint64_t *out)
+{
+    uint64_t v = 0;
+    int n = 0;
+    for (; s[n]; n++) {
+        const int d = hex_value(s[n]);
+        if (d < 0 || n >= 16) {
+            return false;
+        }
+        v = v << 4 | (uint64_t)d;
+    }
+    *out = v;
+    return n == 16;
 }
 
 // Copies the token [p, p + len) into out (size n), NUL-terminated. False if empty or too long.
@@ -291,6 +308,15 @@ static link_result_t decode_args(link_command_t *c, const arg_t *args, int n)
         }
         c->u.pdc_set.on = strcmp(state, "on") == 0;
         c->u.pdc_set.count = (int32_t)v_count;
+    } else if (c->cmd == LINK_CMD_LOG_SINCE) {
+        const char *boot = get_arg(args, n, "boot", v[0]), *seq = get_arg(args, n, "seq", v[1]);
+        int64_t v_seq;
+        if (!seq || !parse_int(seq, 0, UINT32_MAX, &v_seq) ||
+            (find_arg(args, n, "boot") && (!boot || !parse_hex64(boot, &c->u.log_since.boot)))) {
+            return LINK_ERR_ARGS;
+        }
+        c->u.log_since.has_boot = boot != NULL;
+        c->u.log_since.seq = (uint32_t)v_seq;
     } else if (c->cmd == LINK_CMD_PDC_RESULT) {
         const char *id = get_arg(args, n, "id", v[0]), *result = get_arg(args, n, "result", v[1]);
         const char *count = get_arg(args, n, "count", v[2]), *teams = get_arg(args, n, "teams", v[3]);

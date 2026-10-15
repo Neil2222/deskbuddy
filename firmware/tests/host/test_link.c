@@ -250,3 +250,26 @@ void test_link_parses_moods(void)
     CHECK_EQ(parse(frame(">DB1 14 act name=sneeze iid="), &c), LINK_ERR_ARGS);
     CHECK_EQ(parse(frame(">DB1 14 act name=sneeze iid=x1"), &c), LINK_ERR_ARGS);
 }
+
+// log.since: the boot is 16 hex digits (64 bits), optional; seq is required and 32-bit.
+void test_link_parses_log_since(void)
+{
+    link_command_t c;
+    CHECK_EQ(parse(frame(">DB1 3 log.since boot=0123456789abcdef seq=17"), &c), LINK_OK);
+    CHECK_EQ(c.cmd, LINK_CMD_LOG_SINCE);
+    CHECK(c.u.log_since.has_boot && c.u.log_since.boot == 0x0123456789abcdefull && c.u.log_since.seq == 17);
+    CHECK_EQ(parse(frame(">DB1 3 log.since boot=FFFFFFFFFFFFFFFF seq=4294967295"), &c), LINK_OK);
+    CHECK(c.u.log_since.boot == UINT64_MAX && c.u.log_since.seq == 4294967295u);
+    CHECK_EQ(parse(frame(">DB1 3 log.since seq=0"), &c), LINK_OK);
+    CHECK(!c.u.log_since.has_boot && c.u.log_since.seq == 0);
+
+    CHECK_EQ(parse(frame(">DB1 4 log.since"), &c), LINK_ERR_ARGS);
+    CHECK_EQ(c.seq, 4);
+    CHECK_EQ(parse(frame(">DB1 4 log.since boot=0123456789abcdef"), &c), LINK_ERR_ARGS);       // no seq
+    CHECK_EQ(parse(frame(">DB1 4 log.since boot=0123456789abcde seq=1"), &c), LINK_ERR_ARGS);  // 15 digits
+    CHECK_EQ(parse(frame(">DB1 4 log.since boot=0123456789abcdef0 seq=1"), &c), LINK_ERR_ARGS); // 17
+    CHECK_EQ(parse(frame(">DB1 4 log.since boot=0123456789abcdeg seq=1"), &c), LINK_ERR_ARGS);  // not hex
+    CHECK_EQ(parse(frame(">DB1 4 log.since boot= seq=1"), &c), LINK_ERR_ARGS);
+    CHECK_EQ(parse(frame(">DB1 4 log.since seq=4294967296"), &c), LINK_ERR_ARGS);
+    CHECK_EQ(parse(frame(">DB1 4 log.since seq=-1"), &c), LINK_ERR_ARGS);
+}

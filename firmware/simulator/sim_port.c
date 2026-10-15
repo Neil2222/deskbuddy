@@ -44,6 +44,16 @@ uint32_t app_port_random(void)
     return r;
 }
 
+void app_port_random_fill(void *buf, size_t len)
+{
+    uint8_t *p = buf;
+    for (size_t i = 0; i < len; i++) {
+        unsigned int r = 0;
+        rand_s(&r); // the system's cryptographic generator
+        p[i] = (uint8_t)r;
+    }
+}
+
 // Wall clock = the time it was set to plus the time since; from 1970 at start-up, as on the board.
 static int64_t s_wall_base_us; // wall-clock microseconds at app_port_time_us() == s_wall_at_us
 static int64_t s_wall_at_us;
@@ -64,6 +74,23 @@ void app_port_wall_set(int64_t sec, uint32_t usec)
 const char *app_port_version(void)
 {
     return DESKBUDDY_SIM_VERSION;
+}
+
+// "sim-" and 12 hex digits of a hash of the computer's name: the same every run on this machine, another on the next.
+const char *app_port_device_id(void)
+{
+    static char id[17];
+    if (!id[0]) {
+        char name[MAX_COMPUTERNAME_LENGTH + 1] = "";
+        DWORD len = sizeof(name);
+        GetComputerNameA(name, &len);
+        uint64_t h = 0xcbf29ce484222325ull; // FNV-1a
+        for (const char *p = name; *p; p++) {
+            h = (h ^ (uint8_t)*p) * 0x100000001b3ull;
+        }
+        snprintf(id, sizeof(id), "sim-%012llx", (unsigned long long)(h & 0xffffffffffffull));
+    }
+    return id;
 }
 
 void *app_port_alloc(size_t size, app_mem_t kind)
