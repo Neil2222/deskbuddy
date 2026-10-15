@@ -29,6 +29,10 @@ extern "C" {
 typedef enum {
     BUDDY_EVENT_POKE = 1,          // touched: surprise, then happy hops
     BUDDY_EVENT_DRINK_MONSTER = 2, // drinks a can of Monster Energy through a charging cable
+    BUDDY_EVENT_DRINK_WATER = 3,   // the activities in buddy_activity.h
+    BUDDY_EVENT_SNEEZE = 4,
+    BUDDY_EVENT_STARE = 5,
+    BUDDY_EVENT_MEDITATE = 6,
 } buddy_event_t;
 
 typedef struct {
@@ -45,9 +49,13 @@ typedef struct {
 
 void buddy_brain_init(buddy_brain_t *b, uint32_t now_ms, uint32_t seed);
 
-// Delivers an event. Returns true when it started a reaction. Pokes restart the touch reaction; while the Monster
-// sequence runs every event is ignored, so it always plays to the end. Unknown events are ignored.
+// Delivers an event. Returns true when it started a reaction. Pokes restart the touch reaction; while an activity
+// (buddy_activity.h, the Monster sequence among them) plays, every event is ignored, so it always plays to the end.
+// Unknown events are ignored.
 bool buddy_brain_event(buddy_brain_t *b, buddy_event_t ev, uint32_t now_ms);
+
+// True while an activity plays (events are ignored then).
+bool buddy_brain_busy(const buddy_brain_t *b, uint32_t now_ms);
 
 // Drops whatever the character is doing, including a running Monster sequence, and idles from now_ms on (used
 // when he comes back from being paused, e.g. after Office Mode).

@@ -52,6 +52,7 @@ typedef struct {
     int title_shown; // category; -1: not drawn
     int face_shown;  // buddy_mood_t, BUDDY_MOOD_COUNT for the charging face; -1: not drawn
     uint32_t footer_shown; // a summary of what the footer shows; 0: not drawn
+    const char *doing_shown; // ...and what he was doing then (menu_status_t.doing)
     bool closing;          // folding away (menu_view_close) since close_at
     uint32_t close_at;
 } menu_view_t;

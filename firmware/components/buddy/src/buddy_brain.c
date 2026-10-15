@@ -1,6 +1,6 @@
 #include "buddy_brain.h"
 
-#include "buddy_monster.h"
+#include "buddy_activity.h"
 #include "buddy_motion.h"
 
 static const struct {
@@ -57,9 +57,15 @@ static void enter(buddy_brain_t *b, buddy_state_t state, uint32_t now_ms)
     b->state_start = now_ms;
 }
 
+bool buddy_brain_busy(const buddy_brain_t *b, uint32_t now_ms)
+{
+    const uint32_t ms = buddy_activity_ms(b->state);
+    return ms && now_ms - b->state_start < ms;
+}
+
 bool buddy_brain_event(buddy_brain_t *b, buddy_event_t ev, uint32_t now_ms)
 {
-    if (b->state == BUDDY_STATE_MONSTER && now_ms - b->state_start < BUDDY_MONSTER_MS) {
+    if (buddy_brain_busy(b, now_ms)) {
         return false; // the show goes on
     }
     switch (ev) {
@@ -68,6 +74,18 @@ bool buddy_brain_event(buddy_brain_t *b, buddy_event_t ev, uint32_t now_ms)
         return true;
     case BUDDY_EVENT_DRINK_MONSTER:
         enter(b, BUDDY_STATE_MONSTER, now_ms);
+        return true;
+    case BUDDY_EVENT_DRINK_WATER:
+        enter(b, BUDDY_STATE_WATER, now_ms);
+        return true;
+    case BUDDY_EVENT_SNEEZE:
+        enter(b, BUDDY_STATE_SNEEZE, now_ms);
+        return true;
+    case BUDDY_EVENT_STARE:
+        enter(b, BUDDY_STATE_STARE, now_ms);
+        return true;
+    case BUDDY_EVENT_MEDITATE:
+        enter(b, BUDDY_STATE_MEDITATE, now_ms);
         return true;
     default:
         return false;
@@ -143,9 +161,9 @@ uint32_t buddy_brain_tick(buddy_brain_t *b, uint32_t now_ms, buddy_pose_t *pose)
         b->state_start += BUDDY_SURPRISE_MS;
         t -= BUDDY_SURPRISE_MS;
     }
-    if ((b->state == BUDDY_STATE_HAPPY && t >= HAPPY_MS) ||
-        (b->state == BUDDY_STATE_MONSTER && t >= BUDDY_MONSTER_MS)) {
-        const uint32_t ms = b->state == BUDDY_STATE_HAPPY ? HAPPY_MS : BUDDY_MONSTER_MS;
+    const uint32_t act = buddy_activity_ms(b->state);
+    if ((b->state == BUDDY_STATE_HAPPY && t >= HAPPY_MS) || (act && t >= act)) {
+        const uint32_t ms = b->state == BUDDY_STATE_HAPPY ? HAPPY_MS : act;
         b->state = BUDDY_STATE_IDLE;
         b->state_start += ms;
         t -= ms;
@@ -168,12 +186,10 @@ uint32_t buddy_brain_tick(buddy_brain_t *b, uint32_t now_ms, buddy_pose_t *pose)
         pose->lift = buddy_hop(t % BUDDY_HAPPY_HOP_MS, BUDDY_HAPPY_HOP_MS, BUDDY_MAX_LIFT);
         return buddy_min_u32(BUDDY_MOTION_TICK_MS, HAPPY_MS - t);
 
-    case BUDDY_STATE_MONSTER:
-        return buddy_monster_pose(t, pose);
-
     case BUDDY_STATE_IDLE:
-    default:
         break;
+    default: // an activity
+        return buddy_activity_pose(b->state, t, pose);
     }
     if (buddy_brain_mood(b, now_ms) != BUDDY_MOOD_IDLE) {
         return mood_tick(b, now_ms, pose);

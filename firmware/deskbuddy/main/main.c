@@ -14,6 +14,7 @@
 #include <time.h>
 
 #include "board.h"
+#include "buddy_activity.h"
 #include "buddy_brain.h"
 #include "buddy_view.h"
 #include "display.h"
@@ -173,7 +174,9 @@ static void perf_log(const perf_t *p, int64_t window_us)
 // What the menu shows depends on Buddy; the brain owns his state (reading the mood also ends a timed one).
 static menu_status_t menu_status(buddy_brain_t *brain, bool has_office, uint32_t now)
 {
-    return (menu_status_t){buddy_brain_mood(brain, now), brain->state == BUDDY_STATE_MONSTER, has_office};
+    const bool busy = buddy_brain_busy(brain, now);
+    return (menu_status_t){buddy_brain_mood(brain, now), brain->state == BUDDY_STATE_MONSTER, busy,
+                           busy ? buddy_activity_doing(brain->state) : NULL, has_office};
 }
 
 // Carries out what a tap in the menu asks for, the way the companion's commands do (so `evt mood` and `evt mode`
@@ -228,6 +231,9 @@ typedef struct {
     uint32_t showing_id; // 0: nothing on the sign
     uint32_t last_id;    // last accepted message
     bool queued;
+    bool caption;        // the sign shows a line of Buddy's own (buddy_pose_t.say), not a message: a message may
+                         // replace it, and it sends no events
+    uint8_t said;        // the line his pose asked for last
     uint32_t queued_id;
     char queued_text[LINK_TEXT_MAX_BYTES + 1];
 } messages_t;
@@ -246,7 +252,7 @@ static const char *mode_name(const office_switch_t *screen, const buddy_brain_t 
 // be interrupted (in Office Mode the character is paused, so the sign appears under the clock right away).
 static bool msg_can_start(const office_switch_t *screen, const buddy_brain_t *brain, bool lit)
 {
-    return lit && !marquee_active(&s_msg.sign) && !office_zoom_busy(&s_zoom) &&
+    return lit && (!marquee_active(&s_msg.sign) || s_msg.caption) && !office_zoom_busy(&s_zoom) &&
            (screen->office || brain->state != BUDDY_STATE_MONSTER);
 }
 
@@ -254,6 +260,7 @@ static void msg_start(uint32_t id, const char *text, const office_switch_t *scre
                       uint32_t now)
 {
     marquee_start(&s_msg.sign, text, now);
+    s_msg.caption = false;
     s_msg.showing_id = id;
     if (!screen->office) {
         buddy_brain_event(brain, BUDDY_EVENT_POKE, now); // he jumps when a message comes in
@@ -276,7 +283,8 @@ static void run_command(const link_command_t *c, buddy_brain_t *brain, office_sw
         uint32_t ms;
         snprintf(body, sizeof(body), "ok mode=%s mood=%s time=%s msg=%s queued=%d uptime=%" PRIu32,
                  mode_name(screen, brain), buddy_mood_name(buddy_brain_mood(brain, now)),
-                 wall_clock(&tm, &ms) ? "set" : "unset", marquee_active(&s_msg.sign) ? "showing" : "idle",
+                 wall_clock(&tm, &ms) ? "set" : "unset",
+                 marquee_active(&s_msg.sign) && !s_msg.caption ? "showing" : "idle",
                  s_msg.queued, now / 1000);
         break;
     }
@@ -439,6 +447,10 @@ static void render_task(void *arg)
 #if CONFIG_DESKBUDDY_DEMO_MONSTER_S > 0
     uint32_t next_monster = t_start + CONFIG_DESKBUDDY_DEMO_MONSTER_S * 1000u;
 #endif
+#if CONFIG_DESKBUDDY_DEMO_ACTIVITY_S > 0
+    uint32_t next_activity = t_start + CONFIG_DESKBUDDY_DEMO_ACTIVITY_S * 1000u;
+    int demo_activity = 0;
+#endif
 #if CONFIG_DESKBUDDY_DEMO_OFFICE_S > 0
     uint32_t next_office = t_start + CONFIG_DESKBUDDY_DEMO_OFFICE_S * 1000u;
 #endif
@@ -500,6 +512,18 @@ static void render_task(void *arg)
                 ESP_LOGI(TAG, "Monster time (demo)");
             }
             next_monster = now + CONFIG_DESKBUDDY_DEMO_MONSTER_S * 1000u;
+        }
+#endif
+#if CONFIG_DESKBUDDY_DEMO_ACTIVITY_S > 0
+        if ((int32_t)(now - next_activity) >= 0) {
+            static const buddy_event_t k_demo[] = {BUDDY_EVENT_DRINK_WATER, BUDDY_EVENT_SNEEZE, BUDDY_EVENT_STARE,
+                                                   BUDDY_EVENT_MEDITATE};
+            const buddy_event_t ev = k_demo[demo_activity];
+            if (!screen.office && scene_settled(&screen) && buddy_brain_event(&brain, ev, now)) {
+                ESP_LOGI(TAG, "activity %d (demo)", (int)ev);
+                demo_activity = (demo_activity + 1) % (int)(sizeof(k_demo) / sizeof(k_demo[0]));
+            }
+            next_activity = now + CONFIG_DESKBUDDY_DEMO_ACTIVITY_S * 1000u;
         }
 #endif
 #if CONFIG_DESKBUDDY_DEMO_OFFICE_S > 0
@@ -586,6 +610,13 @@ static void render_task(void *arg)
             }
             const uint32_t view_next = buddy_view_apply(&view, &pose, now);
             next = view_next < next ? view_next : next;
+            if (pose.say != s_msg.said) { // a line of his own on the sign, if it is free
+                s_msg.said = pose.say;
+                if (pose.say && s_msg.ready && !marquee_active(&s_msg.sign) && !s_msg.queued) {
+                    marquee_start(&s_msg.sign, buddy_say_text((buddy_say_t)pose.say), now);
+                    s_msg.caption = true;
+                }
+            }
             if (has_menu) {
                 const menu_status_t st = menu_status(&brain, has_office, now);
                 const uint32_t menu_next = menu_view_apply(&menu_view, &menu, &st, now);
@@ -604,10 +635,13 @@ static void render_task(void *arg)
             const bool was_showing = marquee_active(&s_msg.sign);
             uint32_t sign_next = marquee_apply(&s_msg.sign, mx, my, now);
             if (was_showing && !marquee_active(&s_msg.sign)) {
-                char body[48];
-                snprintf(body, sizeof(body), "evt msg id=%" PRIu32 " state=done", s_msg.showing_id);
-                serial_link_send(0, body);
+                if (s_msg.showing_id) {
+                    char body[48];
+                    snprintf(body, sizeof(body), "evt msg id=%" PRIu32 " state=done", s_msg.showing_id);
+                    serial_link_send(0, body);
+                }
                 s_msg.showing_id = 0;
+                s_msg.caption = false;
             }
             if (s_msg.queued && msg_can_start(&screen, &brain, presented >= 2)) {
                 s_msg.queued = false;
@@ -696,6 +730,10 @@ static void render_task(void *arg)
 #if CONFIG_DESKBUDDY_DEMO_MONSTER_S > 0
         const int32_t to_monster = (int32_t)(next_monster - now_ms());
         wait_ms = to_monster <= 0 ? 0 : ((uint32_t)to_monster < wait_ms ? (uint32_t)to_monster : wait_ms);
+#endif
+#if CONFIG_DESKBUDDY_DEMO_ACTIVITY_S > 0
+        const int32_t to_activity = (int32_t)(next_activity - now_ms());
+        wait_ms = to_activity <= 0 ? 0 : ((uint32_t)to_activity < wait_ms ? (uint32_t)to_activity : wait_ms);
 #endif
         if (wait_ms > MAX_SLEEP_MS) {
             wait_ms = MAX_SLEEP_MS;

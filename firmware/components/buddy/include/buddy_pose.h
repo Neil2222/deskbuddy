@@ -16,6 +16,10 @@ typedef enum {
     BUDDY_STATE_SURPRISED, // short reaction right after a touch
     BUDDY_STATE_HAPPY,     // follows the surprise, then back to idle
     BUDDY_STATE_MONSTER,   // drinking a Monster Energy can through a cable (see buddy_monster.h)
+    BUDDY_STATE_WATER,     // the activities in buddy_activity.h: a glass of water (a bad idea for a robot)
+    BUDDY_STATE_SNEEZE,    // a sneeze that blows his head off
+    BUDDY_STATE_STARE,     // a staring contest with the viewer
+    BUDDY_STATE_MEDITATE,  // floating in meditation, until a notification
 } buddy_state_t;
 
 typedef enum {
@@ -65,7 +69,9 @@ typedef enum {
     BUDDY_TINT_COUNT,
 } buddy_tint_t;
 
-#define BUDDY_MAX_LIFT 4 // art pixels
+#define BUDDY_MAX_LIFT 4  // art pixels: hops and jumps (his place on the stage leaves room for this much)
+#define BUDDY_MAX_HOVER 6 // art pixels: floating (meditation)
+#define BUDDY_MAX_POP 10  // art pixels: how far a sneeze can blow his head off his neck
 
 // --- Monster props -------------------------------------------------------------------------------------------
 
@@ -96,6 +102,7 @@ typedef enum {
     BUDDY_HAND_PORT,  // at the charging port on the side of his head
     BUDDY_HAND_MOUTH, // holding something to his mouth
     BUDDY_HAND_REST,  // lowered beside his head, holding something
+    BUDDY_HAND_SIP,   // holding a glass to his mouth
 } buddy_hand_t;
 
 typedef enum {
@@ -122,6 +129,10 @@ typedef enum {
     BUDDY_SPOT_CAN,
     BUDDY_SPOT_PORT,
     BUDDY_SPOT_HAND,
+    BUDDY_SPOT_NECK_L, // either side of where the head sits on the neck (moves with the head)
+    BUDDY_SPOT_NECK_R,
+    BUDDY_SPOT_FEET_L, // on the ground, either side of his feet
+    BUDDY_SPOT_FEET_R,
 } buddy_spot_t;
 
 typedef struct {
@@ -171,6 +182,7 @@ typedef struct {
 
 #define BUDDY_PARTICLES 5
 #define BUDDY_CIG_LENGTHS 4
+#define BUDDY_GLASS_LEVELS 4 // props.glass 1 + water left: 1 (empty) .. BUDDY_GLASS_LEVELS (full)
 
 typedef struct {
     buddy_phase_t phase;
@@ -192,6 +204,7 @@ typedef struct {
     bool cig;         // a cigarette in the hand (hand_from/hand_to/hand_mix say where the hand is)
     uint8_t cig_left; // how much is left: 0 (nearly a butt) .. BUDDY_CIG_LENGTHS-1 (fresh)
     uint8_t ember;    // 0 smouldering, 1 glowing, 2 lit up by a drag
+    uint8_t glass;    // a glass in the hand: 0 none, 1 empty .. BUDDY_GLASS_LEVELS full
     buddy_particle_t particle[BUDDY_PARTICLES];
 } buddy_props_t;
 
@@ -200,11 +213,14 @@ typedef struct {
     buddy_eyes_t eyes;
     buddy_mouth_t mouth;
     buddy_antenna_t antenna;
-    uint8_t lift; // how far the robot is lifted off the ground, in art pixels (0..BUDDY_MAX_LIFT)
+    uint8_t lift; // how far the robot is lifted off the ground, in art pixels (0..BUDDY_MAX_HOVER)
     int8_t shake;  // sideways offset of the whole robot in art pixels (-1..1)
     int8_t wobble; // extra sideways offset of the head alone (-1..1): trembling on the neck, cheap to redraw
     int8_t look;  // sideways eye offset within the face (-1..1)
     uint8_t nod;  // the head sinks onto the neck by this many art pixels (0..1): drooping, dozing off
+    uint8_t pop;  // the head flies up off the neck by this many art pixels (0..BUDDY_MAX_POP): a sneeze
+    uint8_t closeup; // the camera pushes in on his face: 0 his place on the stage .. 255 his head filling the stage
+    uint8_t say;  // buddy_say_t (buddy_activity.h): a line for the LED sign, from the moment it appears; 0 none
     buddy_tint_t tint;
     buddy_props_t props;
 } buddy_pose_t;

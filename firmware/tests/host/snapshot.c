@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "buddy_activity.h"
 #include "buddy_brain.h"
 #include "buddy_monster.h"
 #include "buddy_view.h"
@@ -30,10 +31,12 @@ enum { TILE_W = CROP_W / 2, TILE_H = CROP_H / 2 };
 enum { TILES = (BUDDY_MONSTER_MS + SHEET_STEP_MS - 1) / SHEET_STEP_MS, ROWS = (TILES + COLS - 1) / COLS };
 enum { MOOD_COLS = 12, MOOD_STEP_MS = 700, MOOD_ROWS = BUDDY_MOOD_COUNT - 1 }; // every mood but idle
 enum { PANELS = 18, PANEL_COLS = 6, PANEL_GAP = 8 }; // the menu sheet
+enum { ACT_COLS = 16, ACT_ROWS = 4 };               // the activity sheet: each activity in ACT_COLS even steps
 
 static gfx_color_t s_px[W * H];
 static gfx_color_t s_sheet[COLS * TILE_W * ROWS * TILE_H];
 static gfx_color_t s_mood_sheet[MOOD_COLS * TILE_W * MOOD_ROWS * TILE_H];
+static gfx_color_t s_act_sheet[ACT_COLS * TILE_W * ACT_ROWS * TILE_H];
 static gfx_color_t s_panels[(PANEL_COLS * (352 + PANEL_GAP)) * ((PANELS / PANEL_COLS) * (H + PANEL_GAP))];
 
 static gfx_scene_t s_scene;
@@ -145,7 +148,7 @@ static bool tap(const menu_status_t *st, const char *id, uint32_t t)
 // The menu's screens, driven by touches as on the device.
 static bool menu_screens(void)
 {
-    menu_status_t st = {BUDDY_MOOD_IDLE, false, true};
+    menu_status_t st = {.mood = BUDDY_MOOD_IDLE, .office = true};
     uint32_t t = 10000;
     stage_mood(BUDDY_MOOD_IDLE, 0);
     if (!menu_shot("home", &st, t)) {
@@ -198,18 +201,20 @@ static bool menu_screens(void)
         return false;
     }
     menu_open(&s_menu, MENU_FOOD, t += 1000);
-    if (!menu_shot("food", &st, t += 1000) || !tap(&st, "food.water", t += 1000) ||
+    if (!menu_shot("food", &st, t += 1000) || !tap(&st, "food.coffee", t += 1000) ||
         !menu_shot("food_soon", &st, t + 60)) {
         return false;
     }
-    st.monster = true;
+    st.monster = st.busy = true;
+    st.doing = "charging!";
     buddy_pose_t pose;
     buddy_monster_pose(3300, &pose);
     buddy_view_apply(&s_view, &pose, 3300);
     if (!menu_shot("food_monster", &st, t += 1000)) {
         return false;
     }
-    st.monster = false;
+    st.monster = st.busy = false;
+    st.doing = NULL;
     stage_mood(BUDDY_MOOD_RELAXED, 2000);
 
     // More items than fit: pages (a made-up category; the real ones fit on one page so far).
@@ -289,7 +294,7 @@ static void zoom_render(const office_zoom_t *z, const menu_status_t *st, uint32_
 // on a sheet (zoom_in_sheet.png, zoom_out_sheet.png, the clock in between), and full-size key moments.
 static bool zoom_screens(office_clock_t *clock)
 {
-    const menu_status_t st = {BUDDY_MOOD_RELAXED, false, true};
+    const menu_status_t st = {.mood = BUDDY_MOOD_RELAXED, .office = true};
     office_clock_show(clock, false);
     s_scene.background = layout_background;
     s_scene.background_ctx = &s_layout;
@@ -386,7 +391,7 @@ int main(int argc, char **argv)
     }
     gfx_dirty_init(&s_all, W, H, ALIGN);
     gfx_dirty_add(&s_all, (gfx_rect_t){0, 0, W, H});
-    const menu_status_t idle = {BUDDY_MOOD_IDLE, false, true};
+    const menu_status_t idle = {.mood = BUDDY_MOOD_IDLE, .office = true};
     menu_view_apply(&s_menu_view, &s_menu, &idle, 10000); // Home, settled
     const struct {
         const char *name;
@@ -411,7 +416,8 @@ int main(int argc, char **argv)
     // Key moments of the Monster sequence, full screen (the menu says he is charging meanwhile).
     static const uint32_t k_moments[] = {150, 700, 1000, 1500, 1750, 2000, 2300, 2560, 2700, 3300, 3900, 4400,
                                          4560, 4630, 5000, 5340, 5700, 6500, 6790};
-    const menu_status_t charging = {BUDDY_MOOD_IDLE, true, true};
+    const menu_status_t charging = {.mood = BUDDY_MOOD_IDLE, .monster = true, .busy = true, .doing = "charging!",
+                                    .office = true};
     menu_view_apply(&s_menu_view, &s_menu, &charging, 10000);
     for (unsigned i = 0; i < sizeof(k_moments) / sizeof(k_moments[0]); i++) {
         buddy_pose_t pose;
@@ -461,6 +467,46 @@ int main(int argc, char **argv)
     }
     const gfx_surface_t mood_sheet = {s_mood_sheet, mood_w, MOOD_ROWS * TILE_H, mood_w};
     if (!write("mood_sheet", &mood_sheet)) {
+        return 1;
+    }
+
+    // The activities: a sheet (one row each, in even steps through it) and full-size key moments.
+    static const struct {
+        buddy_state_t state;
+        const char *name;
+        uint32_t keys[3];
+    } k_acts[ACT_ROWS] = {
+        {BUDDY_STATE_WATER, "water", {1500, 3300, 4200}},
+        {BUDDY_STATE_SNEEZE, "sneeze", {900, 1300, 1800}},
+        {BUDDY_STATE_STARE, "stare", {2000, 3500, 4600}},
+        {BUDDY_STATE_MEDITATE, "meditate", {3000, 6000, 6450}},
+    };
+    const int act_w = ACT_COLS * TILE_W;
+    for (int a = 0; a < ACT_ROWS; a++) {
+        const uint32_t len = buddy_activity_ms(k_acts[a].state);
+        for (int col = 0; col < ACT_COLS; col++) {
+            const uint32_t t = len * (uint32_t)col / ACT_COLS;
+            buddy_pose_t pose = {.state = k_acts[a].state};
+            buddy_activity_pose(k_acts[a].state, t, &pose);
+            buddy_view_apply(&s_view, &pose, t);
+            gfx_scene_render(&s_scene, &s_all, &dst);
+            tile(s_act_sheet, act_w, col, a);
+        }
+        for (int k = 0; k < 3; k++) {
+            buddy_pose_t pose = {.state = k_acts[a].state};
+            buddy_activity_pose(k_acts[a].state, k_acts[a].keys[k], &pose);
+            buddy_view_apply(&s_view, &pose, k_acts[a].keys[k]);
+            char name[64];
+            snprintf(name, sizeof(name), "act_%s_%04u", k_acts[a].name, (unsigned)k_acts[a].keys[k]);
+            if (!shot(name)) {
+                return 1;
+            }
+        }
+        const buddy_pose_t rest = {.eyes = BUDDY_EYES_OPEN};
+        buddy_view_apply(&s_view, &rest, 0); // back to his place
+    }
+    const gfx_surface_t act_sheet = {s_act_sheet, act_w, ACT_ROWS * TILE_H, act_w};
+    if (!write("activity_sheet", &act_sheet)) {
         return 1;
     }
 

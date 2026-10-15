@@ -16,7 +16,7 @@ menu_avail_t menu_item_avail(const menu_item_t *it, const menu_status_t *st)
     if (it->soon) {
         return MENU_ITEM_SOON;
     }
-    if (it->action == MENU_DO_EVENT && st->monster) {
+    if (it->action == MENU_DO_EVENT && st->busy) {
         return MENU_ITEM_BUSY;
     }
     return MENU_ITEM_READY;

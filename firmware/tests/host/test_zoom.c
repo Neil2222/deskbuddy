@@ -255,7 +255,8 @@ void test_zoom_whole_loop_into_the_clock_and_back(void)
     int back = 0, frames = 0, bad = 0, max_area = 0, clock_frames = 0, seam_px = -1;
     bool tapped = false, mood_changed = false, message = false, taps_done = false, last_was_face = false;
     for (uint32_t t = 0; t < 9000; t += 5) {
-        const menu_status_t st = {buddy_brain_mood(&brain, t), brain.state == BUDDY_STATE_MONSTER, true};
+        const menu_status_t st = {.mood = buddy_brain_mood(&brain, t), .monster = brain.state == BUDDY_STATE_MONSTER,
+                                  .busy = buddy_brain_busy(&brain, t), .office = true};
         const bool settled = !office_zoom_busy(&z) && !office_switch_busy(&sw) && sw.want_office == sw.office &&
                              z.want_office == sw.office;
         if (!tapped && t >= 1000) { // Clock, tapped on the menu

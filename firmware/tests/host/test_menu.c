@@ -12,7 +12,7 @@
 
 enum { W = 1024, H = 600, ALIGN = 32 };
 
-static const menu_status_t k_idle = {BUDDY_MOOD_IDLE, false, true};
+static const menu_status_t k_idle = {.mood = BUDDY_MOOD_IDLE, .office = true};
 
 static gfx_rect_t panel_area(void)
 {
@@ -185,7 +185,7 @@ void test_menu_selects_every_mood(void)
         t += 500;
     }
     // A mood also works while Buddy drinks a Monster (it shows when he is done).
-    st.monster = true;
+    st.monster = st.busy = true;
     CHECK_EQ(tap(&m, slot_of(&m, &st, "mood.angry"), &st, t).action, MENU_DO_MOOD);
 }
 
@@ -203,7 +203,7 @@ void test_menu_activities_and_availability(void)
 
     // While a Monster sequence runs, Buddy ignores reactions: those buttons are dimmed and do nothing.
     menu_status_t busy = k_idle;
-    busy.monster = true;
+    busy.busy = true; // an activity plays (the Monster sequence or another)
     const int surprise = slot_of(&m, &busy, "activity.surprise");
     const menu_item_t *items[MENU_SLOTS];
     menu_page_items(&m, &busy, items, NULL);
@@ -216,18 +216,22 @@ void test_menu_activities_and_availability(void)
     menu_status_t no_office = k_idle;
     no_office.office = false;
     CHECK_EQ(slot_of(&m, &no_office, "activity.clock"), -1);
-    CHECK_EQ(menu_page_items(&m, &no_office, items, NULL), 1);
+    CHECK_EQ(menu_page_items(&m, &no_office, items, NULL), 4); // Surprise!, Sneeze, Stare, Meditate
 
-    // Food & Drink: Monster works (and is busy during its own sequence); the rest is planned.
+    // Food & Drink: Monster and Water work (and are busy during any activity); the rest is planned.
     menu_open(&m, MENU_FOOD, t += 500);
     t += 1000;
     r = tap(&m, slot_of(&m, &k_idle, "food.monster"), &k_idle, t);
     CHECK_EQ(r.action, MENU_DO_EVENT);
     CHECK_EQ(r.arg, BUDDY_EVENT_DRINK_MONSTER);
     CHECK_EQ(tap(&m, slot_of(&m, &busy, "food.monster"), &busy, t += 500).action, MENU_DO_NOTHING);
-    const int water = slot_of(&m, &k_idle, "food.water");
-    CHECK_EQ(tap(&m, water, &k_idle, t += 500).action, MENU_DO_NOTHING);
-    CHECK_EQ(m.nope, water);
+    r = tap(&m, slot_of(&m, &k_idle, "food.water"), &k_idle, t += 500);
+    CHECK_EQ(r.action, MENU_DO_EVENT);
+    CHECK_EQ(r.arg, BUDDY_EVENT_DRINK_WATER);
+    CHECK_EQ(tap(&m, slot_of(&m, &busy, "food.water"), &busy, t += 500).action, MENU_DO_NOTHING);
+    const int coffee = slot_of(&m, &k_idle, "food.coffee");
+    CHECK_EQ(tap(&m, coffee, &k_idle, t += 500).action, MENU_DO_NOTHING);
+    CHECK_EQ(m.nope, coffee);
 }
 
 void test_menu_touch_needs_a_clean_tap(void)
@@ -479,7 +483,7 @@ void test_menu_redraws_match_full_redraw(void)
         while (next_step < sizeof(k_script) / sizeof(k_script[0]) && k_script[next_step].at <= t) {
             const char *what = k_script[next_step++].what;
             if (strcmp(what, "monster+") == 0 || strcmp(what, "monster-") == 0) {
-                st.monster = what[7] == '+';
+                st.monster = st.busy = what[7] == '+';
             } else if (strcmp(what, "back") == 0) {
                 int x, y;
                 back_center(&m, &x, &y);

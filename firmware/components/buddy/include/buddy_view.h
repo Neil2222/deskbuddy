@@ -43,6 +43,8 @@ typedef struct {
     int scale;
     int x0, y0; // screen position of the art origin at lift 0
     int home_scale, home_x0, home_y0; // his place on the stage (the camera moves him, see buddy_view_camera)
+    gfx_rect_t stage;
+    bool closeup; // the pose's close-up holds the camera (buddy_pose_t.closeup)
     uint32_t anim_start;
     buddy_rig_t rig_px;
 } buddy_view_t;
@@ -64,7 +66,8 @@ void buddy_view_hide(buddy_view_t *v);
 bool buddy_view_hit(const buddy_view_t *v, int x, int y);
 
 // The camera: draws the character at `scale` (1..127) with his art origin at screen point (x0, y0), e.g. to zoom in
-// on his face. Takes effect with the next buddy_view_apply(). buddy_view_camera_home() puts him back on his stage.
+// on his face. Takes effect with the next buddy_view_apply(); the caller holds the camera from then on (a pose's
+// close-up no longer moves it back). buddy_view_camera_home() puts him back on his stage.
 void buddy_view_camera(buddy_view_t *v, int scale, int x0, int y0);
 void buddy_view_camera_home(buddy_view_t *v);
 

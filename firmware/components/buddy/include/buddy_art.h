@@ -46,6 +46,7 @@ typedef struct {
 
     // Mood props: the cigarette by length and ember, and the particle kinds (part_frames[kind] frames each).
     gfx_image_t cig[BUDDY_CIG_LENGTHS][BUDDY_EMBERS];
+    gfx_image_t glass[BUDDY_GLASS_LEVELS]; // by props.glass - 1: empty .. full; it stands on the claw
     gfx_image_t part[BUDDY_PART_COUNT][BUDDY_PART_FRAMES];
     uint8_t part_frames[BUDDY_PART_COUNT];
 
@@ -59,6 +60,9 @@ typedef struct {
     buddy_point_t hand_port;  // head: hand position that holds a plug just beside plug_port
     buddy_point_t hand_mouth; // head: hand position that holds the cigarette's filter in the mouth
     buddy_point_t hand_rest;  // body: the hand lowered beside the head
+    buddy_point_t hand_sip;   // head: hand position that holds a glass's rim to the mouth
+    buddy_point_t neck_spot[2]; // head: left and right of where the head sits on the neck (dust when it lands)
+    buddy_point_t feet_spot[2]; // ground: left and right of his feet
     buddy_point_t from[BUDDY_FROM_COUNT]; // particle start points (BUDDY_FROM_EMBER is worked out from hand_rest)
     buddy_point_t battery_at;
     buddy_point_t alert_at;   // body
@@ -83,7 +87,8 @@ typedef struct {
     // The body is two images, so the head can wobble on its own: head (antenna stem down to the bottom of the face
     // box) and torso (neck down to the feet), stacked at head_at and torso_at.
     buddy_point_t head_at, torso_at, antenna_at, eye_at[2], mouth_at, shadow_at;
-    int w, h; // art bounding box at lift 0, including the shadow
+    gfx_rect_t face; // the face screen, art pixels (what the camera pushes in on)
+    int w, h;        // art bounding box at lift 0, including the shadow
     buddy_props_art_t props;
 } buddy_art_t;
 

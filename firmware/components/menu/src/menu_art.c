@@ -348,6 +348,9 @@ void menu_art_icon_size(menu_icon_t icon, uint8_t arg, int *w, int *h)
     case MENU_ICON_MOOD:
     case MENU_ICON_MOODS:
     case MENU_ICON_SURPRISE:
+    case MENU_ICON_SNEEZE:
+    case MENU_ICON_STARE:
+    case MENU_ICON_MEDITATE:
         *w = MENU_FACE_W;
         *h = MENU_FACE_H;
         return;
@@ -373,6 +376,15 @@ void menu_art_icon(menu_canvas_t *c, menu_icon_t icon, uint8_t arg, int cx, int 
         return;
     case MENU_ICON_SURPRISE:
         menu_art_face(c, (buddy_face_t){BUDDY_EYES_WIDE, BUDDY_MOUTH_OPEN, true, false}, false, cx, cy);
+        return;
+    case MENU_ICON_SNEEZE: // squeezed shut, mouth open: a... a...
+        menu_art_face(c, (buddy_face_t){BUDDY_EYES_SQUEEZE, BUDDY_MOUTH_OPEN, true, false}, false, cx, cy);
+        return;
+    case MENU_ICON_STARE: // the narrowed stare of a challenger
+        menu_art_face(c, (buddy_face_t){BUDDY_EYES_FOCUS, BUDDY_MOUTH_NEUTRAL, true, false}, false, cx, cy);
+        return;
+    case MENU_ICON_MEDITATE: // eyes closed, a peaceful smile, antenna dimmed
+        menu_art_face(c, (buddy_face_t){BUDDY_EYES_CLOSED, BUDDY_MOUTH_SMILE, false, false}, false, cx, cy);
         return;
     case MENU_ICON_MONSTER: {
         const gfx_image_t *can = &buddy_art_get()->props.can[BUDDY_CAN_LEVELS - 1];

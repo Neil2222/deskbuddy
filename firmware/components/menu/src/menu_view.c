@@ -211,7 +211,7 @@ static void draw_footer(menu_view_t *v, const menu_t *m, const menu_status_t *st
         }
     } else { // what Buddy is up to
         char word[16];
-        const char *name = st->monster ? "charging!" : buddy_mood_name(st->mood);
+        const char *name = st->doing ? st->doing : buddy_mood_name(st->mood);
         size_t n = 0;
         for (; name[n] && n + 1 < sizeof(word); n++) {
             word[n] = (char)toupper((unsigned char)name[n]);
@@ -219,7 +219,7 @@ static void draw_footer(menu_view_t *v, const menu_t *m, const menu_status_t *st
         word[n] = 0;
         const int w = menu_art_text_width("BUDDY IS") + 4 + menu_art_text_width(word);
         const int x = menu_art_text(&c, "BUDDY IS", (MENU_FOOTER_W - w) / 2, y, INK_GREY) + 4;
-        menu_art_text(&c, word, x, y, st->monster ? INK_AMBER : INK_CYAN);
+        menu_art_text(&c, word, x, y, st->doing ? INK_AMBER : INK_CYAN);
     }
     redrawn(v, &v->footer);
 }
@@ -231,6 +231,7 @@ static void forget(menu_view_t *v)
     memset(v->shown, 0, sizeof(v->shown));
     v->back_look = v->title_shown = v->face_shown = -1;
     v->footer_shown = 0;
+    v->doing_shown = NULL;
 }
 
 bool menu_view_init(menu_view_t *v, gfx_scene_t *scene, const menu_t *m, uint8_t *mem, size_t mem_size, int z)
@@ -409,10 +410,11 @@ uint32_t menu_view_apply(menu_view_t *v, const menu_t *m, const menu_status_t *s
     // Footer: a summary of what it shows, so it is only redrawn when that changes.
     const uint32_t footer = 1u | (pages > 1 ? 2u : 0u) | (uint32_t)m->page << 2 |
                             (m->pressed == MENU_HIT_PREV ? 1u << 10 : 0u) | (m->pressed == MENU_HIT_NEXT ? 1u << 11 : 0u) |
-                            (pages > 1 ? 0u : (uint32_t)st->mood << 12 | (st->monster ? 1u << 20 : 0u)) |
-                            (uint32_t)pages << 21;
-    if (footer != v->footer_shown) {
+                            (pages > 1 ? 0u : (uint32_t)st->mood << 12) | (uint32_t)pages << 21;
+    const char *doing = pages > 1 ? NULL : st->doing;
+    if (footer != v->footer_shown || doing != v->doing_shown) {
         v->footer_shown = footer;
+        v->doing_shown = doing;
         draw_footer(v, m, st, pages);
     }
     return next;

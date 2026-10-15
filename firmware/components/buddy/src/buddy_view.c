@@ -77,6 +77,7 @@ bool buddy_view_init(buddy_view_t *v, gfx_scene_t *scene, gfx_rect_t stage, int 
         return false;
     }
     v->anim_start = now_ms;
+    v->stage = stage;
     v->home_scale = v->scale;
     v->home_x0 = v->x0;
     v->home_y0 = v->y0;
@@ -245,6 +246,9 @@ static fpoint_t hand_spot(const buddy_props_art_t *p, buddy_hand_t h, int bx, in
     case BUDDY_HAND_REST:
         s = offset(p->hand_rest, bx, by);
         break;
+    case BUDDY_HAND_SIP:
+        s = offset(p->hand_sip, hx, hy);
+        break;
     case BUDDY_HAND_HOME:
     default:
         s = offset(p->arm_root, bx, by);
@@ -312,6 +316,10 @@ static void draw_rig(buddy_view_t *v, const buddy_props_t *pr, int bx, int by, i
         if (pr->cig) { // between the claw's prongs, drawn over by them
             stamp(r, &p->cig[pr->cig_left % BUDDY_CIG_LENGTHS][pr->ember % BUDDY_EMBERS], h.x - BUDDY_CIG_GRIP,
                   h.y - 1);
+        }
+        if (pr->glass >= 1 && pr->glass <= BUDDY_GLASS_LEVELS) { // standing on the claw, its base between the prongs
+            const gfx_image_t *g = &p->glass[pr->glass - 1];
+            stamp(r, g, h.x - 2, h.y - g->h);
         }
         stamp(r, &p->hand, h.x - 1, h.y - 1);
     }
@@ -448,6 +456,14 @@ static void apply_fx(buddy_view_t *v, const buddy_props_t *pr, int hx, int by, b
         case BUDDY_SPOT_PORT:
             c = offset(p->plug_port, hx, by + 1); // where plug meets port
             break;
+        case BUDDY_SPOT_NECK_L:
+        case BUDDY_SPOT_NECK_R:
+            c = offset(p->neck_spot[f->at == BUDDY_SPOT_NECK_R], hx, by);
+            break;
+        case BUDDY_SPOT_FEET_L:
+        case BUDDY_SPOT_FEET_R:
+            c = p->feet_spot[f->at == BUDDY_SPOT_FEET_R];
+            break;
         case BUDDY_SPOT_HAND:
         default:
             c = (buddy_point_t){hand.x, hand.y - p->plug.h};
@@ -534,15 +550,40 @@ static void apply_props(buddy_view_t *v, const buddy_props_t *pr, int bx, int by
     apply_particles(v, pr, bx, by, hx, hy);
 }
 
+static void set_camera(buddy_view_t *v, int scale, int x0, int y0);
+
+// The close-up: the camera pushes in on his face, `amount` (1..255) of the way from his place to his head filling
+// most of the stage. The scale grows exponentially (an even approach) and the face glides to the stage's centre, so
+// he never reaches into the control panel.
+static void closeup(buddy_view_t *v, uint8_t amount)
+{
+    const gfx_rect_t f = v->art->face;
+    const float fx = f.x + f.w / 2.0f, fy = f.y + f.h / 2.0f, e = amount / 255.0f;
+    int top = v->stage.w * 92 / 100 / v->art->head.w;
+    top = top > v->home_scale ? top : v->home_scale;
+    const int s = (int)lroundf(v->home_scale * powf((float)top / v->home_scale, e));
+    const float px = v->home_x0 + fx * v->home_scale, py = v->home_y0 + fy * v->home_scale;
+    const float qx = v->stage.x + v->stage.w / 2.0f, qy = v->stage.y + v->stage.h / 2.0f;
+    set_camera(v, s, (int)lroundf(px + (qx - px) * e - fx * s), (int)lroundf(py + (qy - py) * e - fy * s));
+}
+
 uint32_t buddy_view_apply(buddy_view_t *v, const buddy_pose_t *pose, uint32_t now_ms)
 {
+    if (pose->closeup) {
+        closeup(v, pose->closeup);
+        v->closeup = true;
+    } else if (v->closeup) { // back to his place
+        set_camera(v, v->home_scale, v->home_x0, v->home_y0);
+        v->closeup = false;
+    }
     const buddy_art_t *a = v->art;
-    const int lift = pose->lift > BUDDY_MAX_LIFT ? BUDDY_MAX_LIFT : pose->lift;
+    const int lift = pose->lift > BUDDY_MAX_HOVER ? BUDDY_MAX_HOVER : pose->lift;
+    const int pop = pose->pop > BUDDY_MAX_POP ? BUDDY_MAX_POP : pose->pop;
     const int shake = pose->shake < -1 ? -1 : pose->shake > 1 ? 1 : pose->shake;
     const int wobble = pose->wobble < -1 ? -1 : pose->wobble > 1 ? 1 : pose->wobble;
     const int look = pose->look < -1 ? -1 : pose->look > 1 ? 1 : pose->look;
     const int dx = shake * v->scale, dy = -lift * v->scale, head_dx = (shake + wobble) * v->scale;
-    const int nod = pose->nod > 1 ? 1 : pose->nod, head_dy = dy + nod * v->scale;
+    const int nod = pose->nod > 1 ? 1 : pose->nod, head_dy = dy + (nod - pop) * v->scale;
     const gfx_palette_t *tint = &a->tint[pose->tint < BUDDY_TINT_COUNT ? pose->tint : BUDDY_TINT_NORMAL];
     uint32_t next = UINT32_MAX;
 
@@ -570,7 +611,7 @@ uint32_t buddy_view_apply(buddy_view_t *v, const buddy_pose_t *pose, uint32_t no
     place(v, &v->eye[1], a->eye_at[1], head_dx + look * v->scale, head_dy);
     place(v, &v->mouth, a->mouth_at, head_dx, head_dy);
     place(v, &v->shadow, a->shadow_at, 0, 0);
-    apply_props(v, &pose->props, shake, -lift, shake + wobble, nod - lift);
+    apply_props(v, &pose->props, shake, -lift, shake + wobble, nod - lift - pop);
     return next;
 }
 
@@ -602,7 +643,7 @@ bool buddy_view_hit(const buddy_view_t *v, int x, int y)
     return gfx_rect_contains_point(r, x, y);
 }
 
-void buddy_view_camera(buddy_view_t *v, int scale, int x0, int y0)
+static void set_camera(buddy_view_t *v, int scale, int x0, int y0)
 {
     v->scale = scale < 1 ? 1 : scale > 127 ? 127 : scale; // FX clouds are drawn at twice the scale (uint8_t)
     v->x0 = x0;
@@ -619,6 +660,12 @@ void buddy_view_camera(buddy_view_t *v, int scale, int x0, int y0)
     for (int i = 0; i < BUDDY_PARTICLES; i++) {
         v->part[i].scale = (uint8_t)v->scale;
     }
+}
+
+void buddy_view_camera(buddy_view_t *v, int scale, int x0, int y0)
+{
+    set_camera(v, scale, x0, y0);
+    v->closeup = false; // the caller holds the camera now (Clock Mode's zoom)
 }
 
 void buddy_view_camera_home(buddy_view_t *v)

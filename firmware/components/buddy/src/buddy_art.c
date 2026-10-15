@@ -225,8 +225,15 @@ static const char *const k_anger[2][7] = {
 };
 // The cigarette: filter, paper (shorter as it burns down) and the tip, by ember (see buddy_props_t.ember).
 static const char *const k_cig_tip[BUDDY_EMBERS] = {"lr", "lR", "FY"};
+// A glass of water (his eye glow is the water), by how much is left; it stands on the claw.
+static const char *const k_glass[BUDDY_GLASS_LEVELS][8] = {
+    {"L....L", "L....L", "LW...L", "LW...L", "L....L", "L....L", ".L..L.", ".LLLL."},
+    {"L....L", "L....L", "LW...L", "LW...L", "L....L", "LEEEEL", ".LEEL.", ".LLLL."},
+    {"L....L", "L....L", "LW...L", "LWEEEL", "LEEEEL", "LEEEEL", ".LEEL.", ".LLLL."},
+    {"L....L", "LEEEEL", "LWEEEL", "LWEEEL", "LEEEEL", "LEEEEL", ".LEEL.", ".LLLL."},
+};
 
-static uint8_t s_pool[7168]; // decoded pixels, internal RAM
+static uint8_t s_pool[7424]; // decoded pixels, internal RAM
 static size_t s_used;
 static buddy_art_t s_art;
 static gfx_anim_frame_t s_antenna_frames[BUDDY_ANTENNA_COUNT][3];
@@ -340,6 +347,9 @@ static bool load_props(buddy_props_art_t *p)
              decode(&p->part[BUDDY_PART_ANGER][i], k_anger[i], 7);
     }
     ok = ok && DECODE(p->part[BUDDY_PART_SWEAT][0], k_sweat);
+    for (int i = 0; ok && i < BUDDY_GLASS_LEVELS; i++) {
+        ok = decode(&p->glass[i], k_glass[i], 8);
+    }
     // Cigarettes: two filter pixels, paper, then the tip; each length shorter by a pixel of paper.
     for (int len = 0; ok && len < BUDDY_CIG_LENGTHS; len++) {
         for (int e = 0; ok && e < BUDDY_EMBERS; e++) {
@@ -370,6 +380,11 @@ static bool load_props(buddy_props_art_t *p)
     // the head, its tip pointing away from him.
     p->hand_mouth = (buddy_point_t){15 + BUDDY_CIG_GRIP, 17};
     p->hand_rest = (buddy_point_t){29, 23};
+    p->hand_sip = (buddy_point_t){16, 24}; // the glass (above the claw) covers his mouth's right half
+    p->neck_spot[0] = (buddy_point_t){2, 20};
+    p->neck_spot[1] = (buddy_point_t){25, 20};
+    p->feet_spot[0] = (buddy_point_t){4, p->ground_y - 1};
+    p->feet_spot[1] = (buddy_point_t){23, p->ground_y - 1};
     p->from[BUDDY_FROM_MOUTH] = (buddy_point_t){13, 16};
     p->from[BUDDY_FROM_HEAD_L] = (buddy_point_t){0, 6};
     p->from[BUDDY_FROM_HEAD_R] = (buddy_point_t){27, 6};
@@ -472,6 +487,19 @@ static bool load(void)
     a->shadow_at = (buddy_point_t){4, a->torso_at.y + a->torso.h};
     a->w = a->head.w > a->torso.w ? a->head.w : a->torso.w;
     a->h = a->shadow_at.y + a->shadow.h;
+    // The face screen: the head's screen-coloured pixels.
+    int x0 = a->head.w, y0 = a->head.h, x1 = -1, y1 = -1;
+    for (int y = 0; y < a->head.h; y++) {
+        for (int x = 0; x < a->head.w; x++) {
+            if (a->head.px[y * a->head.w + x] == BUDDY_PX_SCREEN) {
+                x0 = x < x0 ? x : x0;
+                x1 = x > x1 ? x : x1;
+                y0 = y < y0 ? y : y0;
+                y1 = y > y1 ? y : y1;
+            }
+        }
+    }
+    a->face = (gfx_rect_t){a->head_at.x + x0, a->head_at.y + y0, x1 - x0 + 1, y1 - y0 + 1};
     return true;
 }
 

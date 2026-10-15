@@ -95,7 +95,13 @@ extern int g_test_failed;
     X(zoom_camera_grows_from_his_head_and_back)      \
     X(zoom_enters_and_leaves_through_the_scene_switch) \
     X(zoom_survives_rapid_and_contrary_requests)     \
-    X(zoom_whole_loop_into_the_clock_and_back)
+    X(zoom_whole_loop_into_the_clock_and_back)       \
+    X(activity_plays_to_the_end_then_the_mood_resumes) \
+    X(activity_water_short_circuits_him)             \
+    X(activity_sneeze_blows_his_head_off)            \
+    X(activity_stare_pushes_in_and_he_loses)         \
+    X(activity_meditation_floats_until_a_notification) \
+    X(activity_redraws_match_full_redraw_on_the_stage)
 
 #define X(name) void test_##name(void);
 TEST_LIST

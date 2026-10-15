@@ -30,9 +30,12 @@ static const menu_item_t k_items[] = {
 
     {"activity.surprise", "SURPRISE!", MENU_ACTIVITIES, MENU_ICON_SURPRISE, MENU_DO_EVENT, BUDDY_EVENT_POKE, false},
     {"activity.clock", "CLOCK", MENU_ACTIVITIES, MENU_ICON_OFFICE, MENU_DO_OFFICE, 0, false},
+    {"activity.sneeze", "SNEEZE", MENU_ACTIVITIES, MENU_ICON_SNEEZE, MENU_DO_EVENT, BUDDY_EVENT_SNEEZE, false},
+    {"activity.stare", "STARE", MENU_ACTIVITIES, MENU_ICON_STARE, MENU_DO_EVENT, BUDDY_EVENT_STARE, false},
+    {"activity.meditate", "MEDITATE", MENU_ACTIVITIES, MENU_ICON_MEDITATE, MENU_DO_EVENT, BUDDY_EVENT_MEDITATE, false},
 
     {"food.monster", "MONSTER", MENU_FOOD, MENU_ICON_MONSTER, MENU_DO_EVENT, BUDDY_EVENT_DRINK_MONSTER, false},
-    {"food.water", "WATER", MENU_FOOD, MENU_ICON_WATER, MENU_DO_NOTHING, 0, true},
+    {"food.water", "WATER", MENU_FOOD, MENU_ICON_WATER, MENU_DO_EVENT, BUDDY_EVENT_DRINK_WATER, false},
     {"food.coffee", "COFFEE", MENU_FOOD, MENU_ICON_COFFEE, MENU_DO_NOTHING, 0, true},
     {"food.lunch", "LUNCH", MENU_FOOD, MENU_ICON_LUNCH, MENU_DO_NOTHING, 0, true},
     {"food.snacks", "SNACKS", MENU_FOOD, MENU_ICON_SNACKS, MENU_DO_NOTHING, 0, true},

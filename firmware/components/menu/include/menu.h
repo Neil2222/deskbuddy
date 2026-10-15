@@ -74,6 +74,9 @@ typedef enum {
     MENU_ICON_COFFEE,
     MENU_ICON_LUNCH,
     MENU_ICON_SNACKS,
+    MENU_ICON_SNEEZE,   // Buddy's face, for activities that are him (no props)
+    MENU_ICON_STARE,
+    MENU_ICON_MEDITATE,
     MENU_ICON_COUNT,
 } menu_icon_t;
 
@@ -98,9 +101,11 @@ extern const menu_def_t menu_default;
 
 // What the menu shows depends on Buddy's state; the firmware owns it and passes it in on every call.
 typedef struct {
-    buddy_mood_t mood; // the brain's current mood
-    bool monster;      // a Monster sequence is running (Buddy ignores other reactions meanwhile)
-    bool office;       // Office Mode is available
+    buddy_mood_t mood;   // the brain's current mood
+    bool monster;        // a Monster sequence is running (his face in the header charges)
+    bool busy;           // an activity is playing (the Monster sequence or another): he ignores other ones
+    const char *doing;   // what he is doing ("drinking"; buddy_activity_doing), NULL: his mood is shown
+    bool office;         // Clock Mode (first called Office Mode) is available
 } menu_status_t;
 
 typedef enum {
