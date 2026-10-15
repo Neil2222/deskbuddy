@@ -151,25 +151,51 @@ public sealed class WeekStrip : Control
 /// <summary>
 /// One day from 00:00 to 24:00, top to bottom: hour lines, the blocks as layers (a block on top of others is drawn
 /// indented), the current time as a cyan line (today only). Click a block to select it, double-click empty time to
-/// add one there, Delete to remove the selected one. Sized by its owner (see <see cref="PreferredHeight"/>) inside a
-/// scrolling panel.
+/// add one there, Delete to remove the selected one. Drag a block's body to move it, its top or bottom edge to change
+/// its start or end (5-minute steps, Shift: 1 minute); the change is committed on release, Escape cancels it.
+/// Sized by its owner (see <see cref="PreferredHeight"/>) inside a scrolling panel, which it scrolls while dragging
+/// near its edges.
 /// </summary>
 public sealed class DayTimeline : Control
 {
     private const int HourHeight = 48, LabelWidth = 52, Indent = 24, MinBlockHeight = 24, Margin8 = 8;
+    private const int EdgeHeight = 6;      // the grab zone of a block's top and bottom edges (logical pixels)
+    private const int AutoScrollZone = 28; // dragging this close to the visible top or bottom scrolls
 
     private readonly Theme _theme;
     private readonly Func<string, string> _moodLabel;
     private readonly Func<string, Image?> _moodFace;
+    private readonly System.Windows.Forms.Timer _autoScroll = new() { Interval = 30 };
     private IReadOnlyList<(ScheduleBlock Block, int Depth)> _layers = [];
     private ImmutableHashSet<Guid> _active = [];
     private int? _now;
+    private Guid? _hover;
+    private DragState? _drag;
+    private int _scrollStep; // device pixels per auto-scroll tick, signed; 0: not scrolling
+
+    private sealed class DragState(ScheduleBlock block, int depth, DragKind kind, Point down)
+    {
+        public ScheduleBlock Block { get; } = block;
+        public int Depth { get; } = depth;
+        public DragKind Kind { get; } = kind;
+        public Point Down { get; } = down;
+        public bool Started { get; set; } // past the threshold: an ordinary click never changes a block
+        public int Y { get; set; } = down.Y;
+        public int Start { get; set; } = block.Start;
+        public int End { get; set; } = block.End;
+    }
 
     public Guid? SelectedId { get; private set; }
 
     public event Action<Guid?>? BlockSelected;
     public event Action<int>? CreateRequested; // minute of the day
     public event Action? DeleteRequested;
+    /// <summary>While dragging: the block's times as they would be (not stored).</summary>
+    public event Action<Guid, int, int>? DragPreview;
+    /// <summary>The drag ended with new times: store them.</summary>
+    public event Action<Guid, int, int>? DragCommitted;
+    /// <summary>The drag was cancelled (Escape, or the pointer was taken away): show the stored times again.</summary>
+    public event Action? DragCancelled;
 
     public DayTimeline(Theme theme, Func<string, string> moodLabel, Func<string, Image?> moodFace)
     {
@@ -182,9 +208,12 @@ public sealed class DayTimeline : Control
         TabStop = true;
         AccessibleRole = AccessibleRole.List;
         AccessibleName = "Day timeline";
+        _autoScroll.Tick += (_, _) => AutoScrollTick();
     }
 
     public int PreferredHeight => LogicalToDeviceUnits(HourHeight * 24 + 2 * Margin8);
+
+    public bool Dragging => _drag is { Started: true };
 
     /// <param name="blocks">The day's blocks.</param>
     /// <param name="active">Blocks covering the current time (today only; empty otherwise).</param>
@@ -201,26 +230,31 @@ public sealed class DayTimeline : Control
     /// <summary>Where a minute of the day is drawn (device pixels from the top of the control).</summary>
     public int Y(int minute) => LogicalToDeviceUnits(Margin8) + (int)Math.Round(minute * LogicalToDeviceUnits(HourHeight) / 60.0);
 
-    private int MinuteAt(int y) =>
-        Math.Clamp((int)((y - LogicalToDeviceUnits(Margin8)) * 60.0 / LogicalToDeviceUnits(HourHeight)), 0, DayTime.Minutes - 1);
+    private double MinutesPerPixel => 60.0 / LogicalToDeviceUnits(HourHeight);
 
-    private Rectangle BlockRect(ScheduleBlock b, int depth)
+    private int MinuteAt(int y) =>
+        Math.Clamp((int)((y - LogicalToDeviceUnits(Margin8)) * MinutesPerPixel), 0, DayTime.Minutes - 1);
+
+    private Rectangle BlockRect(int start, int end, int depth)
     {
         var left = LogicalToDeviceUnits(LabelWidth + Margin8);
         var right = Width - LogicalToDeviceUnits(Margin8);
         var x = Math.Min(left + depth * LogicalToDeviceUnits(Indent), left + (right - left) / 2);
-        var y0 = Y(b.Start);
-        var h = Math.Max(Y(b.End) - y0, LogicalToDeviceUnits(MinBlockHeight));
+        var y0 = Y(start);
+        var h = Math.Max(Y(end) - y0, LogicalToDeviceUnits(MinBlockHeight));
         return new Rectangle(x, y0 + 1, right - x, h - 2);
     }
 
-    private ScheduleBlock? HitTest(Point p)
+    // The top layer under the pointer (a block on top is found before the one it covers).
+    private (ScheduleBlock Block, int Depth, Rectangle Rect)? HitTest(Point p)
     {
-        for (var i = _layers.Count - 1; i >= 0; i--) // the top layer first
+        for (var i = _layers.Count - 1; i >= 0; i--)
         {
-            if (BlockRect(_layers[i].Block, _layers[i].Depth).Contains(p))
+            var (block, depth) = _layers[i];
+            var rect = BlockRect(block.Start, block.End, depth);
+            if (rect.Contains(p))
             {
-                return _layers[i].Block;
+                return (block, depth, rect);
             }
         }
         return null;
@@ -241,9 +275,79 @@ public sealed class DayTimeline : Control
         Focus();
         if (e.Button == MouseButtons.Left)
         {
-            Select(HitTest(e.Location)?.Id);
+            var hit = HitTest(e.Location);
+            Select(hit?.Block.Id);
+            _drag = hit is { } h
+                ? new DragState(h.Block, h.Depth, BlockDrag.Zone(h.Rect.Y, h.Rect.Height, e.Y, LogicalToDeviceUnits(EdgeHeight)), e.Location)
+                : null;
         }
         base.OnMouseDown(e);
+    }
+
+    protected override void OnMouseMove(MouseEventArgs e)
+    {
+        if (_drag is { } drag) // from the left button going down on a block until it comes up (the control has the capture)
+        {
+            var threshold = SystemInformation.DragSize;
+            if (!drag.Started && (Math.Abs(e.Y - drag.Down.Y) >= threshold.Height || Math.Abs(e.X - drag.Down.X) >= threshold.Width))
+            {
+                drag.Started = true;
+                Cursor = drag.Kind == DragKind.Move ? Cursors.SizeAll : Cursors.SizeNS;
+            }
+            if (drag.Started)
+            {
+                drag.Y = e.Y;
+                UpdateDrag();
+                UpdateAutoScroll(e.Y);
+            }
+        }
+        else
+        {
+            var hit = HitTest(e.Location);
+            Cursor = hit is not { } h ? Cursors.Default
+                     : BlockDrag.Zone(h.Rect.Y, h.Rect.Height, e.Y, LogicalToDeviceUnits(EdgeHeight)) == DragKind.Move ? Cursors.Hand
+                     : Cursors.SizeNS;
+            SetHover(hit?.Block.Id);
+        }
+        base.OnMouseMove(e);
+    }
+
+    protected override void OnMouseLeave(EventArgs e)
+    {
+        if (!Dragging)
+        {
+            SetHover(null);
+        }
+        base.OnMouseLeave(e);
+    }
+
+    protected override void OnMouseUp(MouseEventArgs e)
+    {
+        if (e.Button == MouseButtons.Left && _drag is { } drag)
+        {
+            _drag = null;
+            StopAutoScroll();
+            if (drag.Started && (drag.Start, drag.End) != (drag.Block.Start, drag.Block.End))
+            {
+                DragCommitted?.Invoke(drag.Block.Id, drag.Start, drag.End);
+            }
+            else if (drag.Started)
+            {
+                DragCancelled?.Invoke(); // back where it was: nothing to store
+            }
+            Invalidate();
+        }
+        base.OnMouseUp(e);
+    }
+
+    // The pointer was taken away mid-drag (another window, a dialog): nothing is changed.
+    protected override void OnMouseCaptureChanged(EventArgs e)
+    {
+        if (Dragging && !Capture && (MouseButtons & MouseButtons.Left) != 0) // still pressed: not an ordinary release
+        {
+            CancelDrag();
+        }
+        base.OnMouseCaptureChanged(e);
     }
 
     protected override void OnMouseDoubleClick(MouseEventArgs e)
@@ -255,22 +359,119 @@ public sealed class DayTimeline : Control
         base.OnMouseDoubleClick(e);
     }
 
-    protected override void OnMouseMove(MouseEventArgs e)
-    {
-        Cursor = HitTest(e.Location) is null ? Cursors.Default : Cursors.Hand;
-        base.OnMouseMove(e);
-    }
-
-    protected override bool IsInputKey(Keys keyData) => keyData is Keys.Delete || base.IsInputKey(keyData);
+    protected override bool IsInputKey(Keys keyData) => keyData is Keys.Delete or Keys.Escape || base.IsInputKey(keyData);
 
     protected override void OnKeyDown(KeyEventArgs e)
     {
-        if (e.KeyCode == Keys.Delete && SelectedId is not null)
+        if (e.KeyCode == Keys.Escape && _drag is not null)
+        {
+            CancelDrag();
+            e.Handled = true;
+        }
+        else if (e.KeyCode == Keys.ShiftKey && Dragging)
+        {
+            UpdateDrag(); // to the minute from now on
+        }
+        else if (e.KeyCode == Keys.Delete && SelectedId is not null && !Dragging)
         {
             DeleteRequested?.Invoke();
             e.Handled = true;
         }
         base.OnKeyDown(e);
+    }
+
+    protected override void OnKeyUp(KeyEventArgs e)
+    {
+        if (e.KeyCode == Keys.ShiftKey && Dragging)
+        {
+            UpdateDrag(); // back to 5-minute steps
+        }
+        base.OnKeyUp(e);
+    }
+
+    private void CancelDrag()
+    {
+        var started = Dragging;
+        _drag = null;
+        StopAutoScroll();
+        Cursor = Cursors.Default;
+        Invalidate();
+        if (started)
+        {
+            DragCancelled?.Invoke();
+        }
+    }
+
+    private void UpdateDrag()
+    {
+        if (_drag is not { Started: true } drag)
+        {
+            return;
+        }
+        var precise = (ModifierKeys & Keys.Shift) != 0;
+        var (start, end) = BlockDrag.Apply(drag.Block, drag.Kind, (drag.Y - drag.Down.Y) * MinutesPerPixel, precise);
+        if ((start, end) != (drag.Start, drag.End))
+        {
+            drag.Start = start;
+            drag.End = end;
+            Invalidate();
+            DragPreview?.Invoke(drag.Block.Id, start, end);
+        }
+    }
+
+    // Near the top or bottom of the visible part, the scrolling parent moves along, faster the closer the pointer.
+    private void UpdateAutoScroll(int y)
+    {
+        if (Parent is not ScrollableControl viewport)
+        {
+            return;
+        }
+        var visibleY = y + Top; // Top is negative while the parent is scrolled down
+        var zone = LogicalToDeviceUnits(AutoScrollZone);
+        var speed = LogicalToDeviceUnits(14);
+        _scrollStep = visibleY < zone ? -Math.Max(1, speed * (zone - visibleY) / zone)
+                      : visibleY > viewport.ClientSize.Height - zone ? Math.Max(1, speed * (visibleY - viewport.ClientSize.Height + zone) / zone)
+                      : 0;
+        if (_scrollStep != 0)
+        {
+            _autoScroll.Start();
+        }
+        else
+        {
+            _autoScroll.Stop();
+        }
+    }
+
+    private void AutoScrollTick()
+    {
+        if (!Dragging || Parent is not ScrollableControl viewport)
+        {
+            StopAutoScroll();
+            return;
+        }
+        var before = viewport.AutoScrollPosition.Y;
+        viewport.AutoScrollPosition = new Point(0, -before + _scrollStep);
+        if (viewport.AutoScrollPosition.Y == before)
+        {
+            return; // at the top or the bottom
+        }
+        _drag!.Y = PointToClient(Cursor.Position).Y; // the content moved under the pointer
+        UpdateDrag();
+    }
+
+    private void StopAutoScroll()
+    {
+        _autoScroll.Stop();
+        _scrollStep = 0;
+    }
+
+    private void SetHover(Guid? id)
+    {
+        if (_hover != id)
+        {
+            _hover = id;
+            Invalidate();
+        }
     }
 
     protected override void OnPaint(PaintEventArgs e)
@@ -297,9 +498,28 @@ public sealed class DayTimeline : Control
         }
 
         g.SmoothingMode = SmoothingMode.AntiAlias;
+        var dragging = _drag is { Started: true } d ? d : null;
         foreach (var (block, depth) in _layers)
         {
-            DrawBlock(g, block, BlockRect(block, depth));
+            if (block.Id != dragging?.Block.Id)
+            {
+                DrawBlock(g, block, BlockRect(block.Start, block.End, depth));
+            }
+        }
+        if (dragging is not null)
+        {
+            // Where it was: a dotted outline over the blocks around it, until the drag is committed or cancelled.
+            var was = BlockRect(dragging.Block.Start, dragging.Block.End, dragging.Depth);
+            using (var path = Theme.Rounded(new RectangleF(was.X + 0.5f, was.Y + 0.5f, was.Width - 1, was.Height - 1), LogicalToDeviceUnits(6)))
+            using (var pen = new Pen(Theme.Muted) { DashStyle = DashStyle.Dot })
+            {
+                g.DrawPath(pen, path);
+            }
+            // The dragged block on top of everything, at its layer's indent, with its new times beside it.
+            var preview = dragging.Block with { Start = dragging.Start, End = dragging.End };
+            var rect = BlockRect(preview.Start, preview.End, dragging.Depth);
+            DrawBlock(g, preview, rect);
+            DrawTimes(g, preview, rect);
         }
 
         if (_layers.Count == 0)
@@ -312,12 +532,35 @@ public sealed class DayTimeline : Control
         if (_now is { } now)
         {
             var y = Y(now);
-            var d = LogicalToDeviceUnits(8);
+            var dot = LogicalToDeviceUnits(8);
             using var pen = new Pen(Theme.Cyan, LogicalToDeviceUnits(2));
-            using var dot = new SolidBrush(Theme.Cyan);
+            using var brush = new SolidBrush(Theme.Cyan);
             g.DrawLine(pen, labelWidth, y, right, y);
-            g.FillEllipse(dot, labelWidth - d / 2f, y - d / 2f, d, d);
+            g.FillEllipse(brush, labelWidth - dot / 2f, y - dot / 2f, dot, dot);
         }
+    }
+
+    // A small label with the times being dragged to: above the block, or below it at the top of the day.
+    private void DrawTimes(Graphics g, ScheduleBlock b, Rectangle r)
+    {
+        var text = $"{DayTime.Format(b.Start)}–{DayTime.Format(b.End)} · {DayTime.Duration(b.Duration)}";
+        var size = TextRenderer.MeasureText(g, text, _theme.Small, Size.Empty, TextFormatFlags.NoPadding);
+        var pad = LogicalToDeviceUnits(6);
+        var w = size.Width + 2 * pad;
+        var h = size.Height + pad;
+        var y = r.Y - h - LogicalToDeviceUnits(3);
+        if (y < 0)
+        {
+            y = r.Bottom + LogicalToDeviceUnits(3);
+        }
+        var box = new Rectangle(r.Right - w - LogicalToDeviceUnits(8), y, w, h);
+        using var path = Theme.Rounded(new RectangleF(box.X + 0.5f, box.Y + 0.5f, box.Width - 1, box.Height - 1), h / 2f);
+        using var fill = new SolidBrush(Theme.Input);
+        using var pen = new Pen(Theme.Cyan);
+        g.FillPath(fill, path);
+        g.DrawPath(pen, path);
+        TextRenderer.DrawText(g, text, _theme.Small, box, Theme.Text,
+                              TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
     }
 
     private void DrawBlock(Graphics g, ScheduleBlock b, Rectangle r)
@@ -331,7 +574,8 @@ public sealed class DayTimeline : Control
             var fill = b.Enabled && b.Mood is not null ? Blend(Theme.Card, color, 0.22f) : Theme.Card;
             using var brush = new SolidBrush(fill);
             g.FillPath(brush, path);
-            using var pen = new Pen(selected ? Theme.Cyan : color, selected ? LogicalToDeviceUnits(2) : 1);
+            var border = selected ? Theme.Cyan : b.Id == _hover ? Blend(color, Theme.Text, 0.45f) : color; // hover: a little brighter
+            using var pen = new Pen(border, selected ? LogicalToDeviceUnits(2) : 1);
             if (!selected && (!b.Enabled || b.Mood is null))
             {
                 pen.DashStyle = DashStyle.Dash; // no mood, or switched off: outlined only
@@ -385,6 +629,15 @@ public sealed class DayTimeline : Control
             using var dot = new SolidBrush(Theme.Cyan);
             g.FillEllipse(dot, r.Right - pad - d, r.Y + Math.Min(pad, (r.Height - d) / 2), d, d);
         }
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _autoScroll.Dispose();
+        }
+        base.Dispose(disposing);
     }
 
     private static Color Blend(Color a, Color b, float t) =>

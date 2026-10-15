@@ -112,6 +112,24 @@ public sealed class SchedulePage : Panel
         };
         _timeline.CreateRequested += minute => AddBlock(ScheduleEdits.NewAt(minute));
         _timeline.DeleteRequested += DeleteSelected;
+        _timeline.DragPreview += (_, start, end) =>
+        {
+            // The editor follows the drag; nothing is stored until the block is let go.
+            _binding = true;
+            _start.Value = start;
+            _end.Value = end;
+            _duration.Text = DayTime.Duration(end - start);
+            _binding = false;
+        };
+        _timeline.DragCommitted += (id, start, end) =>
+        {
+            _pendingEnd = null;
+            if (_selected == id)
+            {
+                Edit(b => b with { Start = start, End = end });
+            }
+        };
+        _timeline.DragCancelled += BindEditor;
         _dayScroll.Resize += (_, _) => _timeline.Height = _timeline.PreferredHeight;
         _clock.Tick += (_, _) => RefreshNow();
         VisibleChanged += (_, _) =>
