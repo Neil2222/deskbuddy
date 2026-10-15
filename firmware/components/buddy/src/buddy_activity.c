@@ -28,6 +28,7 @@ static const struct {
     {"sneeze", BUDDY_EVENT_SNEEZE, {BUDDY_EYES_SQUEEZE, BUDDY_MOUTH_OPEN, true, false}},  // a... a...
     {"stare", BUDDY_EVENT_STARE, {BUDDY_EYES_FOCUS, BUDDY_MOUTH_NEUTRAL, true, false}},   // a challenger's stare
     {"meditate", BUDDY_EVENT_MEDITATE, {BUDDY_EYES_CLOSED, BUDDY_MOUTH_SMILE, false, false}}, // at peace
+    {"focus", BUDDY_EVENT_FOCUS, {BUDDY_EYES_FOCUS, BUDDY_MOUTH_TONGUE, true, false}},    // deep in thought
 };
 
 const char *buddy_act_name(int i)
@@ -569,6 +570,83 @@ static uint32_t sad(uint32_t t, buddy_pose_t *p)
     return 50;
 }
 
+// --- Focus (MonkeyUser's "Focus") ---------------------------------------------------------------------------------
+
+static const uint16_t k_plan_at[BUDDY_PLAN_STEPS] = {400, 700, 1000, 1500, 1800, 2100, 2400, 2800};
+#define F_TONGUE 1200u  // concentrating hard
+#define F_SMUG 2600u    // it all comes together
+#define F_HEY 3300u     // "HEY! DO YOU HAVE 1 SEC?"
+#define F_GLARE 3800u
+#define F_POOF 4600u    // the plan goes up in smoke
+#define F_POOF2 4850u
+#define F_NEVER 5400u   // "NEVERMIND"
+#define F_VOID 6400u    // ...what was I doing?
+#define F_DRIFT_MS 150u // the pieces move on every this many ms
+#define F_LAND 8400u
+
+static uint32_t focus(uint32_t t, buddy_pose_t *p)
+{
+    buddy_thought_t *th = &p->thought;
+    p->antenna = BUDDY_ANTENNA_CALM;
+    if (t < F_POOF) { // the plan grows, step by step
+        uint32_t next = F_POOF - t;
+        for (int i = 0; i < BUDDY_PLAN_STEPS; i++) {
+            if (t < k_plan_at[i]) {
+                next = buddy_min_u32(next, k_plan_at[i] - t);
+                break;
+            }
+            th->plan = (uint8_t)(i + 1);
+        }
+        p->eyes = BUDDY_EYES_FOCUS;
+        p->mouth = t < F_TONGUE ? BUDDY_MOUTH_NEUTRAL : t < F_SMUG ? BUDDY_MOUTH_TONGUE : BUDDY_MOUTH_SMIRK;
+        if (t >= F_HEY) { // someone, off to the right
+            th->speech = BUDDY_SPEECH_HEY;
+            p->look = 1;
+            p->eyes = t < F_GLARE ? BUDDY_EYES_FOCUS : BUDDY_EYES_ANGRY;
+            p->mouth = BUDDY_MOUTH_GRIT;
+        }
+        static const uint32_t k_marks[] = {F_TONGUE, F_SMUG, F_HEY, F_GLARE};
+        for (size_t i = 0; i < sizeof(k_marks) / sizeof(k_marks[0]); i++) {
+            next = t < k_marks[i] ? buddy_min_u32(next, k_marks[i] - t) : next;
+        }
+        return next;
+    }
+    if (t < F_NEVER) { // POOF
+        th->poof = t < F_POOF2 ? 1 : 2;
+        p->eyes = BUDDY_EYES_WIDE;
+        p->mouth = BUDDY_MOUTH_OPEN;
+        p->antenna = BUDDY_ANTENNA_EXCITED;
+        p->shake = jitter(t - F_POOF, 80);
+        return TICK;
+    }
+    if (t < F_VOID) { // the smoke hangs there. "NEVERMIND"
+        th->poof = 2;
+        th->speech = BUDDY_SPEECH_NEVERMIND;
+        p->eyes = BUDDY_EYES_HALF;
+        p->mouth = BUDDY_MOUTH_FROWN;
+        p->look = 1;
+        return F_VOID - t;
+    }
+    if (t < F_LAND) { // adrift among the pieces, blank
+        const uint32_t u = t - F_VOID;
+        th->drift = (uint8_t)buddy_min_u32(1 + u / F_DRIFT_MS, 255);
+        th->speech = u >= 300 ? BUDDY_SPEECH_WHAT : BUDDY_SPEECH_NONE;
+        p->eyes = u >= 1200 && u < 1350 ? BUDDY_EYES_CLOSED : BUDDY_EYES_OPEN;
+        p->mouth = BUDDY_MOUTH_NEUTRAL;
+        p->tint = BUDDY_TINT_DROWSY;
+        p->antenna = BUDDY_ANTENNA_DIM;
+        p->lift = (uint8_t)buddy_min_u32(u / 120, BUDDY_MAX_HOVER - 1) + ((u / 600) % 2 && u >= 600 ? 1 : 0);
+        p->wobble = (u / 450) % 2 ? 1 : -1;
+        return F_DRIFT_MS - u % F_DRIFT_MS;
+    }
+    const uint32_t u = t - F_LAND; // back down
+    const uint32_t up = BUDDY_MAX_HOVER - 1;
+    p->lift = (uint8_t)(u / 80 < up ? up - u / 80 : 0);
+    p->eyes = BUDDY_FOCUS_MS - t < 150 ? BUDDY_EYES_CLOSED : BUDDY_EYES_OPEN;
+    p->mouth = BUDDY_MOUTH_NEUTRAL;
+    return TICK;
+}
+
 // --- Dispatch -------------------------------------------------------------------------------------------------------
 
 uint32_t buddy_activity_ms(buddy_state_t state)
@@ -592,6 +670,8 @@ uint32_t buddy_activity_ms(buddy_state_t state)
         return BUDDY_CONFIRM_MS;
     case BUDDY_STATE_ZDMW:
         return BUDDY_ZDMW_MS;
+    case BUDDY_STATE_FOCUS:
+        return BUDDY_FOCUS_MS;
     default:
         return 0;
     }
@@ -627,6 +707,9 @@ uint32_t buddy_activity_pose(buddy_state_t state, uint32_t t, buddy_pose_t *pose
     case BUDDY_STATE_ZDMW:
         next = zdmw(t, pose);
         break;
+    case BUDDY_STATE_FOCUS:
+        next = focus(t, pose);
+        break;
     default:
         return UINT32_MAX;
     }
@@ -656,6 +739,8 @@ const char *buddy_activity_doing(buddy_state_t state)
         return "asking";
     case BUDDY_STATE_ZDMW:
         return "fuming";
+    case BUDDY_STATE_FOCUS:
+        return "focusing";
     default:
         return NULL;
     }

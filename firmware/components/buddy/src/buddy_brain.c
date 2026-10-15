@@ -97,6 +97,9 @@ bool buddy_brain_event(buddy_brain_t *b, buddy_event_t ev, uint32_t now_ms)
     case BUDDY_EVENT_ZDMW:
         enter(b, BUDDY_STATE_ZDMW, now_ms);
         return true;
+    case BUDDY_EVENT_FOCUS:
+        enter(b, BUDDY_STATE_FOCUS, now_ms);
+        return true;
     default:
         return false;
     }

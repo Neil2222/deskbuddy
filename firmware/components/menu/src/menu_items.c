@@ -35,6 +35,7 @@ static const menu_item_t k_items[] = {
     {"activity.sneeze", "SNEEZE", MENU_ACTIVITIES, MENU_ICON_SNEEZE, MENU_DO_EVENT, BUDDY_EVENT_SNEEZE, false},
     {"activity.stare", "STARE", MENU_ACTIVITIES, MENU_ICON_STARE, MENU_DO_EVENT, BUDDY_EVENT_STARE, false},
     {"activity.meditate", "MEDITATE", MENU_ACTIVITIES, MENU_ICON_MEDITATE, MENU_DO_EVENT, BUDDY_EVENT_MEDITATE, false},
+    {"activity.focus", "FOCUS", MENU_ACTIVITIES, MENU_ICON_FOCUS, MENU_DO_EVENT, BUDDY_EVENT_FOCUS, false},
     {"activity.peukie", "PEUKIE?", MENU_ACTIVITIES, MENU_ICON_PEUKIE, MENU_DO_EVENT, BUDDY_EVENT_ASK_PEUKIE, false},
 
     {"pdc.zdmw", "ZE DOEN MAAR WAT!", MENU_PDC, MENU_ICON_ZDMW, MENU_DO_PDC, 0, false},

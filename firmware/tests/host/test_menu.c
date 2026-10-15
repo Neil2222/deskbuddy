@@ -216,7 +216,7 @@ void test_menu_activities_and_availability(void)
     menu_status_t no_office = k_idle;
     no_office.office = false;
     CHECK_EQ(slot_of(&m, &no_office, "activity.clock"), -1);
-    CHECK_EQ(menu_page_items(&m, &no_office, items, NULL), 5); // Surprise!, Sneeze, Stare, Meditate, Peukie?
+    CHECK_EQ(menu_page_items(&m, &no_office, items, NULL), 6); // Surprise!, Sneeze, Stare, Meditate, Focus, Peukie?
 
     // Food & Drink: Monster and Water work (and are busy during any activity); the rest is planned.
     menu_open(&m, MENU_FOOD, t += 500);

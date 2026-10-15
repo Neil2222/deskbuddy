@@ -32,6 +32,7 @@
 #include "marquee.h"
 #include "menu.h"
 #include "menu_ask.h"
+#include "menu_thought.h"
 #include "menu_view.h"
 #include "office_clock.h"
 #include "office_switch.h"
@@ -136,6 +137,9 @@ static office_zoom_t s_zoom;
 static menu_ask_t s_ask;
 static const char k_ask_peukie[] = MENU_QUESTION_PEUKIE;
 static const char k_ask_zdmw[] = MENU_QUESTION_ZDMW;
+
+// What goes on in his head (FOCUS), drawn behind him on the stage.
+static menu_thought_t s_thought;
 
 // No scene change under way or asked for: neither Buddy's zoom nor the scene switch.
 static bool scene_settled(const office_switch_t *screen)
@@ -507,6 +511,15 @@ static void render_task(void *arg)
     if (!menu_ask_init(&s_ask, &s_scene, s_layout.stage, head_top, 25)) {
         ESP_LOGW(TAG, "Buddy cannot ask questions (they do not fit the stage)");
     }
+    // Read by the compositor whenever the thought redraws: internal RAM if there is room (as the menu).
+    uint8_t *thought_mem = heap_caps_malloc(MENU_THOUGHT_MEMORY, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (!thought_mem) {
+        thought_mem = heap_caps_malloc(MENU_THOUGHT_MEMORY, MALLOC_CAP_SPIRAM);
+    }
+    const int head_cx = view.home_x0 + view.art->w * view.home_scale / 2;
+    if (!menu_thought_init(&s_thought, &s_scene, s_layout.stage, head_cx, thought_mem, MENU_THOUGHT_MEMORY, 5)) {
+        ESP_LOGW(TAG, "Buddy's thoughts cannot be shown (no memory, or they do not fit the stage)");
+    }
     // The glyph cache is only read when the clock redraws (rarely): PSRAM.
     uint8_t *clock_mem = heap_caps_malloc(OFFICE_CLOCK_MEMORY, MALLOC_CAP_SPIRAM);
     const bool has_office = office_clock_init(&clock, &s_scene, s_layout.screen, clock_mem, OFFICE_CLOCK_MEMORY, 20);
@@ -633,7 +646,8 @@ static void render_task(void *arg)
 #if CONFIG_DESKBUDDY_DEMO_ACTIVITY_S > 0
         if ((int32_t)(now - next_activity) >= 0) {
             static const buddy_event_t k_demo[] = {BUDDY_EVENT_DRINK_WATER, BUDDY_EVENT_SNEEZE, BUDDY_EVENT_STARE,
-                                                   BUDDY_EVENT_MEDITATE, BUDDY_EVENT_ASK_PEUKIE}; // unanswered: sad
+                                                   BUDDY_EVENT_MEDITATE,    BUDDY_EVENT_FOCUS,
+                                                   BUDDY_EVENT_ASK_PEUKIE}; // unanswered: sad
             const buddy_event_t ev = k_demo[demo_activity];
             if (!screen.office && scene_settled(&screen) && buddy_brain_event(&brain, ev, now)) {
                 ESP_LOGI(TAG, "activity %d (demo)", (int)ev);
@@ -735,6 +749,7 @@ static void render_task(void *arg)
             uint32_t ms = 0;
             const bool known = wall_clock(&tm, &ms);
             next = office_clock_apply(&clock, known ? &tm : NULL, ms);
+            menu_thought_apply(&s_thought, NULL);
         } else {
             buddy_pose_t pose;
             next = buddy_brain_tick(&brain, now, &pose); // his brain keeps time, also while the zoom draws him
@@ -746,6 +761,7 @@ static void render_task(void *arg)
             }
             const uint32_t view_next = buddy_view_apply(&view, &pose, now);
             next = view_next < next ? view_next : next;
+            menu_thought_apply(&s_thought, zoom.animate ? NULL : &pose.thought); // not while the camera moves
             if (pose.say != s_msg.said) { // a line of his own on the sign, if it is free
                 s_msg.said = pose.say;
                 if (pose.say && s_msg.ready && !marquee_active(&s_msg.sign) && !s_msg.queued) {

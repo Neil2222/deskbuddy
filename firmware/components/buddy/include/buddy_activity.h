@@ -18,6 +18,10 @@
 //             through the companion (menu_ask.h shows the question; pdc.h owns the request). NEE or 15 s: nothing
 //   zdmw      PDC Manager confirmed the click: a jolt, then a rant (angry eyes, red face, waving hand, bouncing,
 //             anger marks), then a sigh. About 2.6 s
+//   focus     after MonkeyUser's "Focus": deep in thought he builds a plan (A -> B -> C, a flowchart, E) in the air
+//             above him, tongue out. "HEY! DO YOU HAVE 1 SEC?" from off-stage; he glares... POOF, the plan goes up
+//             in smoke. "NEVERMIND". Then he floats, blank, among the pieces: "WHAT WAS I DOING?" (pose.thought;
+//             menu_thought.h draws it). About 9 s
 //
 // Pure logic: no rendering, no clock of its own. Adding one: a buddy_state_t, a buddy_event_t, its length and pose
 // function here, and an item in the touchscreen menu (menu_items.c).
@@ -43,6 +47,7 @@ extern "C" {
 #define BUDDY_SMOKE_BREAK_MS 120000u // after yes: the peukie mood for this long, then back to his mood
 #define BUDDY_CONFIRM_MS 15000u      // "ZE DOEN MAAR WAT?": how long the confirmation waits (then: as if NEE)
 #define BUDDY_ZDMW_MS 2600u          // PDC Manager confirmed the click: his exasperated reaction
+#define BUDDY_FOCUS_MS 9000u
 
 // Lines Buddy puts on the LED sign (buddy_pose_t.say).
 typedef enum {
@@ -67,7 +72,7 @@ const char *buddy_activity_doing(buddy_state_t state);
 
 // The activities by the names the protocol uses (act name=, hello acts=), in display order. The Monster sequence and
 // the tap reaction have their own commands (monster, poke) and are not listed.
-#define BUDDY_ACTS 4
+#define BUDDY_ACTS 5
 const char *buddy_act_name(int i);                       // i < BUDDY_ACTS
 bool buddy_act_parse(const char *name, buddy_event_t *out); // false (and *out untouched) for an unknown name
 

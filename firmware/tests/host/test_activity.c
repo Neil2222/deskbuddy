@@ -20,6 +20,7 @@ static const struct {
     {BUDDY_EVENT_STARE, BUDDY_STATE_STARE, BUDDY_STARE_MS, "staring"},
     {BUDDY_EVENT_MEDITATE, BUDDY_STATE_MEDITATE, BUDDY_MEDITATE_MS, "meditating"},
     {BUDDY_EVENT_ZDMW, BUDDY_STATE_ZDMW, BUDDY_ZDMW_MS, "fuming"}, // PDC Manager confirmed a click
+    {BUDDY_EVENT_FOCUS, BUDDY_STATE_FOCUS, BUDDY_FOCUS_MS, "focusing"},
 };
 #define N_ACTS (int)(sizeof(k_acts) / sizeof(k_acts[0]))
 
@@ -50,6 +51,7 @@ void test_activity_plays_to_the_end_then_the_mood_resumes(void)
         CHECK(!buddy_brain_busy(&b, 1000 + k_acts[i].ms));
         CHECK_EQ(buddy_brain_mood(&b, 1000 + k_acts[i].ms), BUDDY_MOOD_RELAXED);
         CHECK(pose.closeup == 0 && pose.pop == 0 && pose.say == 0 && pose.props.glass == 0);
+        CHECK(pose.thought.plan == 0 && pose.thought.poof == 0 && pose.thought.speech == 0 && pose.thought.drift == 0);
         CHECK(buddy_brain_event(&b, BUDDY_EVENT_POKE, 1000 + k_acts[i].ms + 10));
     }
     CHECK(buddy_activity_doing(BUDDY_STATE_IDLE) == NULL);
@@ -204,7 +206,7 @@ void test_activity_redraws_match_full_redraw_on_the_stage(void)
     uint32_t start = 500;
     bool closeup_seen = false;
     const uint32_t end = 500 + BUDDY_WATER_MS + BUDDY_SNEEZE_MS + BUDDY_STARE_MS + BUDDY_MEDITATE_MS + BUDDY_ZDMW_MS +
-                         N_ACTS * 600 + 1000;
+                         BUDDY_FOCUS_MS + N_ACTS * 600 + 1000;
     for (uint32_t t = 0, k = 0; t < end; k++) {
         if (act < N_ACTS && t >= start && !buddy_brain_busy(&brain, t)) {
             CHECK(buddy_brain_event(&brain, k_acts[act].ev, t));

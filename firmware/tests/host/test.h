@@ -110,7 +110,9 @@ extern int g_test_failed;
     X(pdc_lease_and_one_request_per_tap)             \
     X(pdc_sign_lines)                                \
     X(pdc_menu_only_while_offered)                   \
-    X(pdc_confirmation_and_reaction)
+    X(pdc_confirmation_and_reaction)                 \
+    X(focus_tells_the_comic_in_order)                \
+    X(focus_thoughts_redraw_on_the_stage)
 
 #define X(name) void test_##name(void);
 TEST_LIST

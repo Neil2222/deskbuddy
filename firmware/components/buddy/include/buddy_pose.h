@@ -24,6 +24,7 @@ typedef enum {
     BUDDY_STATE_SAD,       // the answer was no (or none came): briefly sad
     BUDDY_STATE_CONFIRM,   // asks to confirm a ZDMW click ("ZE DOEN MAAR WAT?"), waits for buddy_brain_answer
     BUDDY_STATE_ZDMW,      // PDC Manager confirmed the click: exasperated, briefly
+    BUDDY_STATE_FOCUS,     // deep in thought, building a plan... until someone asks "do you have 1 sec?"
 } buddy_state_t;
 
 typedef enum {
@@ -212,6 +213,24 @@ typedef struct {
     buddy_particle_t particle[BUDDY_PARTICLES];
 } buddy_props_t;
 
+// What goes on in his head, drawn on the stage around him (FOCUS, after the MonkeyUser comic): the plan he builds,
+// how it goes up in smoke, and the words around it.
+typedef enum {
+    BUDDY_SPEECH_NONE,
+    BUDDY_SPEECH_HEY,       // someone off-stage: "HEY! DO YOU HAVE 1 SEC?"
+    BUDDY_SPEECH_NEVERMIND, // ...and then: "NEVERMIND"
+    BUDDY_SPEECH_WHAT,      // Buddy, lost: "WHAT WAS I DOING?"
+} buddy_speech_t;
+
+#define BUDDY_PLAN_STEPS 8
+
+typedef struct {
+    uint8_t plan;   // how much of the plan is drawn: 0 nothing .. BUDDY_PLAN_STEPS (nodes, arrows, a flowchart)
+    uint8_t poof;   // the plan goes up in smoke: 0 not, 1..2 the burst
+    uint8_t speech; // buddy_speech_t
+    uint8_t drift;  // what is left of the plan floats about him: 0 not, 1.. each step a little further
+} buddy_thought_t;
+
 typedef struct {
     buddy_state_t state;
     buddy_eyes_t eyes;
@@ -227,6 +246,7 @@ typedef struct {
     uint8_t say;  // buddy_say_t (buddy_activity.h): a line for the LED sign, from the moment it appears; 0 none
     buddy_tint_t tint;
     buddy_props_t props;
+    buddy_thought_t thought;
 } buddy_pose_t;
 
 #ifdef __cplusplus

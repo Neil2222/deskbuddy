@@ -38,6 +38,7 @@ public static class Activities
         ActTile("Sneeze", ActivityKind.Action, "face-sneeze", "sneeze"),
         ActTile("Stare", ActivityKind.Action, "face-stare", "stare"),
         ActTile("Meditate", ActivityKind.Action, "face-meditate", "meditate"),
+        ActTile("Focus", ActivityKind.Action, "face-focus", "focus"),
         new("Monster", ActivityKind.Food, "can", "monster", "monster", Reaction: "happy"),
         ActTile("Water", ActivityKind.Food, "glass", "water"),
         MoodTile("Idle", "face-neutral", DeviceMood.Idle),

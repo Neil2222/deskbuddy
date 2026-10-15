@@ -19,6 +19,7 @@
 #include "marquee.h"
 #include "menu.h"
 #include "menu_ask.h"
+#include "menu_thought.h"
 #include "menu_view.h"
 #include "office_clock.h"
 #include "office_zoom.h"
@@ -406,6 +407,8 @@ int main(int argc, char **argv)
     static uint8_t menu_mem[MENU_VIEW_MEMORY];
     static marquee_t marquee;
     static menu_ask_t ask;
+    static menu_thought_t thought;
+    static uint8_t thought_mem[MENU_THOUGHT_MEMORY];
     s_layout = layout_compute(W, H, STAGE_PERCENT, false, ALIGN);
     if (!gfx_scene_init(&s_scene, W, H, layout_background, &s_layout, strip, 16 * 1024, ALIGN) ||
         !buddy_view_init(&s_view, &s_scene, s_layout.stage, 10, 0) ||
@@ -413,7 +416,9 @@ int main(int argc, char **argv)
         !menu_view_init(&s_menu_view, &s_scene, &s_menu, menu_mem, sizeof(menu_mem), 10) ||
         !office_clock_init(&clock, &s_scene, s_layout.screen, clock_mem, sizeof(clock_mem), 20) ||
         !marquee_init(&marquee, &s_scene, 30) ||
-        !menu_ask_init(&ask, &s_scene, s_layout.stage, s_view.home_y0 - BUDDY_MAX_LIFT * s_view.home_scale, 25)) {
+        !menu_ask_init(&ask, &s_scene, s_layout.stage, s_view.home_y0 - BUDDY_MAX_LIFT * s_view.home_scale, 25) ||
+        !menu_thought_init(&thought, &s_scene, s_layout.stage, s_view.home_x0 + s_view.art->w * s_view.home_scale / 2,
+                           thought_mem, sizeof(thought_mem), 5)) {
         fprintf(stderr, "scene setup failed\n");
         return 1;
     }
@@ -581,6 +586,24 @@ int main(int argc, char **argv)
     ask.pressed = MENU_ANSWER_NONE;
     menu_ask_apply(&ask, NULL, 0, BUDDY_ASK_MS);
     menu_view_apply(&s_menu_view, &s_menu, &idle, 40000);
+
+    // FOCUS, panel by panel: the plan growing, the interruption, POOF, NEVERMIND, and the void.
+    static const uint32_t k_focus[] = {1000, 2200, 3000, 4100, 4700, 5000, 5900, 7200, 8000};
+    const menu_status_t focusing = {.mood = BUDDY_MOOD_IDLE, .busy = true, .doing = "focusing", .office = true};
+    for (unsigned i = 0; i < sizeof(k_focus) / sizeof(k_focus[0]); i++) {
+        buddy_pose_t pose = {.state = BUDDY_STATE_FOCUS};
+        buddy_activity_pose(BUDDY_STATE_FOCUS, k_focus[i], &pose);
+        buddy_view_apply(&s_view, &pose, k_focus[i]);
+        menu_thought_apply(&thought, &pose.thought);
+        menu_view_apply(&s_menu_view, &s_menu, &focusing, 50000 + k_focus[i]);
+        char name[32];
+        snprintf(name, sizeof(name), "act_focus_%04u", (unsigned)k_focus[i]);
+        if (!shot(name)) {
+            return 1;
+        }
+    }
+    menu_thought_apply(&thought, NULL);
+    menu_view_apply(&s_menu_view, &s_menu, &idle, 60000);
     const buddy_pose_t rest = {.eyes = BUDDY_EYES_OPEN};
     buddy_view_apply(&s_view, &rest, 0);
 

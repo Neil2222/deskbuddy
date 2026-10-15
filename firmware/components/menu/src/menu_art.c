@@ -352,6 +352,7 @@ void menu_art_icon_size(menu_icon_t icon, uint8_t arg, int *w, int *h)
     case MENU_ICON_SNEEZE:
     case MENU_ICON_STARE:
     case MENU_ICON_MEDITATE:
+    case MENU_ICON_FOCUS:
     case MENU_ICON_PEUKIE:
     case MENU_ICON_ZDMW:
         *w = MENU_FACE_W;
@@ -388,6 +389,9 @@ void menu_art_icon(menu_canvas_t *c, menu_icon_t icon, uint8_t arg, int cx, int 
         return;
     case MENU_ICON_MEDITATE:
         menu_art_face(c, buddy_act_face(BUDDY_EVENT_MEDITATE), false, cx, cy);
+        return;
+    case MENU_ICON_FOCUS:
+        menu_art_face(c, buddy_act_face(BUDDY_EVENT_FOCUS), false, cx, cy);
         return;
     case MENU_ICON_PEUKIE: // the question offers a smoke: his smoking face
         menu_art_face(c, buddy_mood_face(BUDDY_MOOD_PEUKIE), false, cx, cy);

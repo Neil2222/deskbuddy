@@ -36,6 +36,7 @@ typedef enum {
     BUDDY_EVENT_ASK_PEUKIE = 7,    // "PEUKIE ROKEN?": he asks and waits for buddy_brain_answer()
     BUDDY_EVENT_ASK_ZDMW = 8,      // "ZE DOEN MAAR WAT?": confirm a ZDMW click; buddy_brain_answer() ends it
     BUDDY_EVENT_ZDMW = 9,          // PDC Manager confirmed the click: his reaction
+    BUDDY_EVENT_FOCUS = 10,
 } buddy_event_t;
 
 typedef struct {
