@@ -61,6 +61,7 @@ typedef enum {
     BUDDY_TINT_ZAP,    // electrocuted negative flash
     BUDDY_TINT_FURY,   // face screen flushes red
     BUDDY_TINT_DROWSY, // face glow turned down
+    BUDDY_TINT_DARK,   // face screen switched off (going into Office Mode): the clock's background colour
     BUDDY_TINT_COUNT,
 } buddy_tint_t;
 

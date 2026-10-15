@@ -52,6 +52,8 @@ typedef struct {
     int title_shown; // category; -1: not drawn
     int face_shown;  // buddy_mood_t, BUDDY_MOOD_COUNT for the charging face; -1: not drawn
     uint32_t footer_shown; // a summary of what the footer shows; 0: not drawn
+    bool closing;          // folding away (menu_view_close) since close_at
+    uint32_t close_at;
 } menu_view_t;
 
 // Uses mem (MENU_VIEW_MEMORY bytes, kept for the view's lifetime; fast memory is best, the compositor reads it) and
@@ -59,8 +61,13 @@ typedef struct {
 // Returns false if the memory is too small, the scene is full or the art is malformed.
 bool menu_view_init(menu_view_t *v, gfx_scene_t *scene, const menu_t *m, uint8_t *mem, size_t mem_size, int z);
 
-// Hides the whole menu (Office Mode), or shows it again: the next apply redraws everything as it is then.
+// Hides the whole menu at once, or shows it again: the next apply redraws everything as it is then (after
+// menu_reveal(), its tiles flip in one by one).
 void menu_view_show(menu_view_t *v, bool visible);
+
+// Folds the menu away (Buddy going into Office Mode): its buttons vanish one by one, MENU_FLIP_MS apart as they flip
+// in, then the header and footer; then it is hidden as with menu_view_show(v, false).
+void menu_view_close(menu_view_t *v, uint32_t now);
 
 // Brings the sprites up to date with the menu and Buddy's state at now. Returns ms until the view changes next on
 // its own (a flip, a blink, the active light); UINT32_MAX when nothing is scheduled.

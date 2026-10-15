@@ -48,7 +48,7 @@ if(NOT MSVC)
 endif()
 
 add_executable(host_tests main.c test_util.c test_dirty.c test_scene.c test_repair.c test_anim.c test_buddy.c
-               test_monster.c test_mood.c test_office.c test_link.c test_marquee.c test_menu.c)
+               test_monster.c test_mood.c test_office.c test_link.c test_marquee.c test_menu.c test_zoom.c)
 target_link_libraries(host_tests PRIVATE deskbuddy_core)
 target_compile_options(host_tests PRIVATE ${WARNINGS})
 

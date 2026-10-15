@@ -83,6 +83,12 @@ void menu_open(menu_t *m, menu_category_t category, uint32_t now)
     show_page(m, category < MENU_CATEGORY_COUNT ? category : MENU_HOME, 0, now);
 }
 
+void menu_reveal(menu_t *m, uint32_t now)
+{
+    menu_cancel(m);
+    show_page(m, m->category, m->page, now);
+}
+
 int menu_page_items(const menu_t *m, const menu_status_t *st, const menu_item_t *out[MENU_SLOTS], int *pages)
 {
     const int per_page = slots_of(layout_of(m));

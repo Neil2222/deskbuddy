@@ -77,6 +77,9 @@ bool buddy_view_init(buddy_view_t *v, gfx_scene_t *scene, gfx_rect_t stage, int 
         return false;
     }
     v->anim_start = now_ms;
+    v->home_scale = v->scale;
+    v->home_x0 = v->x0;
+    v->home_y0 = v->y0;
     v->rig_px.part[0].cur = v->rig_px.part[1].cur = -1;
 
     const buddy_props_art_t *p = &a->props;
@@ -597,4 +600,28 @@ bool buddy_view_hit(const buddy_view_t *v, int x, int y)
     r.w += 2 * margin;
     r.h += 2 * margin;
     return gfx_rect_contains_point(r, x, y);
+}
+
+void buddy_view_camera(buddy_view_t *v, int scale, int x0, int y0)
+{
+    v->scale = scale < 1 ? 1 : scale > 127 ? 127 : scale; // FX clouds are drawn at twice the scale (uint8_t)
+    v->x0 = x0;
+    v->y0 = y0;
+    gfx_sprite_t *all[] = {&v->shadow, &v->torso,  &v->head,   &v->antenna, &v->eye[0], &v->eye[1],
+                           &v->mouth,  &v->can_shadow, &v->can, &v->port,    &v->rig[0], &v->rig[1],
+                           &v->battery, &v->alert};
+    for (unsigned i = 0; i < sizeof(all) / sizeof(all[0]); i++) {
+        all[i]->scale = (uint8_t)v->scale;
+    }
+    for (int i = 0; i < BUDDY_MAX_BOLTS; i++) {
+        v->bolt[i].scale = (uint8_t)v->scale;
+    }
+    for (int i = 0; i < BUDDY_PARTICLES; i++) {
+        v->part[i].scale = (uint8_t)v->scale;
+    }
+}
+
+void buddy_view_camera_home(buddy_view_t *v)
+{
+    buddy_view_camera(v, v->home_scale, v->home_x0, v->home_y0);
 }

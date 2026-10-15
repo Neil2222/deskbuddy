@@ -286,6 +286,7 @@ bool menu_view_init(menu_view_t *v, gfx_scene_t *scene, const menu_t *m, uint8_t
 void menu_view_show(menu_view_t *v, bool visible)
 {
     v->visible = visible;
+    v->closing = false;
     if (!visible) {
         for (int i = 0; i < MENU_SLOTS; i++) {
             set_hidden(&v->slot[i], true);
@@ -299,10 +300,39 @@ void menu_view_show(menu_view_t *v, bool visible)
     forget(v);
 }
 
+void menu_view_close(menu_view_t *v, uint32_t now)
+{
+    if (v->visible && !v->closing) {
+        v->closing = true;
+        v->close_at = now;
+    }
+}
+
+// Folding away: the buttons vanish one by one, then the rest. Returns ms until the next one goes.
+static uint32_t apply_close(menu_view_t *v, uint32_t now)
+{
+    const uint32_t t = now - v->close_at;
+    set_hidden(&v->led, true);
+    for (int i = 0; i < MENU_SLOTS; i++) {
+        if (t < (uint32_t)i * MENU_FLIP_MS) {
+            return (uint32_t)i * MENU_FLIP_MS - t;
+        }
+        set_slot(v, i, NULL, MENU_GRID, 0);
+    }
+    if (t < MENU_SLOTS * MENU_FLIP_MS) {
+        return MENU_SLOTS * MENU_FLIP_MS - t;
+    }
+    menu_view_show(v, false);
+    return UINT32_MAX;
+}
+
 uint32_t menu_view_apply(menu_view_t *v, const menu_t *m, const menu_status_t *st, uint32_t now)
 {
     if (!v->visible) {
         return UINT32_MAX;
+    }
+    if (v->closing) {
+        return apply_close(v, now);
     }
     uint32_t next = UINT32_MAX;
     const menu_item_t *items[MENU_SLOTS];

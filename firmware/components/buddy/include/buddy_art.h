@@ -19,6 +19,7 @@ enum {
     BUDDY_PX_BODY = 2,
     BUDDY_PX_BODY_SHADE = 3,
     BUDDY_PX_WHITE = 4,
+    BUDDY_PX_SCREEN = 5, // the face screen
     BUDDY_PX_YELLOW = 8,
     BUDDY_PX_NEON = 12,
     BUDDY_PX_CABLE = 18,

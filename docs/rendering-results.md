@@ -11,7 +11,7 @@ All numbers come from the device's own `PERF` logs (5-second windows). The bring
 | `components/buddy` | Placeholder robot: behavior state machine and events (`buddy_brain`), the Monster Energy sequence (`buddy_monster`), ASCII programmer art (`buddy_art`), pose-to-sprite mapping including the procedural arm and cable (`buddy_view`) | No (host-tested) |
 | `components/layout` | Character stage (default 65 % of the width, rounded to 672 px) and the control panel (352 px); background painting | No (host-tested) |
 | `components/menu` | The touchscreen menu in the control panel: item table, navigation and touch rules (`menu`), and its view: one sprite per button at 2x, redrawn in place only when it changes, tiles flipping in one by one on a page change (`menu_view`) | No (host-tested) |
-| `components/office` | Office Mode: antialiased stroke font rasterized into indexed images, the desk-clock face, the moon art, and the scene switch (`office_switch`) | No (host-tested) |
+| `components/office` | Office Mode: antialiased stroke font rasterized into indexed images, the desk-clock face, the moon art, the scene switch (`office_switch`), and Buddy's zoom into the clock and back (`office_zoom`: a camera and a pose timeline on top of the switch) | No (host-tested) |
 | `components/display` | Application-owned frame buffers, the scanout fill, and the buffer-swap proof | Yes |
 | `deskbuddy/main` | Touch task (GT911 → events), serial link to the Windows companion (commands → events, replies), render loop, Office Mode switching, backlight at boot, wall-clock time with the companion's time zone, layout configuration (Kconfig), performance log, verify mode | Yes |
 
@@ -108,6 +108,23 @@ The switch between DeskBuddy and the clock repaints the whole screen: the scene 
   3. PWM register only, as in Waveshare's brightness-slider example (enable bit set once): the brightness never changed at all, and "off" did not go dark.
 
   An ESPHome user on the same board reports dimming that works a couple of times after a reboot and then stops. The expander's registers do not read back reliably (values lag or come from another register), so its state cannot be checked from firmware. Decision: the backlight is set once at boot (PWM register, then the enable bit, as in the original bring-up) and never changed afterwards; Office Mode is not dimmed.
+
+### Zooming into Office Mode (2026-10-15)
+Buddy's head comes toward the viewer until his face screen fills the display, goes dark and becomes the clock; leaving reverses it with a wake-up. The zoom is a camera on the view: every sprite is drawn at a larger integer scale (8 → 75) by the compositor, which fills scaled sprites in runs, so a frame costs its area and no image is scaled or allocated. The large frames are full-screen redraws, which the measurements below show to be as safe as the scene switch's own.
+
+Measured on the device over 12 transitions (6 in, 6 out; `ZOOM` log lines), including one during a Monster sequence and a burst of contrary requests:
+
+| | Value |
+|---|---|
+| Duration | in 1.40–1.50 s (notice 280 ms, zoom 660 ms, eyes closing and dark, then the clock's two-frame redraw); out 1.50–1.58 s (eyes opening, zoom 660 ms, stretch and blink) |
+| Frames | 24–29 per transition, 15–20 per second |
+| Render time | average 27–37 ms, largest frames (full screen) 61–65 ms |
+| Redraw | average 270–320 k px, largest 614,400 px (the whole screen) |
+| Scanout resyncs | 0 in every transition |
+| Longest bounce fill | 427–430 µs per transition (the scene switch's two full frames alone: 421–430 µs; budget 449 µs) |
+
+- **Why it holds:** the frame rate limits itself (a full frame takes about 60 ms, two scanout periods), and the per-row cache writeback keeps PSRAM writes out of the bounce fills. The average redraw (about half the screen over 24–29 frames) suggests roughly half of a transition's frames are full-screen.
+- **No seam:** the "screen off" tint of the face is exactly the clock's background, so the swap to the clock changes only the digits (17 k px, host test).
 
 ### Message marquee (2026-10-14)
 The LED sign (`components/marquee`) is one sprite of 636x84 px; each update redraws its rectangle (56,448 px after alignment, plus the robot's own animation). It moves one LED column per 40 ms (25 redraws a second, about 4 characters a second).

@@ -33,6 +33,7 @@
 #include "menu_view.h"
 #include "office_clock.h"
 #include "office_switch.h"
+#include "office_zoom.h"
 #include "serial_link.h"
 #include "sdkconfig.h"
 
@@ -125,6 +126,29 @@ static void verify_frame(const gfx_surface_t *frame, perf_t *perf)
 }
 #endif
 
+// Buddy's zoom into Office Mode and back (office_zoom.h); all Office Mode requests go here.
+static office_zoom_t s_zoom;
+
+// No scene change under way or asked for: neither Buddy's zoom nor the scene switch.
+static bool scene_settled(const office_switch_t *screen)
+{
+    return !office_zoom_busy(&s_zoom) && !office_switch_busy(screen) && screen->want_office == screen->office &&
+           s_zoom.want_office == screen->office;
+}
+
+// What a zoom cost, like a performance window: everything since the window was restarted for it.
+static void zoom_log(const char *way, const perf_t *p, int64_t window_us)
+{
+    display_stats_t d;
+    display_stats_take(&d);
+    const uint32_t n = p->renders ? p->renders : 1;
+    ESP_LOGI(TAG,
+             "ZOOM %s: %" PRIu32 " frames in %.0f ms (%.1f/s) | render avg %.1f max %.1f ms | redraw avg %" PRId64
+             " max %d px | scanout resync %" PRIu32 ", fill max %" PRIu32 " us",
+             way, p->renders, window_us / 1000.0, p->renders / (window_us / 1e6), p->render_us_sum / 1000.0 / n,
+             p->render_us_max / 1000.0, p->px_sum / n, p->px_max, d.resyncs, d.fill_us_max);
+}
+
 static void perf_log(const perf_t *p, int64_t window_us)
 {
     display_stats_t d;
@@ -154,7 +178,7 @@ static menu_status_t menu_status(buddy_brain_t *brain, bool has_office, uint32_t
 
 // Carries out what a tap in the menu asks for, the way the companion's commands do (so `evt mood` and `evt mode`
 // tell the companion, whichever side changed it).
-static void run_menu_action(const menu_result_t *r, buddy_brain_t *brain, office_switch_t *screen, uint32_t now)
+static void run_menu_action(const menu_result_t *r, buddy_brain_t *brain, uint32_t now)
 {
     switch (r->action) {
     case MENU_DO_OPEN:
@@ -170,7 +194,7 @@ static void run_menu_action(const menu_result_t *r, buddy_brain_t *brain, office
         }
         break;
     case MENU_DO_OFFICE:
-        office_switch_request(screen, true);
+        office_zoom_request(&s_zoom, true); // he zooms into the clock
         ESP_LOGI(TAG, "Office Mode on");
         break;
     default:
@@ -218,11 +242,12 @@ static const char *mode_name(const office_switch_t *screen, const buddy_brain_t 
     return brain->state == BUDDY_STATE_MONSTER ? "monster" : "normal";
 }
 
-// A message can go up now: the screen is lit, the sign is free, and no Monster sequence would be interrupted (in
-// Office Mode the character is paused, so the sign appears under the clock right away).
+// A message can go up now: the screen is lit, the sign is free, no zoom is under way, and no Monster sequence would
+// be interrupted (in Office Mode the character is paused, so the sign appears under the clock right away).
 static bool msg_can_start(const office_switch_t *screen, const buddy_brain_t *brain, bool lit)
 {
-    return lit && !marquee_active(&s_msg.sign) && (screen->office || brain->state != BUDDY_STATE_MONSTER);
+    return lit && !marquee_active(&s_msg.sign) && !office_zoom_busy(&s_zoom) &&
+           (screen->office || brain->state != BUDDY_STATE_MONSTER);
 }
 
 static void msg_start(uint32_t id, const char *text, const office_switch_t *screen, buddy_brain_t *brain,
@@ -258,8 +283,7 @@ static void run_command(const link_command_t *c, buddy_brain_t *brain, office_sw
     case LINK_CMD_POKE:
     case LINK_CMD_MONSTER: {
         const buddy_event_t be = c->cmd == LINK_CMD_POKE ? BUDDY_EVENT_POKE : BUDDY_EVENT_DRINK_MONSTER;
-        const bool switching = office_switch_busy(screen) || screen->want_office != screen->office;
-        if (!lit || screen->office || switching || !buddy_brain_event(brain, be, now)) {
+        if (!lit || screen->office || !scene_settled(screen) || !buddy_brain_event(brain, be, now)) {
             snprintf(body, sizeof(body), "err busy mode=%s", mode_name(screen, brain));
         } else {
             ESP_LOGI(TAG, "%s (companion)", c->cmd == LINK_CMD_POKE ? "Poke" : "Monster time");
@@ -272,7 +296,7 @@ static void run_command(const link_command_t *c, buddy_brain_t *brain, office_sw
         } else if (!lit) {
             snprintf(body, sizeof(body), "err busy mode=%s", mode_name(screen, brain));
         } else {
-            office_switch_request(screen, c->u.office);
+            office_zoom_request(&s_zoom, c->u.office); // the same way in and out as from the menu and a tap
             ESP_LOGI(TAG, "Office Mode %s (companion)", c->u.office ? "on" : "off");
         }
         break;
@@ -389,6 +413,7 @@ static void render_task(void *arg)
         ESP_LOGW(TAG, "Office Mode unavailable (no memory for the clock)");
     }
     office_switch_init(&screen);
+    office_zoom_init(&s_zoom);
     s_msg.ready = marquee_init(&s_msg.sign, &s_scene, 30); // above everything
     if (!s_msg.ready) {
         ESP_LOGW(TAG, "no room in the scene for the message marquee");
@@ -426,8 +451,9 @@ static void render_task(void *arg)
                     run_command(&ev.command, &brain, &screen, has_office, presented >= 2, now_ms());
                     continue;
                 }
-                // Touches count once the screen is lit and no scene switch is under way or requested.
-                if (presented < 2 || office_switch_busy(&screen) || screen.want_office != screen.office) {
+                // Touches count once the screen is lit and no scene change (Buddy's zoom, the switch) is under way
+                // or asked for: taps during a transition are dropped, so repeated taps cannot pile up.
+                if (presented < 2 || !scene_settled(&screen)) {
                     continue;
                 }
                 // In Office Mode any tap (on release) brings DeskBuddy back. Otherwise the menu takes the touches in
@@ -435,7 +461,7 @@ static void render_task(void *arg)
                 const uint32_t t = now_ms();
                 if (screen.office) {
                     if (ev.type == INPUT_UP) {
-                        office_switch_request(&screen, false);
+                        office_zoom_request(&s_zoom, false); // he wakes up
                         ESP_LOGI(TAG, "Office Mode off");
                     }
                     continue;
@@ -446,7 +472,7 @@ static void render_task(void *arg)
                                               : ev.type == INPUT_MOVE ? MENU_TOUCH_MOVE
                                                                       : MENU_TOUCH_UP;
                     const menu_result_t r = menu_touch(&menu, type, ev.x, ev.y, &st, t);
-                    run_menu_action(&r, &brain, &screen, t);
+                    run_menu_action(&r, &brain, t);
                     if (menu.down) {
                         if (ev.type == INPUT_DOWN && !pending_touch_us) {
                             pending_touch_us = ev.irq_us; // the button sinks in: the reaction to measure
@@ -478,11 +504,32 @@ static void render_task(void *arg)
 #endif
 #if CONFIG_DESKBUDDY_DEMO_OFFICE_S > 0
         if ((int32_t)(now - next_office) >= 0 && has_office && presented >= 2) {
-            office_switch_request(&screen, !screen.want_office);
-            ESP_LOGI(TAG, "Office Mode %s (demo)", screen.want_office ? "on" : "off");
+            office_zoom_request(&s_zoom, !s_zoom.want_office);
+            ESP_LOGI(TAG, "Office Mode %s (demo)", s_zoom.want_office ? "on" : "off");
             next_office = now + CONFIG_DESKBUDDY_DEMO_OFFICE_S * 1000u;
         }
 #endif
+
+        // Buddy's zoom into Office Mode and back: it asks the scene switch for the clock or for Buddy.
+        const office_zoom_step_t zoom = office_zoom_step(&s_zoom, &screen, now);
+        if (zoom.menu_hide) {
+            menu_cancel(&menu);
+            menu_view_close(&menu_view, now);
+            perf_log(&perf, esp_timer_get_time() - perf_since); // the next window covers exactly the zoom in
+            memset(&perf, 0, sizeof(perf));
+            perf_since = esp_timer_get_time();
+        }
+        if (zoom.menu_show && has_menu) {
+            menu_view_show(&menu_view, true);
+            menu_reveal(&menu, now); // the page he left, flipping back in
+        }
+        if (zoom.back) {
+            buddy_view_camera_home(&view);
+            buddy_brain_rest(&brain, now); // his mood carries on (a mood chosen meanwhile shows now)
+            zoom_log("out", &perf, esp_timer_get_time() - perf_since);
+            memset(&perf, 0, sizeof(perf));
+            perf_since = esp_timer_get_time();
+        }
 
         // Scene switch: the scene changes and both buffers are redrawn.
         const office_step_t step = office_switch_step(&screen);
@@ -495,12 +542,11 @@ static void render_task(void *arg)
                 office_clock_show(&clock, true);
                 s_scene.background = office_background;
                 s_scene.background_ctx = NULL;
-            } else {
+            } else { // his dark face first (the zoom draws it); the menu comes back as he steps back
                 office_clock_show(&clock, false);
-                menu_view_show(&menu_view, has_menu);
                 s_scene.background = layout_background;
                 s_scene.background_ctx = &s_layout;
-                buddy_brain_rest(&brain, now);
+                buddy_brain_rest(&brain, now); // a paused Monster sequence is dropped (the mode is normal again)
             }
         }
         if (step.redraw_all) {
@@ -510,10 +556,15 @@ static void render_task(void *arg)
         }
         if (step.redrawn) {
             // Like at boot: report the full redraws separately, so the performance windows cover normal frames.
-            display_stats_t sw;
-            display_stats_take(&sw);
-            ESP_LOGI(TAG, "%s drawn (%" PRIu32 " scanout resyncs, fill max %" PRIu32 " us)",
-                     screen.office ? "clock" : "DeskBuddy", sw.resyncs, sw.fill_us_max);
+            // Into the clock, the window started with the zoom: the line covers the whole way in.
+            if (screen.office) {
+                zoom_log("in", &perf, esp_timer_get_time() - perf_since);
+            } else {
+                display_stats_t sw;
+                display_stats_take(&sw);
+                ESP_LOGI(TAG, "DeskBuddy drawn (%" PRIu32 " scanout resyncs, fill max %" PRIu32 " us)", sw.resyncs,
+                         sw.fill_us_max);
+            }
             memset(&perf, 0, sizeof(perf));
             perf_since = esp_timer_get_time();
         }
@@ -526,7 +577,13 @@ static void render_task(void *arg)
             next = office_clock_apply(&clock, known ? &tm : NULL, ms);
         } else {
             buddy_pose_t pose;
-            next = buddy_brain_tick(&brain, now, &pose);
+            next = buddy_brain_tick(&brain, now, &pose); // his brain keeps time, also while the zoom draws him
+            if (zoom.animate) {
+                const office_camera_t home = {view.home_scale, view.home_x0, view.home_y0};
+                office_camera_t cam;
+                next = office_zoom_frame(&s_zoom, now, home, s_layout.screen, &cam, &pose);
+                buddy_view_camera(&view, cam.scale, cam.x0, cam.y0);
+            }
             const uint32_t view_next = buddy_view_apply(&view, &pose, now);
             next = view_next < next ? view_next : next;
             if (has_menu) {
@@ -536,6 +593,7 @@ static void render_task(void *arg)
             }
         }
         next = step.next_ms < next ? step.next_ms : next;
+        next = step.redrawn ? 0 : next; // the zoom carries on (and a waiting message goes up) right away
         next = !light_ok && next > BACKLIGHT_RETRY_MS ? BACKLIGHT_RETRY_MS : next;
 
         // The message sign: above the robot, or below the clock in Office Mode (which stays on).

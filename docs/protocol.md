@@ -31,7 +31,7 @@ DeskBuddy and the Windows companion (`companion/`) talk over the board's **UART*
 | `status` | | `ok mode=<normal\|office\|monster> mood=<mood> time=<set\|unset> msg=<showing\|idle> queued=<0\|1> uptime=<s>` |
 | `poke` | | `ok`, or `err busy mode=<mode>` (Office Mode, Monster running, screen not up yet) |
 | `monster` | | `ok`, or `err busy mode=<mode>` |
-| `mode.set` | `mode=office\|normal` | `ok` (switches like *Office* in the touchscreen menu / a tap on the clock), or `err unavailable` |
+| `mode.set` | `mode=office\|normal` | `ok` (switches like *Office* in the touchscreen menu / a tap on the clock: Buddy zooms into the clock or out of it, about 1.5 s; `evt mode` follows when the new scene is on screen; a request during a zoom is carried out after it), or `err unavailable` |
 | `time.set` | `utc=<s> [ms=<0-999>] off=<min> [next=<utc s> next_off=<min>]` | `ok` |
 | `msg.show` | `id=<1-4294967295> [style=marquee] text=<percent-encoded UTF-8>` | `ok` (on the sign now), `ok queued=1` (waits its turn), `ok dup=1` (this id was already taken), `err busy mode=<mode>` (one is already waiting), `err unsupported` (unknown style), `err bad_args` |
 | `mood.set` | `name=<mood> [secs=<1-86400>]` | `ok`, `err unsupported` (a mood this firmware does not have), `err bad_args` |

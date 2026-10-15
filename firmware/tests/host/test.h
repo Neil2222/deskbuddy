@@ -90,7 +90,12 @@ extern int g_test_failed;
     X(menu_touch_needs_a_clean_tap)                  \
     X(menu_pages_and_swipes)                         \
     X(menu_view_follows_the_state)                   \
-    X(menu_redraws_match_full_redraw)
+    X(menu_redraws_match_full_redraw)                \
+    X(zoom_face_fills_the_screen_in_the_clock_colour) \
+    X(zoom_camera_grows_from_his_head_and_back)      \
+    X(zoom_enters_and_leaves_through_the_scene_switch) \
+    X(zoom_survives_rapid_and_contrary_requests)     \
+    X(zoom_whole_loop_into_the_clock_and_back)
 
 #define X(name) void test_##name(void);
 TEST_LIST

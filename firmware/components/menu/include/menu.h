@@ -198,6 +198,9 @@ bool menu_init(menu_t *m, const menu_def_t *def, gfx_rect_t area, uint32_t now);
 // Opens a category's first page.
 void menu_open(menu_t *m, menu_category_t category, uint32_t now);
 
+// Plays the current page's flip-in again (when the menu comes back after Office Mode), keeping page and category.
+void menu_reveal(menu_t *m, uint32_t now);
+
 // The items on the current page (up to MENU_SLOTS, in slot order) and the number of pages. Hidden items take no
 // slot; pages beyond the last are clamped.
 int menu_page_items(const menu_t *m, const menu_status_t *st, const menu_item_t *out[MENU_SLOTS], int *pages);

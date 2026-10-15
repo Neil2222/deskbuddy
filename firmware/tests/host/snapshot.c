@@ -19,6 +19,7 @@
 #include "menu.h"
 #include "menu_view.h"
 #include "office_clock.h"
+#include "office_zoom.h"
 #include "png.h"
 
 enum { W = 1024, H = 600, ALIGN = 32, STAGE_PERCENT = 65 }; // firmware defaults (Kconfig)
@@ -245,6 +246,126 @@ static bool menu_screens(void)
     return write("menu_sheet", &sheet);
 }
 
+// --- The zoom into Office Mode and back --------------------------------------------------------------------------
+
+enum { ZOOM_STEP_MS = 40, ZOOM_COLS = 6, ZOOM_TILE_W = W / 2, ZOOM_TILE_H = H / 2 };
+enum { ZOOM_ROWS = (OFFICE_LEAVE_MS / ZOOM_STEP_MS + 2 + ZOOM_COLS - 1) / ZOOM_COLS };
+static gfx_color_t s_zoom_sheet[ZOOM_COLS * ZOOM_TILE_W * ZOOM_ROWS * ZOOM_TILE_H];
+
+// Adds the last full render, halved, as tile i of the zoom sheet (white top/left border).
+static void zoom_tile(int i)
+{
+    const int sheet_w = ZOOM_COLS * ZOOM_TILE_W, ox = (i % ZOOM_COLS) * ZOOM_TILE_W, oy = (i / ZOOM_COLS) * ZOOM_TILE_H;
+    for (int y = 0; y < ZOOM_TILE_H; y++) {
+        for (int x = 0; x < ZOOM_TILE_W; x++) {
+            s_zoom_sheet[(size_t)(oy + y) * sheet_w + ox + x] =
+                x == 0 || y == 0 ? GFX_RGB(255, 255, 255) : s_px[(size_t)(2 * y) * W + 2 * x];
+        }
+    }
+}
+
+static bool zoom_sheet(const char *name, int tiles)
+{
+    const int sheet_w = ZOOM_COLS * ZOOM_TILE_W;
+    const gfx_surface_t sheet = {s_zoom_sheet, sheet_w, (tiles + ZOOM_COLS - 1) / ZOOM_COLS * ZOOM_TILE_H, sheet_w};
+    return write(name, &sheet);
+}
+
+// Draws Buddy and the menu t ms into a zoom, as the firmware does, and renders the screen.
+static void zoom_render(const office_zoom_t *z, const menu_status_t *st, uint32_t t)
+{
+    const gfx_surface_t dst = {s_px, W, H, W};
+    office_camera_t cam;
+    buddy_pose_t pose;
+    office_zoom_frame(z, t, (office_camera_t){s_view.home_scale, s_view.home_x0, s_view.home_y0}, s_layout.screen,
+                      &cam, &pose);
+    buddy_view_camera(&s_view, cam.scale, cam.x0, cam.y0);
+    buddy_view_apply(&s_view, &pose, t);
+    menu_view_apply(&s_menu_view, &s_menu, st, t);
+    gfx_scene_render(&s_scene, &s_all, &dst);
+}
+
+// Office from the menu's Activities page with Buddy relaxed, then a tap on the clock: every ZOOM_STEP_MS of both ways
+// on a sheet (zoom_in_sheet.png, zoom_out_sheet.png, the clock in between), and full-size key moments.
+static bool zoom_screens(office_clock_t *clock)
+{
+    const menu_status_t st = {BUDDY_MOOD_RELAXED, false, true};
+    office_clock_show(clock, false);
+    s_scene.background = layout_background;
+    s_scene.background_ctx = &s_layout;
+    menu_view_show(&s_menu_view, true);
+    menu_open(&s_menu, MENU_ACTIVITIES, 0);
+    menu_view_apply(&s_menu_view, &s_menu, &st, 5000);
+
+    const uint32_t t0 = 10000;
+    office_zoom_t z = {.state = OFFICE_ZOOM_ENTERING, .want_office = true, .start = t0};
+    menu_view_close(&s_menu_view, t0);
+    static const uint32_t k_in_keys[] = {60, 500, 640, 780, 940, 1050, 1250};
+    int n = 0;
+    for (uint32_t t = 0; t < OFFICE_ENTER_MS; t += ZOOM_STEP_MS) {
+        zoom_render(&z, &st, t0 + t);
+        zoom_tile(n++);
+    }
+    for (unsigned i = 0; i < sizeof(k_in_keys) / sizeof(k_in_keys[0]); i++) {
+        zoom_render(&z, &st, t0 + k_in_keys[i]);
+        char name[32];
+        snprintf(name, sizeof(name), "zoom_in_%04u", (unsigned)k_in_keys[i]);
+        if (!shot(name)) {
+            return false;
+        }
+    }
+    // The clock takes his dark face's place.
+    buddy_view_hide(&s_view);
+    menu_view_show(&s_menu_view, false);
+    office_clock_show(clock, true);
+    s_scene.background = office_background;
+    s_scene.background_ctx = NULL;
+    if (!shot("zoom_clock")) {
+        return false;
+    }
+    zoom_tile(n++);
+    if (!zoom_sheet("zoom_in_sheet", n)) {
+        return false;
+    }
+
+    // A tap: his dark face, then he wakes up and steps back; the menu comes back on its page.
+    office_clock_show(clock, false);
+    s_scene.background = layout_background;
+    s_scene.background_ctx = &s_layout;
+    zoom_tile(0);
+    z = (office_zoom_t){.state = OFFICE_ZOOM_LEAVING, .running = true, .start = t0};
+    static const uint32_t k_out_keys[] = {200, 300, 600, 800, 1000, 1200, 1420};
+    n = 1;
+    bool menu_back = false;
+    for (uint32_t t = 0; t < OFFICE_LEAVE_MS + ZOOM_STEP_MS; t += ZOOM_STEP_MS) {
+        if (!menu_back && t >= OFFICE_MENU_BACK_AT) {
+            menu_view_show(&s_menu_view, true);
+            menu_reveal(&s_menu, t0 + t);
+            menu_back = true;
+        }
+        zoom_render(&z, &st, t0 + t);
+        zoom_tile(n++);
+    }
+    if (!zoom_sheet("zoom_out_sheet", n)) {
+        return false;
+    }
+    menu_view_show(&s_menu_view, false); // the key moments: the menu as it is at each of them
+    for (unsigned i = 0; i < sizeof(k_out_keys) / sizeof(k_out_keys[0]); i++) {
+        if (k_out_keys[i] >= OFFICE_MENU_BACK_AT && !s_menu_view.visible) {
+            menu_view_show(&s_menu_view, true);
+            menu_reveal(&s_menu, t0 + OFFICE_MENU_BACK_AT);
+        }
+        zoom_render(&z, &st, t0 + k_out_keys[i]);
+        char name[32];
+        snprintf(name, sizeof(name), "zoom_out_%04u", (unsigned)k_out_keys[i]);
+        if (!shot(name)) {
+            return false;
+        }
+    }
+    buddy_view_camera_home(&s_view);
+    return true;
+}
+
 int main(int argc, char **argv)
 {
     s_dir = argc > 1 ? argv[1] : ".";
@@ -378,5 +499,9 @@ int main(int argc, char **argv)
         return 1;
     }
     office_clock_apply(&clock, NULL, 0);
-    return shot("office_not_set") ? 0 : 1;
+    if (!shot("office_not_set")) {
+        return 1;
+    }
+    office_clock_apply(&clock, &tm, 100);
+    return zoom_screens(&clock) ? 0 : 1;
 }

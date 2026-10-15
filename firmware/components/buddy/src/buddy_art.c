@@ -33,7 +33,7 @@ static gfx_color_t s_colors[] = {
     GFX_RGB(255, 140, 40),  // F ember, glowing
 };
 #define N_COLORS (sizeof(s_colors) / sizeof(s_colors[0]))
-static gfx_color_t s_glow[N_COLORS], s_zap[N_COLORS], s_fury[N_COLORS], s_drowsy[N_COLORS];
+static gfx_color_t s_glow[N_COLORS], s_zap[N_COLORS], s_fury[N_COLORS], s_drowsy[N_COLORS], s_dark[N_COLORS];
 
 // The body in two parts that normally move together; the head can also wobble on its own.
 static const char *const k_head[] = {
@@ -415,6 +415,13 @@ static void make_palettes(buddy_art_t *a)
     memcpy(s_drowsy, s_colors, sizeof(s_colors));
     s_drowsy[key('E')] = GFX_RGB(52, 140, 166);
     a->tint[BUDDY_TINT_DROWSY] = (gfx_palette_t){s_drowsy, (uint16_t)N_COLORS};
+
+    // Dark: the face screen switched off, eyes and all, in exactly the Office Mode clock's background colour
+    // (office_clock.c): a face filling the display turns into the clock with only the digits appearing.
+    memcpy(s_dark, s_colors, sizeof(s_colors));
+    s_dark[key('S')] = GFX_RGB(8, 9, 12);
+    s_dark[key('E')] = GFX_RGB(8, 9, 12);
+    a->tint[BUDDY_TINT_DARK] = (gfx_palette_t){s_dark, (uint16_t)N_COLORS};
 }
 
 static void make_antenna(buddy_art_t *a, buddy_antenna_t which, const gfx_image_t *const *images, uint16_t ms, int n)
