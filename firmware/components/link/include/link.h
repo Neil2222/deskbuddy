@@ -37,7 +37,7 @@ typedef enum {
     LINK_CMD_TIME_SET,  // utc= [ms=] off= [next= next_off=]
     LINK_CMD_MSG_SHOW,  // id= [style=] text=
     LINK_CMD_MOOD_SET,  // name= [secs=]
-    LINK_CMD_ACT,       // name=: an activity (hello acts=)
+    LINK_CMD_ACT,       // name= [iid=]: an activity (hello acts=); iid identifies it in its evt act events
     LINK_CMD_PDC_SET,   // state=on|off [count=]: the PDC Manager integration, as the companion sees it (a lease)
     LINK_CMD_PDC_RESULT, // id= result= [count=] [teams=]: how a ZDMW click (evt pdc.click) ended
 } link_cmd_t;
@@ -94,6 +94,7 @@ typedef struct {
         } mood; // MOOD_SET
         struct {
             char name[LINK_MOOD_NAME_MAX + 1];
+            uint32_t iid; // chosen by the companion (1..2^31-1); 0: not given (the device picks one)
         } act; // ACT
         struct {
             bool on;

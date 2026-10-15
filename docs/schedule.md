@@ -53,7 +53,8 @@ All backward compatible: unknown arguments and events are ignored on both sides;
 | cap `track` | The firmware does the above; without it the Companion schedules no actions (moods only) |
 
 Touch-started questions get an iid from the device (top bit set), so the device's and the Companion's ids never
-collide. The question waits **60 s** (`BUDDY_ASK_MS`), not 30; changing that is a separate decision.
+collide. The question keeps its **60 s** window (`BUDDY_ASK_MS`; decided). Approved: grace periods of 3 min for
+questions and 1 min for animations; the scheduled-action allowlist above (Monster stays out); the four Pause presets.
 
 ## 3. Interaction lifecycle and records
 
@@ -140,6 +141,27 @@ skipped. A mood override does not block actions (moods and actions are independe
   current scheduled mood, like *Resume schedule*.
 - Paused days are excluded from all statistics.
 
+## 4b. Reliability and later synchronisation (requirements, binding for P5 on)
+
+- **Incomplete data stays incomplete.** An interaction whose outcome cannot be established (no reply, no `shown`, the
+  link lost and `status act=` reports another or no interaction) is recorded as `unconfirmed` or `lost`, never as
+  `no`, `timeout` or anything else that claims behaviour. The device itself never turns an interruption into an
+  answer (`interrupted`, host-tested).
+- **No duplicates.** Retries reuse the `iid` (the device answers `ok dup=1` and starts nothing). Activity records from
+  `evt did` are keyed by the device's `n` (random start per boot) within a connection, those from an answered
+  question by the interaction id: replaying or receiving an event twice adds nothing.
+- **Installation id.** Each Companion installation gets a stable random id (stored next to the journals, created on
+  first use); every record carries it.
+- **Globally unique ids.** Records use GUIDv7 ids (time-ordered); an occurrence id is `<installation>/<block id>/<local
+  date>` once several installations exist, so a merge sees one occurrence once.
+- **Unambiguous time.** Every record stores UTC (`at_utc`) and the local time with its offset (`at`), plus the
+  Windows time zone id the occurrence was evaluated in; local wall-clock time drives the schedule, UTC orders events.
+- **Mergeable journals.** Append-only, one fact per line, never rewritten: merging installations is a union by id,
+  folding per interaction id; corrections are new lines (`_retract`), not edits.
+- **At most once per local calendar day**, the repeated DST hour included: the occurrence id is per local date and is
+  written before the action is sent (P6).
+- Not built yet: any server, remote control or synchronisation.
+
 ## 5. Later: patterns and suggestions (not authorized yet)
 
 `PatternAnalyzer` only reads the journals; `SuggestionEngine` turns findings into proposals.
@@ -165,7 +187,7 @@ could repeat after a crash, and its result would be lost. So the journals come b
 | Phase | Scope | Acceptance |
 |---|---|---|
 | P3 (done) | Engine, `schedule.json`, Schedule page, drag-and-drop | 112 tests; drag verified in the running app |
-| **P4** Protocol + firmware | `act iid=`, `ask_peukie` in `acts=`, `evt act shown/done`, `status act=`, `evt mood src=`, `evt did`, MY DAY page, cap `track`; Companion only parses and logs | Host tests (yes, no and timeout distinct, `shown` only after a present, no events for commanded actions, touch iids with the top bit); simulator and board give byte-identical events; flashed and checked on the board by the user |
+| **P4** Protocol + firmware (done, on `feature/schedule`) | `act iid=`, `ask_peukie` in `acts=`, `evt act shown/done`, `status act=`, `evt mood src=`, `evt did`, MY DAY page, caps `track,did`; the Companion needs no change (it ignores unknown events and lists no `ask_peukie` tile) | 93 host tests incl. the application end to end on a fake platform (yes, no, timeout, interrupted, dup retry, device ids, MY DAY counter, mood sources); the simulator smoke-tested over TCP (question by command, JA in the window, `status`, retry, MY DAY); firmware builds without warnings; **board not flashed yet** |
 | **P5** Journals | `interactions.jsonl`, `activities.jsonl` (+`.sim`), InteractionTracker (iid correlation, `status` reconciliation, dedup), manual records (touch question, MY DAY, Companion quick-log) | Unit tests for folding, dedup and torn last lines; in the simulator one question gives exactly one record with the right outcome; a JA gives one `smoke` activity; simulator records never reach the real files |
 | **P6** Live scheduling | MoodDirector wired; ActionScheduler (occurrences, grace, availability, skips); `action` in the editor (schedule v2); Pause | In the simulator: a block a minute ahead sends one `mood.set`; `ask_peukie` asks once and records yes, no or timeout; Clock Mode gives `skipped:busy:office` and is not interrupted; a disconnect past grace gives `skipped:offline`; a restart does not ask again |
 | **P7** History + polish | History page (today, this week, outcomes), Away presets, optional reminders, DPI pass (125/150 %), regression tests | Screenshots at 3 DPIs; history matches the journals |

@@ -29,6 +29,8 @@ static const struct {
     {"stare", BUDDY_EVENT_STARE, {BUDDY_EYES_FOCUS, BUDDY_MOUTH_NEUTRAL, true, false}},   // a challenger's stare
     {"meditate", BUDDY_EVENT_MEDITATE, {BUDDY_EYES_CLOSED, BUDDY_MOUTH_SMILE, false, false}}, // at peace
     {"focus", BUDDY_EVENT_FOCUS, {BUDDY_EYES_FOCUS, BUDDY_MOUTH_TONGUE, true, false}},    // deep in thought
+    // "PEUKIE ROKEN?", the same question as the touchscreen's PEUKIE? (answered there only): the smoking face
+    {"ask_peukie", BUDDY_EVENT_ASK_PEUKIE, {BUDDY_EYES_LIDDED, BUDDY_MOUTH_SMIRK, true, true}},
 };
 
 const char *buddy_act_name(int i)
@@ -45,6 +47,16 @@ bool buddy_act_parse(const char *name, buddy_event_t *out)
         }
     }
     return false;
+}
+
+const char *buddy_act_event_name(buddy_event_t ev)
+{
+    for (int i = 0; i < BUDDY_ACTS; i++) {
+        if (k_acts[i].event == ev) {
+            return k_acts[i].name;
+        }
+    }
+    return NULL;
 }
 
 buddy_face_t buddy_act_face(buddy_event_t ev)

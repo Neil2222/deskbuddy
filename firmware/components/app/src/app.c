@@ -163,6 +163,116 @@ static menu_status_t menu_status(buddy_brain_t *brain, bool has_office, uint32_t
                            pdc_ready(&s_pdc, now), s_pdc.count};
 }
 
+// ---- Interactions: the activities the companion hears about (evt act), started by `act` or on the touchscreen ----
+//
+// One at a time (the brain plays one activity at a time). Its life: started (the brain took it) -> shown (a frame
+// with it has been presented: for the question, the question itself is on screen) -> done, with how it ended:
+//   yes / no / timeout   the question was answered with JA, with NEE, or not within the minute
+//   done                 a show played to its end
+//   interrupted          cut off (Clock Mode, a restart of his mood): never counted as an answer
+// `status` reports the last one, so a companion that missed an event can still learn how it ended.
+
+#define IA_OWN_BIT 0x80000000u // ids the device picks itself (touch, or `act` without iid) have the top bit set
+
+typedef enum { IA_NONE, IA_STARTED, IA_SHOWN, IA_DONE } ia_state_t;
+
+typedef struct {
+    ia_state_t state;
+    uint32_t iid;
+    const char *name;     // act name (buddy_act_name)
+    bool touch;           // started on the touchscreen (else by a command)
+    buddy_state_t bstate; // the brain state it plays in
+    uint32_t start;       // now_ms when the brain took it
+    bool cut;             // the brain was made to rest while it played
+    const char *result;
+    uint32_t next_own;
+} interaction_t;
+static interaction_t s_ia;
+
+static const char *ia_state_name(ia_state_t state)
+{
+    return state == IA_STARTED ? "started" : state == IA_SHOWN ? "shown" : state == IA_DONE ? "done" : "none";
+}
+
+// How it ended, decided when the brain has left its state.
+static const char *ia_outcome(const buddy_brain_t *b, uint32_t now)
+{
+    if (s_ia.cut) {
+        return "interrupted";
+    }
+    if (s_ia.bstate == BUDDY_STATE_ASK) {
+        switch (b->answer) {
+        case BUDDY_ANSWER_YES:
+            return "yes";
+        case BUDDY_ANSWER_NO:
+            return "no";
+        case BUDDY_ANSWER_TIMEOUT:
+            return "timeout";
+        default: // the minute is over but the brain has not moved on yet (a new activity came first)
+            return now - s_ia.start >= BUDDY_ASK_MS ? "timeout" : "interrupted";
+        }
+    }
+    return now - s_ia.start >= buddy_activity_ms(s_ia.bstate) ? "done" : "interrupted";
+}
+
+static void ia_finish(const buddy_brain_t *b, uint32_t now)
+{
+    s_ia.result = ia_outcome(b, now);
+    s_ia.state = IA_DONE;
+    char body[64];
+    snprintf(body, sizeof(body), "evt act iid=%" PRIu32 " state=done result=%s", s_ia.iid, s_ia.result);
+    app_link_send(0, body);
+    APP_LOGI(TAG, "interaction %" PRIu32 " (%s): %s", s_ia.iid, s_ia.name, s_ia.result);
+}
+
+// The brain has just taken an activity (b->state is its state). iid 0: the device picks one.
+static void ia_begin(uint32_t iid, const char *name, bool touch, const buddy_brain_t *b, uint32_t now)
+{
+    if (s_ia.state == IA_STARTED || s_ia.state == IA_SHOWN) {
+        ia_finish(b, now); // its end and the new start fell between two frames
+    }
+    if (!iid) {
+        iid = IA_OWN_BIT | (s_ia.next_own++ & ~IA_OWN_BIT);
+    }
+    const uint32_t next_own = s_ia.next_own;
+    s_ia = (interaction_t){IA_STARTED, iid, name, touch, b->state, now, false, NULL, next_own};
+    APP_LOGI(TAG, "interaction %" PRIu32 ": %s (%s)", iid, name, touch ? "touch" : "companion");
+}
+
+// Once per frame, after the brain moved on and after the frame was (or was not) presented.
+// visible: what was presented shows it (the question on the stage, or Buddy doing his show).
+static void ia_update(const buddy_brain_t *b, bool presented, bool visible, uint32_t now)
+{
+    if (s_ia.state != IA_STARTED && s_ia.state != IA_SHOWN) {
+        return;
+    }
+    if (b->state != s_ia.bstate) {
+        ia_finish(b, now);
+        return;
+    }
+    if (s_ia.state == IA_STARTED && presented && visible) {
+        s_ia.state = IA_SHOWN;
+        char body[80];
+        snprintf(body, sizeof(body), "evt act iid=%" PRIu32 " name=%s state=shown src=%s", s_ia.iid, s_ia.name,
+                 s_ia.touch ? "touch" : "cmd");
+        app_link_send(0, body);
+    }
+}
+
+// Drops what the brain is doing: an interaction under way ends as interrupted, never as an answer.
+static void brain_rest(buddy_brain_t *b, uint32_t now)
+{
+    if (s_ia.state == IA_STARTED || s_ia.state == IA_SHOWN) {
+        s_ia.cut = true;
+    }
+    buddy_brain_rest(b, now);
+}
+
+// Why the mood changed, for evt mood src=: set where it is changed on purpose, used once by the next report.
+static const char *s_mood_src;
+static bool s_smoke_break; // a smoke break (JA to the question) is under way: its start and end are src=break
+static uint32_t s_did_n;   // evt did n=: counts up from a random start on every boot
+
 // Carries out what a tap in the menu asks for, the way the companion's commands do (so `evt mood` and `evt mode`
 // tell the companion, whichever side changed it).
 static void run_menu_action(const menu_result_t *r, buddy_brain_t *brain, uint32_t now)
@@ -173,11 +283,17 @@ static void run_menu_action(const menu_result_t *r, buddy_brain_t *brain, uint32
         break;
     case MENU_DO_MOOD:
         buddy_brain_set_mood(brain, (buddy_mood_t)r->arg, 0, now);
+        s_mood_src = "touch";
+        s_smoke_break = false;
         APP_LOGI(TAG, "mood %s (touch)", buddy_mood_name((buddy_mood_t)r->arg));
         break;
     case MENU_DO_EVENT:
         if (buddy_brain_event(brain, (buddy_event_t)r->arg, now)) {
             APP_LOGI(TAG, "%s (touch)", r->item->id);
+            const char *act = buddy_act_event_name((buddy_event_t)r->arg); // a show or the question: tracked
+            if (act) {
+                ia_begin(0, act, true, brain, now);
+            }
         }
         break;
     case MENU_DO_OFFICE:
@@ -318,16 +434,25 @@ static void zdmw_send(const office_switch_t *screen, buddy_brain_t *brain, uint3
 static void run_command(const link_command_t *c, buddy_brain_t *brain, office_switch_t *screen, bool has_office,
                         bool lit, uint32_t now)
 {
-    char body[96] = "ok";
+    char body[160] = "ok";
     switch (c->cmd) {
     case LINK_CMD_STATUS: {
         struct tm tm;
         uint32_t ms;
-        snprintf(body, sizeof(body), "ok mode=%s mood=%s time=%s msg=%s queued=%d uptime=%" PRIu32,
-                 mode_name(screen, brain), buddy_mood_name(buddy_brain_mood(brain, now)),
-                 wall_clock(&tm, &ms) ? "set" : "unset",
-                 marquee_active(&s_msg.sign) && !s_msg.caption ? "showing" : "idle",
-                 s_msg.queued, now / 1000);
+        int n = snprintf(body, sizeof(body), "ok mode=%s mood=%s time=%s msg=%s queued=%d uptime=%" PRIu32,
+                         mode_name(screen, brain), buddy_mood_name(buddy_brain_mood(brain, now)),
+                         wall_clock(&tm, &ms) ? "set" : "unset",
+                         marquee_active(&s_msg.sign) && !s_msg.caption ? "showing" : "idle",
+                         s_msg.queued, now / 1000);
+        // The last interaction (evt act), so a companion that missed its events can still learn how it ended.
+        if (n > 0 && (size_t)n < sizeof(body)) {
+            if (s_ia.state == IA_NONE) {
+                snprintf(body + n, sizeof(body) - (size_t)n, " act=none");
+            } else {
+                snprintf(body + n, sizeof(body) - (size_t)n, " act=%" PRIu32 ":%s%s%s", s_ia.iid,
+                         ia_state_name(s_ia.state), s_ia.result ? ":" : "", s_ia.result ? s_ia.result : "");
+            }
+        }
         break;
     }
     case LINK_CMD_POKE:
@@ -338,11 +463,19 @@ static void run_command(const link_command_t *c, buddy_brain_t *brain, office_sw
             strcpy(body, "err unsupported"); // an activity this firmware does not have
             break;
         }
+        if (c->cmd == LINK_CMD_ACT && c->u.act.iid && c->u.act.iid == s_ia.iid && s_ia.state != IA_NONE) {
+            // The same request again (a retry after a lost reply): it never starts a second time.
+            snprintf(body, sizeof(body), "ok dup=1 state=%s", ia_state_name(s_ia.state));
+            break;
+        }
         if (!lit || screen->office || !scene_settled(screen) || !buddy_brain_event(brain, be, now)) {
             snprintf(body, sizeof(body), "err busy mode=%s", mode_name(screen, brain));
         } else {
             APP_LOGI(TAG, "%s (companion)",
                      c->cmd == LINK_CMD_POKE ? "Poke" : c->cmd == LINK_CMD_MONSTER ? "Monster time" : c->u.act.name);
+            if (c->cmd == LINK_CMD_ACT) {
+                ia_begin(c->u.act.iid, buddy_act_event_name(be), false, brain, now);
+            }
         }
         break;
     }
@@ -398,6 +531,8 @@ static void run_command(const link_command_t *c, buddy_brain_t *brain, office_sw
             strcpy(body, "err unsupported");
         } else {
             buddy_brain_set_mood(brain, mood, c->u.mood.secs * 1000u, now);
+            s_mood_src = "cmd";
+            s_smoke_break = false;
             APP_LOGI(TAG, "mood %s for %" PRIu32 " s (0: until changed) (companion)", buddy_mood_name(mood),
                      c->u.mood.secs);
         }
@@ -529,6 +664,8 @@ bool app_init(const app_config_t *config)
 
     buddy_brain_init(&s.brain, t_start, app_port_random());
     pdc_init(&s_pdc, (uint16_t)app_port_random()); // click ids start somewhere new on every boot
+    s_did_n = app_port_random();                   // as do evt did's n=...
+    s_ia.next_own = app_port_random();              // ...and the device's own interaction ids
     gfx_scene_invalidate(&s_scene, s_layout.screen); // both buffers start black: first two frames are full
     APP_LOGI(TAG, "stage %dx%d at x=%d, panel %dx%d at x=%d; character scale %d at (%d,%d)", s_layout.stage.w,
              s_layout.stage.h, s_layout.stage.x, s_layout.panel.w, s_layout.panel.h, s_layout.panel.x, s.view.scale,
@@ -541,6 +678,22 @@ bool app_init(const app_config_t *config)
     s.next_activity = t_start + (uint32_t)s_cfg.demo_activity_s * 1000u;
     s.next_office = t_start + (uint32_t)s_cfg.demo_office_s * 1000u;
     return true;
+}
+
+// MY DAY: you say what you are doing. The companion records it (evt did, sent for touches only, never for what it
+// commanded itself); Buddy cheers (a hop, unless a show is playing) and puts the item's line on his sign.
+static void myday(const menu_item_t *it, uint32_t now)
+{
+    char body[64];
+    snprintf(body, sizeof(body), "evt did item=%s n=%" PRIu32, it->id, s_did_n++);
+    app_link_send(0, body);
+    APP_LOGI(TAG, "MY DAY: %s", it->id);
+    if (!s.screen.office && scene_settled(&s.screen)) {
+        buddy_brain_event(&s.brain, BUDDY_EVENT_POKE, now);
+    }
+    if (menu_item_note(it)) {
+        show_line(menu_item_note(it), &s.screen, &s.brain, s.presented >= 2, now);
+    }
 }
 
 void app_event(const app_event_t *ev)
@@ -573,6 +726,10 @@ void app_event(const app_event_t *ev)
     if (answer != MENU_ANSWER_NONE && buddy_brain_answer(&s.brain, answer == MENU_ANSWER_YES, t)) {
         if (!confirming) {
             APP_LOGI(TAG, "peukie? %s", answer == MENU_ANSWER_YES ? "ja" : "nee");
+            if (answer == MENU_ANSWER_YES && s.brain.mood_timed && s.brain.mood == BUDDY_MOOD_PEUKIE) {
+                s_mood_src = "break"; // the smoke break starts now...
+                s_smoke_break = true; // ...and its end is reported as src=break too
+            }
         } else if (answer == MENU_ANSWER_YES) {
             zdmw_send(&s.screen, &s.brain, t);
         } else {
@@ -592,6 +749,9 @@ void app_event(const app_event_t *ev)
         const menu_status_t st = menu_status(&s.brain, s.has_office, t);
         const menu_result_t r = menu_touch(&s.menu, type, ev->x, ev->y, &st, t);
         run_menu_action(&r, &s.brain, t);
+        if (r.action == MENU_DO_LOG) {
+            myday(r.item, t);
+        }
         if (s.menu.down) {
             if (ev->type == APP_TOUCH_DOWN && !s.pending_touch_us) {
                 s.pending_touch_us = ev->at_us; // the button sinks in: the reaction to measure
@@ -670,7 +830,7 @@ uint32_t app_frame(void)
     }
     if (zoom.back) {
         buddy_view_camera_home(&s.view);
-        buddy_brain_rest(&s.brain, now); // his mood carries on (a mood chosen meanwhile shows now)
+        brain_rest(&s.brain, now); // his mood carries on (a mood chosen meanwhile shows now)
         zoom_log("out", &s.perf, app_port_time_us() - s.perf_since);
         memset(&s.perf, 0, sizeof(s.perf));
         s.perf_since = app_port_time_us();
@@ -691,7 +851,7 @@ uint32_t app_frame(void)
             office_clock_show(&s.clock, false);
             s_scene.background = layout_background;
             s_scene.background_ctx = &s_layout;
-            buddy_brain_rest(&s.brain, now); // a paused Monster sequence is dropped (the mode is normal again)
+            brain_rest(&s.brain, now); // a paused Monster sequence is dropped (the mode is normal again)
         }
     }
     if (step.redraw_all) {
@@ -722,7 +882,7 @@ uint32_t app_frame(void)
             APP_LOGI(TAG, "PDC Manager no longer offered (the lease ran out, or a new companion connection)");
         }
         if (s.brain.state == BUDDY_STATE_CONFIRM) {
-            buddy_brain_rest(&s.brain, now);
+            brain_rest(&s.brain, now);
             APP_LOGI(TAG, "ZDMW: confirmation withdrawn (the companion no longer offers PDC Manager)");
         }
         if (s.menu.category == MENU_PDC) {
@@ -813,12 +973,19 @@ uint32_t app_frame(void)
     }
     const buddy_mood_t new_mood = buddy_brain_mood(&s.brain, now); // also ends a timed mood, in Office Mode too
     if (new_mood != s.mood) {
-        char body[32];
-        snprintf(body, sizeof(body), "evt mood mood=%s", buddy_mood_name(new_mood));
+        // Why: chosen (touch, cmd), a smoke break starting or ending (break), or a timed mood running out (timer).
+        const char *src = s_mood_src ? s_mood_src : s_smoke_break ? "break" : "timer";
+        if (!s_mood_src) {
+            s_smoke_break = false; // a break that ended by itself
+        }
+        char body[48];
+        snprintf(body, sizeof(body), "evt mood mood=%s src=%s", buddy_mood_name(new_mood), src);
         app_link_send(0, body);
         s.mood = new_mood;
     }
+    s_mood_src = NULL; // a choice that changed nothing explains nothing later
 
+    bool presented = false;
     gfx_dirty_clear(&s.changes);
     gfx_scene_collect(&s_scene, &s.changes);
     if (s.changes.count > 0) {
@@ -831,6 +998,7 @@ uint32_t app_frame(void)
             verify_frame(&back, &s.perf);
         }
         app_port_present();
+        presented = true;
         office_switch_presented(&s.screen);
 
         const int area = gfx_dirty_area(&s.redraw);
@@ -863,6 +1031,9 @@ uint32_t app_frame(void)
             s.perf_since = app_port_time_us();
         }
     }
+
+    // The interaction (evt act): shown once a presented frame shows it, done once the brain has moved on.
+    ia_update(&s.brain, presented, s_ia.bstate == BUDDY_STATE_ASK ? ask_left != 0 : !s.screen.office, now);
 
     const int64_t t = app_port_time_us();
     if (s_cfg.perf_log_s > 0 && t - s.perf_since >= s_cfg.perf_log_s * 1000000LL) {

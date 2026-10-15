@@ -273,12 +273,15 @@ static link_result_t decode_args(link_command_t *c, const arg_t *args, int n)
         c->u.mood.secs = (uint32_t)v_secs;
     } else if (c->cmd == LINK_CMD_ACT) {
         // Like a mood: only the shape is checked here; which activities exist is the device's business.
-        const char *name = get_arg(args, n, "name", v[0]);
+        const char *name = get_arg(args, n, "name", v[0]), *iid = get_arg(args, n, "iid", v[1]);
         const size_t len = name ? strlen(name) : 0;
-        if (len == 0 || len > LINK_MOOD_NAME_MAX || strspn(name, "abcdefghijklmnopqrstuvwxyz_") != len) {
+        int64_t v_iid = 0;
+        if (len == 0 || len > LINK_MOOD_NAME_MAX || strspn(name, "abcdefghijklmnopqrstuvwxyz_") != len ||
+            (find_arg(args, n, "iid") && (!iid || !parse_int(iid, 1, UINT32_MAX, &v_iid)))) {
             return LINK_ERR_ARGS;
         }
         memcpy(c->u.act.name, name, len + 1);
+        c->u.act.iid = (uint32_t)v_iid;
     } else if (c->cmd == LINK_CMD_PDC_SET) {
         const char *state = get_arg(args, n, "state", v[0]), *count = get_arg(args, n, "count", v[1]);
         int64_t v_count = -1;

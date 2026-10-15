@@ -236,4 +236,17 @@ void test_link_parses_moods(void)
     CHECK_EQ(c.seq, 12);
     CHECK_EQ(parse(frame(">DB1 12 act name=Sneeze"), &c), LINK_ERR_ARGS);
     CHECK_EQ(parse(frame(">DB1 12 act name=abcdefghijklmnop"), &c), LINK_ERR_ARGS);
+
+    // act iid=: the companion's id for the interaction (evt act); absent is 0 (the device picks one).
+    CHECK_EQ(parse(frame(">DB1 13 act name=ask_peukie iid=42"), &c), LINK_OK);
+    CHECK(strcmp(c.u.act.name, "ask_peukie") == 0 && c.u.act.iid == 42);
+    CHECK_EQ(parse(frame(">DB1 13 act iid=4294967295 name=sneeze"), &c), LINK_OK);
+    CHECK_EQ(c.u.act.iid, 4294967295u);
+    CHECK_EQ(parse(frame(">DB1 13 act name=sneeze"), &c), LINK_OK);
+    CHECK_EQ(c.u.act.iid, 0);
+    CHECK_EQ(parse(frame(">DB1 14 act name=sneeze iid=0"), &c), LINK_ERR_ARGS);
+    CHECK_EQ(parse(frame(">DB1 14 act name=sneeze iid=4294967296"), &c), LINK_ERR_ARGS);
+    CHECK_EQ(parse(frame(">DB1 14 act name=sneeze iid=-1"), &c), LINK_ERR_ARGS);
+    CHECK_EQ(parse(frame(">DB1 14 act name=sneeze iid="), &c), LINK_ERR_ARGS);
+    CHECK_EQ(parse(frame(">DB1 14 act name=sneeze iid=x1"), &c), LINK_ERR_ARGS);
 }

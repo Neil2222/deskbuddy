@@ -1,0 +1,340 @@
+// The application (components/app) end to end, as the board and the simulator run it, on a fake platform: a clock
+// the test moves, frame buffers in memory, and the lines it sends to the companion collected. Commands go in as
+// protocol lines, touches as touch events. Covers what the companion relies on: evt act (shown, then exactly one
+// outcome; no and timeout distinct; an interruption never an answer), act retries, status act=, evt did (MY DAY), and
+// evt mood src=. One application for all tests in this file (it is a singleton, like on the board), run in order.
+#include <inttypes.h>
+#include <stdarg.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "app.h"
+#include "app_link.h"
+#include "app_port.h"
+#include "buddy_activity.h"
+#include "buddy_view.h"
+#include "layout.h"
+#include "menu.h"
+#include "menu_ask.h"
+#include "test.h"
+
+enum { W = 1024, H = 600, ALIGN = 32 };
+
+// ---- the fake platform ----
+
+static int64_t s_now_us;
+static int64_t s_wall_us;
+static char s_out[64 * 1024]; // what was sent to the companion since clear_out()
+static size_t s_out_len;
+static uint16_t s_fb[2][W * H];
+static int s_back;
+
+int64_t app_port_time_us(void) { return s_now_us; }
+uint32_t app_port_random(void) { return 12345; }
+void app_port_wall_get(int64_t *sec, uint32_t *usec)
+{
+    *sec = s_wall_us / 1000000;
+    *usec = (uint32_t)(s_wall_us % 1000000);
+}
+void app_port_wall_set(int64_t sec, uint32_t usec) { s_wall_us = sec * 1000000 + usec; }
+const char *app_port_version(void) { return "test"; }
+void *app_port_alloc(size_t size, app_mem_t kind)
+{
+    (void)kind;
+    return malloc(size);
+}
+gfx_color_t *app_port_back_buffer(void) { return s_fb[s_back]; }
+void app_port_flush(const gfx_color_t *px, int count)
+{
+    (void)px;
+    (void)count;
+}
+void app_port_present(void) { s_back ^= 1; }
+bool app_port_backlight_on(void) { return true; }
+void app_port_scanout_stats(app_scanout_stats_t *out) { memset(out, 0, sizeof(*out)); }
+void app_port_log(char level, const char *tag, const char *fmt, ...)
+{
+    (void)level;
+    (void)tag;
+    (void)fmt;
+}
+void app_port_send(const char *line, size_t len)
+{
+    if (s_out_len + len < sizeof(s_out)) {
+        memcpy(s_out + s_out_len, line, len);
+        s_out_len += len;
+        s_out[s_out_len] = '\0';
+    }
+}
+
+static void clear_out(void)
+{
+    s_out_len = 0;
+    s_out[0] = '\0';
+}
+
+static bool sent(const char *text) { return strstr(s_out, text) != NULL; }
+
+static int count(const char *text)
+{
+    int n = 0;
+    for (const char *p = strstr(s_out, text); p; p = strstr(p + 1, text)) {
+        n++;
+    }
+    return n;
+}
+
+// Runs the application loop for ms of fake time, as the board's render task does.
+static void run(uint32_t ms)
+{
+    const int64_t end = s_now_us + (int64_t)ms * 1000;
+    for (;;) {
+        uint32_t wait = app_frame();
+        wait = wait ? wait : 1;
+        if (s_now_us + (int64_t)wait * 1000 >= end) {
+            s_now_us = end;
+            app_frame();
+            return;
+        }
+        s_now_us += (int64_t)wait * 1000;
+    }
+}
+
+static bool deliver(const app_event_t *ev, void *ctx)
+{
+    (void)ctx;
+    app_event(ev); // straight to the application (on the board: through the queue to the render task)
+    return true;
+}
+
+// A command line from the companion, with its checksum, through the device's own line handling.
+static void command(uint32_t seq, const char *body)
+{
+    char line[300];
+    const int n = snprintf(line, sizeof(line), ">DB1 %" PRIu32 " %s", seq, body);
+    snprintf(line + n, sizeof(line) - (size_t)n, " #%04X\n", link_crc16(line, (size_t)n));
+    static app_link_rx_t rx;
+    app_link_feed(&rx, (const uint8_t *)line, strlen(line), deliver, NULL);
+}
+
+static void touch(int x, int y)
+{
+    app_event(&(app_event_t){.type = APP_TOUCH_DOWN, .x = (int16_t)x, .y = (int16_t)y, .at_us = s_now_us});
+    run(40);
+    app_event(&(app_event_t){.type = APP_TOUCH_UP, .x = (int16_t)x, .y = (int16_t)y, .at_us = s_now_us});
+    run(40);
+}
+
+// Where things are on screen: computed the way the application places them (same layout, same functions).
+static layout_t s_layout;
+static menu_t s_where; // only for the menu's area
+static int s_no_x, s_no_y, s_yes_x, s_yes_y;
+
+static void tap_slot(menu_layout_t layout, int slot)
+{
+    const gfx_rect_t r = menu_slot_rect(layout, slot);
+    touch(s_where.area.x + (r.x + r.w / 2) * MENU_SCALE, s_where.area.y + (r.y + r.h / 2) * MENU_SCALE);
+}
+
+static void tap_back(void)
+{
+    const gfx_rect_t r = menu_back_rect();
+    touch(s_where.area.x + (r.x + r.w / 2) * MENU_SCALE, s_where.area.y + (r.y + r.h / 2) * MENU_SCALE);
+}
+
+static bool s_started;
+
+static bool start(void)
+{
+    if (s_started) {
+        return true;
+    }
+    static uint16_t strip[16 * 1024];
+    static gfx_scene_t scene;
+    static buddy_view_t view;
+    static menu_ask_t ask;
+    s_layout = layout_compute(W, H, 65, false, ALIGN);
+    if (!gfx_scene_init(&scene, W, H, layout_background, &s_layout, strip, 16 * 1024, ALIGN) ||
+        !buddy_view_init(&view, &scene, s_layout.stage, 10, 0) ||
+        !menu_ask_init(&ask, &scene, s_layout.stage, view.home_y0 - BUDDY_MAX_LIFT * view.home_scale, 25) ||
+        !menu_init(&s_where, &menu_default, layout_panel_content(&s_layout), 0)) {
+        return false;
+    }
+    menu_ask_apply(&ask, MENU_QUESTION_PEUKIE, BUDDY_ASK_MS, BUDDY_ASK_MS);
+    const gfx_rect_t no = gfx_sprite_bounds(&ask.button[MENU_ANSWER_NO]);
+    const gfx_rect_t yes = gfx_sprite_bounds(&ask.button[MENU_ANSWER_YES]);
+    s_no_x = no.x + no.w / 2;
+    s_no_y = no.y + no.h / 2;
+    s_yes_x = yes.x + yes.w / 2;
+    s_yes_y = yes.y + yes.h / 2;
+
+    const app_config_t config = {.width = W, .height = H, .stage_percent = 65};
+    s_now_us = 1000000;
+    if (!app_init(&config)) {
+        return false;
+    }
+    run(500); // both buffers drawn, the screen lit
+    s_started = true;
+    return true;
+}
+
+// ---- tests ----
+
+void test_app_hello_offers_tracking_and_the_question(void)
+{
+    CHECK(start());
+    clear_out();
+    command(1, "hello");
+    CHECK(sent("caps=poke,monster,mode,time,status,msg,mood,act,pdc,track,did "));
+    CHECK(sent("acts=water,sneeze,stare,meditate,focus,ask_peukie"));
+    clear_out();
+    command(2, "status");
+    CHECK(sent(" act=none"));
+}
+
+// The scheduled question: started by `act` with the companion's id, shown, then exactly one outcome. NEE and no
+// answer are different outcomes, although Buddy is sad either way.
+void test_app_question_by_command_reports_yes_no_and_timeout(void)
+{
+    CHECK(start());
+    clear_out();
+    command(3, "act name=ask_peukie iid=42");
+    CHECK(sent("<DB1 3 ok #"));
+    CHECK(!sent("state=shown")); // not before a frame with the question has been presented
+    run(100);
+    CHECK_EQ(count("evt act iid=42 name=ask_peukie state=shown src=cmd"), 1);
+
+    // A retry of the same request (its reply was lost): no second question.
+    clear_out();
+    command(4, "act name=ask_peukie iid=42");
+    CHECK(sent("<DB1 4 ok dup=1 state=shown"));
+    run(100);
+    CHECK(!sent("evt act")); // no second question, so nothing new to report
+
+    // NEE.
+    touch(s_no_x, s_no_y);
+    CHECK_EQ(count("evt act iid=42 state=done result=no"), 1);
+    clear_out();
+    command(5, "status");
+    CHECK(sent(" act=42:done:no"));
+    run(4000); // sad, then his mood again
+
+    // JA: the smoke break, its start and end reported as such.
+    clear_out();
+    command(6, "act name=ask_peukie iid=43");
+    run(100);
+    CHECK(sent("evt act iid=43 name=ask_peukie state=shown src=cmd"));
+    touch(s_yes_x, s_yes_y);
+    CHECK_EQ(count("evt act iid=43 state=done result=yes"), 1);
+    CHECK(sent("evt mood mood=peukie src=break"));
+    run(BUDDY_SMOKE_BREAK_MS + 1000);
+    CHECK(sent("evt mood mood=idle src=break"));
+
+    // No answer within the minute: timeout, never "no".
+    clear_out();
+    command(7, "act name=ask_peukie iid=44");
+    run(BUDDY_ASK_MS - 1000);
+    CHECK(sent("evt act iid=44 name=ask_peukie state=shown"));
+    CHECK(!sent("state=done"));
+    run(2000);
+    CHECK_EQ(count("evt act iid=44 state=done result=timeout"), 1);
+    CHECK(!sent("result=no"));
+    run(4000);
+}
+
+// Clock Mode cuts the question off: interrupted, even after more than a minute; and while the clock is up an action
+// is refused (never started, no events).
+void test_app_an_interrupted_question_is_never_an_answer(void)
+{
+    CHECK(start());
+    clear_out();
+    command(10, "act name=ask_peukie iid=45");
+    run(100);
+    CHECK(sent("evt act iid=45 name=ask_peukie state=shown"));
+    command(11, "mode.set mode=office");
+    run(3000);
+    CHECK(sent("evt mode mode=office"));
+    clear_out();
+    command(12, "act name=sneeze iid=46");
+    CHECK(sent("<DB1 12 err busy mode=office"));
+    run(BUDDY_ASK_MS + 10000);
+    CHECK(!sent("evt act")); // nothing decided while he is away, and the minute running out is not an answer
+    command(13, "mode.set mode=normal");
+    run(3000);
+    CHECK_EQ(count("evt act iid=45 state=done result=interrupted"), 1);
+    CHECK(!sent("result=timeout") && !sent("iid=46"));
+    clear_out();
+    command(14, "status");
+    CHECK(sent(" act=45:done:interrupted"));
+}
+
+// A show by command plays to its end (done); one already playing refuses another; without an iid, and on the
+// touchscreen, the device picks the id (top bit set).
+void test_app_shows_and_touches_report_their_own_ids(void)
+{
+    CHECK(start());
+    clear_out();
+    command(20, "act name=sneeze iid=47");
+    run(50);
+    CHECK(sent("evt act iid=47 name=sneeze state=shown src=cmd"));
+    command(21, "act name=stare iid=48");
+    CHECK(sent("<DB1 21 err busy"));
+    run(BUDDY_SNEEZE_MS + 500);
+    CHECK_EQ(count("evt act iid=47 state=done result=done"), 1);
+    CHECK(!sent("iid=48"));
+
+    clear_out();
+    command(22, "act name=juggle_cats iid=49");
+    CHECK(sent("<DB1 22 err unsupported"));
+    command(23, "act name=sneeze");
+    run(50);
+    char own[64];
+    snprintf(own, sizeof(own), "evt act iid=%" PRIu32 " name=sneeze state=shown src=cmd", 0x80000000u | 12345u);
+    CHECK(sent(own));
+    run(BUDDY_SNEEZE_MS + 500);
+
+    // On the touchscreen: Activities, SNEEZE.
+    clear_out();
+    tap_slot(MENU_LIST, 1);
+    run(600); // the tiles flip in
+    tap_slot(MENU_GRID, 2);
+    run(50);
+    snprintf(own, sizeof(own), "evt act iid=%" PRIu32 " name=sneeze state=shown src=touch", 0x80000000u | 12346u);
+    CHECK(sent(own));
+    run(BUDDY_SNEEZE_MS + 500);
+    CHECK_EQ(count("state=done result=done"), 1);
+    tap_back();
+    run(600);
+}
+
+// MY DAY reports what you are doing (counted, so a repeat is a new record, a duplicate is not); his shows and moods
+// never do. Moods report why they changed.
+void test_app_my_day_and_mood_sources(void)
+{
+    CHECK(start());
+    clear_out();
+    tap_slot(MENU_LIST, 3); // MY DAY
+    run(600);
+    tap_slot(MENU_GRID, 2); // COFFEE
+    run(100);
+    CHECK_EQ(count("evt did item=myday.coffee n=12345"), 1);
+    run(1000);
+    tap_slot(MENU_GRID, 1); // MEETING
+    run(100);
+    CHECK_EQ(count("evt did item=myday.meeting n=12346"), 1);
+    CHECK_EQ(count("evt did"), 2);
+    CHECK(!sent("evt act")); // he cheers; it is not one of his shows
+    tap_back();
+    run(600);
+
+    clear_out();
+    command(30, "mood.set name=happy");
+    run(50);
+    CHECK(sent("evt mood mood=happy src=cmd"));
+    command(31, "mood.set name=happy"); // no change: no event, and it explains nothing later
+    command(32, "mood.set name=sleepy secs=1");
+    run(1500);
+    CHECK(sent("evt mood mood=sleepy src=cmd"));
+    CHECK(sent("evt mood mood=idle src=timer"));
+    CHECK(!sent("evt did"));
+}

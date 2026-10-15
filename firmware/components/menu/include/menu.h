@@ -4,9 +4,10 @@
 // What goes where, so the menu can grow without being redesigned:
 //   moods        how Buddy is: ongoing states, exactly one active (MENU_DO_MOOD)
 //   activities   things he does now, on top of his mood: short animations and modes (MENU_DO_EVENT, _OFFICE)
-//   food & drink activities that are meals: Monster today; water, coffee, lunch and snacks later
+//   food & drink activities that are meals: Monster today; water, coffee, lunch and snacks later (his shows)
+//   my day       what YOU are doing now, as you tell Buddy (MENU_DO_LOG): coffee, a smoke, a meeting. The companion
+//                records it (evt did); Buddy only cheers. Never one of his shows, which record nothing
 //   games        later: interactive experiences with their own screens
-//   schedule     later: routines and reminders, configured from the Windows companion
 //   pdc          the PDC Manager integration (ZDMW), only while the companion offers it (menu_status_t.pdc)
 // Scenarios (combinations of actions run by the companion) and needs (hunger, thirst, energy) are not menu items:
 // they will trigger the same actions and change what the items show.
@@ -37,7 +38,7 @@ typedef enum {
     MENU_ACTIVITIES,
     MENU_FOOD,
     MENU_GAMES,
-    MENU_SCHEDULE,
+    MENU_MYDAY,
     MENU_PDC,
     MENU_CATEGORY_COUNT,
 } menu_category_t;
@@ -60,6 +61,7 @@ typedef enum {
     MENU_DO_EVENT,   // delivers buddy_event_t `arg` (Surprise!, Monster)
     MENU_DO_OFFICE,  // switches to the Office Mode clock
     MENU_DO_PDC,     // asks to confirm a ZDMW click (then the companion sends it to PDC Manager)
+    MENU_DO_LOG,     // you are doing what the item says (MY DAY): reported to the companion, never refused
 } menu_do_t;
 
 typedef enum {
@@ -69,7 +71,7 @@ typedef enum {
     MENU_ICON_ACTIVITIES,
     MENU_ICON_FOOD,
     MENU_ICON_GAMES,
-    MENU_ICON_SCHEDULE,
+    MENU_ICON_SCHEDULE, // the calendar: MY DAY
     MENU_ICON_SURPRISE,
     MENU_ICON_MONSTER,
     MENU_ICON_OFFICE,
@@ -83,6 +85,8 @@ typedef enum {
     MENU_ICON_FOCUS,
     MENU_ICON_PEUKIE,   // the smoking face, for "PEUKIE?" (the question)
     MENU_ICON_ZDMW,     // the exasperated face: "ZE DOEN MAAR WAT!" (PDC Manager)
+    MENU_ICON_MEETING,  // two speech bubbles
+    MENU_ICON_WALK,     // a sneaker: stretch your legs
     MENU_ICON_COUNT,
 } menu_icon_t;
 
@@ -128,6 +132,9 @@ menu_avail_t menu_item_avail(const menu_item_t *it, const menu_status_t *st);
 
 // The item stands for what Buddy is doing now (his current mood).
 bool menu_item_active(const menu_item_t *it, const menu_status_t *st);
+
+// What Buddy puts on his sign when a MY DAY item is tapped ("ENJOY YOUR COFFEE!"); NULL for other items.
+const char *menu_item_note(const menu_item_t *it);
 
 // --- Geometry -----------------------------------------------------------------------------------------------------
 // The menu is drawn in menu pixels of MENU_SCALE x MENU_SCALE screen pixels, MENU_W x MENU_H of them.

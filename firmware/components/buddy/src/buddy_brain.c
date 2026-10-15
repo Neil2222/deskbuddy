@@ -49,6 +49,7 @@ void buddy_brain_init(buddy_brain_t *b, uint32_t now_ms, uint32_t seed)
     b->mood_start = now_ms;
     b->mood_timed = false;
     b->mood_back = BUDDY_MOOD_IDLE;
+    b->answer = BUDDY_ANSWER_NONE;
     start_cycle(b, now_ms);
 }
 
@@ -90,6 +91,7 @@ bool buddy_brain_event(buddy_brain_t *b, buddy_event_t ev, uint32_t now_ms)
         return true;
     case BUDDY_EVENT_ASK_PEUKIE:
         enter(b, BUDDY_STATE_ASK, now_ms);
+        b->answer = BUDDY_ANSWER_NONE;
         return true;
     case BUDDY_EVENT_ASK_ZDMW:
         enter(b, BUDDY_STATE_CONFIRM, now_ms);
@@ -153,6 +155,7 @@ bool buddy_brain_answer(buddy_brain_t *b, bool yes, uint32_t now_ms)
     }
     if (!yes) {
         enter(b, BUDDY_STATE_SAD, now_ms);
+        b->answer = BUDDY_ANSWER_NO;
         return true;
     }
     // A smoke break, then back to how he was (if he was smoking already, he just carries on).
@@ -162,6 +165,7 @@ bool buddy_brain_answer(buddy_brain_t *b, bool yes, uint32_t now_ms)
         b->mood_back = before;
     }
     enter(b, BUDDY_STATE_HAPPY, now_ms); // happy hops first
+    b->answer = BUDDY_ANSWER_YES;
     return true;
 }
 
@@ -210,6 +214,7 @@ uint32_t buddy_brain_tick(buddy_brain_t *b, uint32_t now_ms, buddy_pose_t *pose)
     }
     if (b->state == BUDDY_STATE_ASK && t >= BUDDY_ASK_MS) { // no answer in time: as if it were no
         b->state = BUDDY_STATE_SAD;
+        b->answer = BUDDY_ANSWER_TIMEOUT;
         b->state_start += BUDDY_ASK_MS;
         t -= BUDDY_ASK_MS;
     }

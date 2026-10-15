@@ -70,11 +70,13 @@ uint32_t buddy_activity_pose(buddy_state_t state, uint32_t t, buddy_pose_t *pose
 // What he is doing, for the touchscreen menu's footer ("drinking"); NULL when `state` is not an activity.
 const char *buddy_activity_doing(buddy_state_t state);
 
-// The activities by the names the protocol uses (act name=, hello acts=), in display order. The Monster sequence and
-// the tap reaction have their own commands (monster, poke) and are not listed.
-#define BUDDY_ACTS 5
+// The activities by the names the protocol uses (act name=, hello acts=, evt act name=), in display order: the shows
+// and "ask_peukie" (the question). The Monster sequence and the tap reaction have their own commands (monster, poke)
+// and are not listed.
+#define BUDDY_ACTS 6
 const char *buddy_act_name(int i);                       // i < BUDDY_ACTS
 bool buddy_act_parse(const char *name, buddy_event_t *out); // false (and *out untouched) for an unknown name
+const char *buddy_act_event_name(buddy_event_t ev);      // the name of an event that is one of them; NULL otherwise
 
 // The face that stands for an activity in pictures of Buddy (the touchscreen menu's icons, the companion's tiles).
 buddy_face_t buddy_act_face(buddy_event_t ev);
