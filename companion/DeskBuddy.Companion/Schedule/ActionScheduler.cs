@@ -48,6 +48,9 @@ public sealed class ActionScheduler(TimeZoneInfo zone, IEnumerable<string> decid
     private DateTimeOffset? _liveSince; // switched on at runtime: occurrences planned before are not ours
     private bool _wasLive;
 
+    /// <summary>The time zone the schedule's wall-clock times are in; replaced when Windows' time zone changes.</summary>
+    public TimeZoneInfo Zone { get; set; } = zone;
+
     public bool IsDecided(string occurrence) => _decided.Contains(occurrence);
 
     public IReadOnlyList<ActionDecision> Tick(WeekSchedule schedule, DateTimeOffset now, bool connected)
@@ -135,15 +138,15 @@ public sealed class ActionScheduler(TimeZoneInfo zone, IEnumerable<string> decid
     /// </summary>
     public IEnumerable<Occurrence> Occurrences(WeekSchedule schedule, DateTimeOffset now)
     {
-        var today = TimeZoneInfo.ConvertTime(now, zone).Date;
-        var midnight = ToUtc(today, zone);
+        var today = TimeZoneInfo.ConvertTime(now, Zone).Date;
+        var midnight = ToUtc(today, Zone);
         var list = new List<Occurrence>();
         foreach (var date in new[] { today.AddDays(-1), today })
         {
             foreach (var b in schedule[date.DayOfWeek].Where(b => b.Enabled && b.Action is not null && ScheduledActions.IsAllowed(b.Action)))
             {
                 var local = date.AddMinutes(b.Start);
-                var o = new Occurrence(Occurrence.IdFor(b.Id, date), b.Id, b.Action!, local, ToUtc(local, zone));
+                var o = new Occurrence(Occurrence.IdFor(b.Id, date), b.Id, b.Action!, local, ToUtc(local, Zone));
                 if (o.PlannedUtc <= now && (date == today || o.Deadline >= midnight))
                 {
                     list.Add(o);

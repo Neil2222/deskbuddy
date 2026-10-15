@@ -217,6 +217,19 @@ public class ActionSchedulerTests
     }
 
     [Fact]
+    public void After_a_time_zone_change_the_wall_clock_times_are_read_in_the_new_zone()
+    {
+        var w = Live(DayOfWeek.Wednesday, Block("10:00", "sneeze"));
+        var s = Fresh();
+        var london = TimeZoneInfo.FindSystemTimeZoneById("GMT Standard Time"); // UTC+1 in October, an hour behind Amsterdam
+        s.Tick(w, At("09:59"), true);
+        s.Zone = london;
+        Assert.Empty(s.Tick(w, At("10:00"), true)); // 10:00 in Amsterdam is 09:00 in London
+        var d = Assert.Single(s.Tick(w, At("11:00"), true));
+        Assert.Equal(new DateTimeOffset(2026, 10, 14, 10, 0, 0, TimeSpan.FromHours(1)), d.Occurrence.PlannedUtc);
+    }
+
+    [Fact]
     public void Only_the_allowed_actions_can_be_scheduled()
     {
         Assert.Equal(["ask_peukie", "sneeze", "stare", "meditate", "focus", "water"], ScheduledActions.All.Select(a => a.Id));

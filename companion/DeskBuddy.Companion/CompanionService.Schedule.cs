@@ -65,17 +65,14 @@ public sealed partial class CompanionService
             }
             return;
         }
-        // Records go to the history of the device in use: the connected one, else the last one connected. Before any
-        // connection nothing is recorded (it is not known which device it is for); what was missed meanwhile is
-        // recorded once one connects.
-        if ((_history ?? _lastHistory) is not { IsLoaded: true } history)
+        // Each device (board, simulator) has its own scheduler and journal, created once it has connected and its
+        // history is read; before any connection nothing is recorded (it is not known which device it is for). All are
+        // ticked every second, only the connected one as reachable: an action missed on the other device is "offline",
+        // not "asleep" because its scheduler stood still.
+        if ((_history ?? _lastHistory) is { IsLoaded: true } current && !_schedulers.ContainsKey(current))
         {
-            return;
-        }
-        if (!_schedulers.TryGetValue(history, out var scheduler))
-        {
-            var occurrences = history.Snapshot.Occurrences;
-            scheduler = new ActionScheduler(TimeZoneInfo.Local, occurrences.Where(o => o.Decided).Select(o => o.Id), _startedAt);
+            var occurrences = current.Snapshot.Occurrences;
+            _schedulers[current] = new ActionScheduler(TimeZoneInfo.Local, occurrences.Where(o => o.Decided).Select(o => o.Id), _startedAt);
             foreach (var o in occurrences)
             {
                 if (o.Iid is { } iid)
@@ -83,21 +80,32 @@ public sealed partial class CompanionService
                     _occurrenceIids[o.Id] = iid; // a busy one from before a restart keeps its request
                 }
             }
-            _schedulers[history] = scheduler;
         }
-        foreach (var d in scheduler.Tick(schedule, now, IsConnected && _history == history))
+        foreach (var (history, scheduler) in _schedulers)
         {
-            var o = d.Occurrence;
-            var reference = new ScheduleRef(o.Id, o.BlockId, o.PlannedLocal, o.PlannedUtc);
-            if (d.Step == ActionStep.Skip)
+            foreach (var d in scheduler.Tick(schedule, now, IsConnected && _history == history))
             {
-                history.Skipped(reference, o.Action, d.Reason!);
-                Write(LogKind.Info, $"Scheduled {ScheduledActions.Label(o.Action)} ({o.PlannedLocal:HH:mm}) skipped: {d.Reason}");
+                var o = d.Occurrence;
+                var reference = new ScheduleRef(o.Id, o.BlockId, o.PlannedLocal, o.PlannedUtc);
+                if (d.Step == ActionStep.Skip)
+                {
+                    history.Skipped(reference, o.Action, d.Reason!);
+                    Write(LogKind.Info, $"Scheduled {ScheduledActions.Label(o.Action)} ({o.PlannedLocal:HH:mm}) skipped: {d.Reason}");
+                }
+                else
+                {
+                    _ = RunScheduledActionAsync(history, scheduler, o, reference);
+                }
             }
-            else
-            {
-                _ = RunScheduledActionAsync(history, scheduler, o, reference);
-            }
+        }
+    }
+
+    // Windows' time zone changed: the schedule's wall-clock times are read in the new one from now on.
+    private void ScheduleZoneChanged()
+    {
+        foreach (var scheduler in _schedulers.Values)
+        {
+            scheduler.Zone = TimeZoneInfo.Local;
         }
     }
 

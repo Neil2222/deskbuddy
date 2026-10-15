@@ -138,17 +138,15 @@ public sealed class SchedulePage : Panel
         _timeline.DragCancelled += BindEditor;
         _dayScroll.Resize += (_, _) => _timeline.Height = _timeline.PreferredHeight;
         _clock.Tick += (_, _) => RefreshNow();
+        // The clock runs whether or not the page is shown: the header, the status line and the sidebar dot follow a pause
+        // that runs out or a block that starts while another page is open.
+        _clock.Start();
         VisibleChanged += (_, _) =>
         {
             if (Visible)
             {
-                _clock.Start();
                 RefreshNow();
                 BeginInvoke(ApplyScroll); // after the layout that showing the page causes
-            }
-            else
-            {
-                _clock.Stop();
             }
         };
     }

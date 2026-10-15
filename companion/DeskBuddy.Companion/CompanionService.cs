@@ -652,6 +652,8 @@ public sealed partial class CompanionService : IDisposable
 
     private void OnTimeChanged(object? sender, EventArgs e) => Post(() =>
     {
+        TimeZoneInfo.ClearCachedData(); // the zone may have changed: TimeZoneInfo.Local and DateTimeOffset.Now follow it
+        ScheduleZoneChanged();
         if (IsConnected)
         {
             _ = SyncClockAsync("Windows time or time zone changed");

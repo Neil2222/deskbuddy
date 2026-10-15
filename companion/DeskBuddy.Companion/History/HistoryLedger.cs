@@ -38,7 +38,8 @@ public sealed class HistoryLedger
     private readonly CheckpointFile _checkpoints;
     private readonly string _source;
     private readonly string _installation;
-    private readonly TimeZoneInfo _zone;
+    private readonly TimeZoneInfo? _fixedZone; // tests; else Windows' current zone, read at each write
+    private TimeZoneInfo Zone => _fixedZone ?? TimeZoneInfo.Local;
 
     private readonly List<LogEntry> _entries = [];
     private readonly List<object> _journalEntries = [];
@@ -67,7 +68,7 @@ public sealed class HistoryLedger
         _checkpoints = new CheckpointFile(Path.Combine(directory, $"device-checkpoints{sim}.json"));
         _source = source == HistorySource.Simulator ? "simulator" : "board";
         _installation = installation;
-        _zone = zone ?? TimeZoneInfo.Local;
+        _fixedZone = zone;
     }
 
     public string LogPath => _log.Path;
@@ -304,7 +305,7 @@ public sealed class HistoryLedger
         {
             var r = new RequestEntry(Guid.CreateVersion7(at).ToString(), cur.Dev, cur.Boot, iid, action, origin, at, schedule);
             _journalEntries.Add(r);
-            _journalOut.Add(HistoryCodec.ToJson(r, _source, _installation, _zone));
+            _journalOut.Add(HistoryCodec.ToJson(r, _source, _installation, Zone));
             _changed = true;
         }
     }
@@ -314,7 +315,7 @@ public sealed class HistoryLedger
     {
         var s = new SkipEntry(schedule, action, reason, at, _current?.Dev, _current?.Boot);
         _journalEntries.Add(s);
-        _journalOut.Add(HistoryCodec.ToJson(s, _source, _installation, _zone));
+        _journalOut.Add(HistoryCodec.ToJson(s, _source, _installation, Zone));
         _changed = true;
     }
 
@@ -327,7 +328,7 @@ public sealed class HistoryLedger
         {
             var r = new RequestResultEntry(key.Dev, key.Boot, iid, result, at);
             _journalEntries.Add(r);
-            _journalOut.Add(HistoryCodec.ToJson(r, _source, _installation, _zone));
+            _journalOut.Add(HistoryCodec.ToJson(r, _source, _installation, Zone));
             _changed = true;
         }
     }
@@ -442,7 +443,7 @@ public sealed class HistoryLedger
     {
         if (Apply(entry))
         {
-            _logOut.Add(HistoryCodec.ToJson(entry, _source, _installation, _zone));
+            _logOut.Add(HistoryCodec.ToJson(entry, _source, _installation, Zone));
             _checkpointsDirty = true;
             _changed = true;
         }
