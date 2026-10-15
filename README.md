@@ -49,6 +49,8 @@ tools\setup-idf.ps1                                   # ESP-IDF v5.5.5 -> %USERP
 
 To keep ESP-IDF elsewhere, set `DESKBUDDY_IDF_PATH` to the `esp-idf` directory first, for both setup and later use. The scripts check that this checkout is exactly v5.5.5.
 
+The Companion needs the .NET 10 SDK (per user, no admin): `tools\setup-dotnet.ps1`, then `tools\companion.ps1 -Publish` for `companion\publish\DeskBuddy.Companion.exe`. Its data lives in `%APPDATA%\DeskBuddy` and is not in Git (history, settings, this installation's id: each PC keeps its own). To start from the example week instead of an empty schedule, copy `docs\examples\schedule.demo.json` there as `schedule.json` before the first start (it is off: switch it to *Live* in the Schedule page to apply it).
+
 Optional: clone Waveshare's reference code into `_ref/`, which is gitignored:
 
 ```powershell
