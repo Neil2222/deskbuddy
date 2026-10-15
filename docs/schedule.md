@@ -75,17 +75,32 @@ stateDiagram-v2
     Skipped --> [*]
 ```
 
-**Interaction journal:** `interactions.jsonl`, append-only, one line per state change. A simulator connection
-writes `interactions.sim.jsonl` instead.
+**Files (P5, `%APPDATA%\DeskBuddy`; the simulator's have `.sim` before the extension):**
+
+| File | Holds | Written |
+|---|---|---|
+| `device-events.jsonl` | The canonical device log: `event` (one per `(dev, boot, seq)`), `boot` (first seen), `gap` (overflow, count known), `boot_end` (`complete` true/false) | Append-only, flushed to disk per batch |
+| `device-checkpoints.json` | Per `(dev, boot)`: the contiguous checkpoint | Replaced atomically, after the log lines it covers |
+| `companion-events.jsonl` | The Companion's own facts: `request` (an `act` it sends, with iid, action, origin; written before sending) and `request_result` (`ok`, `dup`, `busy`, `unsupported`, `err:<code>`, `no_reply`, `lost`) | Append-only |
+| `installation.json` | This installation's stable id (GUIDv7), carried by every line | Once |
 
 ```json
-{"v":1,"id":"<guid>","occ":"<block id>/2026-10-16","action":"ask_peukie","iid":2981223,"state":"shown",
- "at":"2026-10-16T10:00:01.412+02:00","src":"board","meta":{"fw":"d36d8f0"}}
+{"v":1,"kind":"event","dev":"441bf68d1178","boot":"3b765ad715085c07","seq":2,"name":"act",
+ "payload":"evt act iid=2001 state=done result=yes seq=2 t=1792097124747","time_known":true,
+ "t_utc":"2026-10-15T20:45:24.747+00:00","up_ms":null,"src":"board","recv_utc":"…","recv":"…+02:00",
+ "tz":"W. Europe Standard Time","inst":"<installation id>"}
 ```
 
-A record is the fold of its lines. It holds the interaction id, occurrence and block, action, scheduled time,
-display time (from `shown`), response and response time, the outcome, the source (board or simulator) and
-diagnostics.
+**Interactions and activities are derived, not stored:** they are folded from these files on loading and after every
+change (`HistoryDeriver`), with ids that are pure functions of their source (`<dev>/<boot>/i<iid>`,
+`<dev>/<boot>/<seq>`, `<interaction id>/smoke`). A replay, a restart or a rebuild therefore yields the same records;
+there is nothing to deduplicate. A record holds:
+- **Interaction:** iid, action, origin (`touchscreen` from `src=touch`; `companion` / `scheduled` from the journal;
+  `command` for an unrecorded command; `unknown` when `shown` never arrived), shown (only from `state=shown`; an
+  accepted command is not shown), shown and end time (device time), outcome (`yes`, `no`, `timeout`, `interrupted`,
+  `done` for shows, `not_started` when the device refused the request, else `unknown`), request time and result.
+- **Activity:** type, started_at (device time: UTC or uptime only), optional ended_at (only from an explicit end;
+  none yet), via (`myday:<item>` or `interaction:<id>`).
 
 **Outcomes and what they may mean later:**
 
@@ -94,23 +109,19 @@ diagnostics.
 | `yes`, `no` (shown) | yes |
 | `timeout` (shown) | yes, but weaker: you may not have been at the desk |
 | `done`, `interrupted` (animations) | no (Buddy's show) |
-| `skipped:<reason>`, `unconfirmed`, `lost` | no: an offline device, a pause or a busy Buddy is not you ignoring him |
+| `skipped:<reason>`, `unconfirmed`, `lost`, `not_started`, `unknown` | no: an offline device, a pause or a busy Buddy is not you ignoring him |
 
 **No duplicates:**
-- The `requested` line is written before `act` is sent.
-- The occurrence id is checked before every attempt, so a restart, reconnect or retry never sends twice.
-- Events are matched by iid; a repeated event for a finished iid changes nothing.
+- The `request` line is written before `act` is sent (P5 for Activities tiles; P6 for the schedule).
+- The occurrence id is checked before every attempt, so a restart, reconnect or retry never sends twice (P6).
+- Events are stored by `(dev, boot, seq)`; derived records have deterministic ids.
 
-**Manual activity:** `activities.jsonl` (and `.sim.jsonl`).
-
-```json
-{"v":1,"id":"<guid>","type":"smoke","started_at":"…","ended_at":null,"source":"board|simulator|companion",
- "via":"interaction:<id>|myday:food.coffee|companion","meta":{}}
-```
-
-- *JA* to the question records `smoke` started at the answer time, linked to the interaction.
-- A later MY DAY "Smoke" at 10:25 is a separate record.
-- `ended_at` is optional and only set by an explicit end, for example MY DAY "Back to work".
+**Activities:**
+- Every MY DAY tap (`evt did`) is one activity of its type.
+- *JA* to the question is one `smoke` activity at the answer time, linked to the interaction (`interaction:<id>`),
+  however often its events arrive.
+- A MY DAY "Smoke" is a separate record: a different source of evidence.
+- Moods and Buddy's shows are never activities. `ended_at` stays empty until there is an explicit end.
 
 ## 4. When an action runs (ActionScheduler, P6)
 
@@ -164,11 +175,12 @@ skipped. A mood override does not block actions (moods and actions are independe
     stored, or covered by a written gap record. Not the highest seq seen.
   - A seq above checkpoint + 1 (a hole) triggers `log.since boot=<b> seq=<checkpoint>` (one at a time; the device
     answers `err busy` to a second); so does every `hello`.
-  - When the reply arrives, every seq up to its `last=` has either been received (stored) or is gone: the device
-    reports those as `lost=<k>`, and they are exactly the lowest missing ones (the oldest dropped first). Only then
-    does the Companion write one gap record for them (`gap`, `dev`, `boot`, `from_seq`, `to_seq`, count known) and
-    advance the checkpoint over them. A hole the reply does not explain (a replayed line itself lost on the wire)
-    stays a hole: ask again.
+  - When the reply arrives, every seq up to its `last=` has either been received or is gone. The device sends what
+    it still has in order and drops the oldest first, so the lost ones are those between the request's seq and the
+    first replayed one. Only when that range has exactly `lost=<k>` members does the Companion write gap records
+    for the ones it does not have (`gap`, `from`, `to`, count known) and advance the checkpoint over them; when the
+    numbers do not add up, or a hole remains after the reply (a replayed line lost on the wire), nothing is written
+    and it asks again (after 5 s, at most three times per trigger).
   - **Durability:** the checkpoint is persisted only after the event lines (and gap records) it covers are appended
     and flushed. A crash in between re-fetches events already stored: harmless by the key. The checkpoint never
     passes a seq that is neither stored nor recorded as a gap.
@@ -218,8 +230,8 @@ could repeat after a crash, and its result would be lost. So the journals come b
 |---|---|---|
 | P3 (done) | Engine, `schedule.json`, Schedule page, drag-and-drop | 112 tests; drag verified in the running app |
 | **P4** Protocol + firmware (done, on `feature/schedule`) | `act iid=`, `ask_peukie` in `acts=`, `evt act shown/done`, `status act=`, `evt mood src=`, `evt did`, MY DAY page, caps `track,did`; the Companion needs no change (it ignores unknown events and lists no `ask_peukie` tile) | 93 host tests incl. the application end to end on a fake platform; the simulator smoke-tested over TCP; firmware builds without warnings; on the board (`2a0c261`): question by command, JA / NEE / timeout distinct, Clock Mode interrupts and refuses, MY DAY all seven, Clock zoom unchanged (0 resyncs), Companion connects |
-| **P4.1** Recorded events (done, on `feature/schedule`) | Identity `(dev, boot, seq)` (MAC / machine hash, 64-bit boot id from a true entropy source), event time `t=` or `up=`, the last 64 events in PSRAM, `log.since` replay (2 lines per frame, reply after the last, `lost=` on overflow), cap `log`; no flash writes; `evt did n=` replaced by `seq=` | 97 host tests (identity and time, replay without duplicates, repeat replay identical, other boot, one replay at a time, overflow `lost=`); simulator: events from while disconnected replayed with their own time; **board not flashed** |
-| **P5** Journals | `interactions.jsonl`, `activities.jsonl` (+`.sim`), InteractionTracker (iid correlation, `status` reconciliation, dedup), manual records (touch question, MY DAY, Companion quick-log) | Unit tests for folding, dedup and torn last lines; in the simulator one question gives exactly one record with the right outcome; a JA gives one `smoke` activity; simulator records never reach the real files |
+| **P4.1** Recorded events (done, on `feature/schedule`) | Identity `(dev, boot, seq)` (MAC / machine hash, 64-bit boot id from a true entropy source), event time `t=` or `up=`, the last 64 events in PSRAM, `log.since` replay (2 lines per frame, reply after the last, `lost=` on overflow), cap `log`; no flash writes; `evt did n=` replaced by `seq=` | 97 host tests; simulator; on the board (`29f5c80`): 20/20 automated checks over the UART (identity, new boot per restart, `up=`/`t=`, reconnect replay, identical repeat, overflow `lost=4`, 64 events in 1.31 s at 27.9 fps with 0 resyncs) and the user's JA / NEE / MY DAY replayed identically |
+| **P5** History (done, on `feature/schedule`) | `device-events.jsonl` (canonical, keyed), checkpoints, `companion-events.jsonl` (requests with iid), `installation.json`, all with `.sim` twins; replay after hello and on holes, gaps and boot ends; interactions and activities derived (`HistoryDeriver`); worker thread (`HistoryRecorder`); Activities tiles send `act … iid=` | 18 unit tests (live, replay, duplicates, out of order, holes, overflow, unexplained loss, wire loss, boot end incomplete / complete, crash before checkpoint, checkpoint ahead of the log, torn line, uptime-only time, outcomes, origins, MY DAY, one JA smoke break, shows and moods no activity, simulator isolation); end to end with the Companion and the simulator (connected, disconnected, reconnect, Companion restart, stale checkpoint, simulator restart): 12 events, 12 keys, nothing missing |
 | **P6** Live scheduling | MoodDirector wired; ActionScheduler (occurrences, grace, availability, skips); `action` in the editor (schedule v2); Pause | In the simulator: a block a minute ahead sends one `mood.set`; `ask_peukie` asks once and records yes, no or timeout; Clock Mode gives `skipped:busy:office` and is not interrupted; a disconnect past grace gives `skipped:offline`; a restart does not ask again |
 | **P7** History + polish | History page (today, this week, outcomes), Away presets, optional reminders, DPI pass (125/150 %), regression tests | Screenshots at 3 DPIs; history matches the journals |
 | Future | PatternAnalyzer, SuggestionEngine, edit provenance | Separate approval |

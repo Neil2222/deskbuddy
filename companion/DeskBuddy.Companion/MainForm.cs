@@ -859,9 +859,12 @@ public sealed class MainForm : Form
         tile.Enabled = false;
         try
         {
-            var done = activity is { Kind: ActivityKind.Mood, Mood: { } mood }
-                ? await _service.SetMoodAsync(activity.Label, mood)
-                : await _service.RunAsync(activity.Label, activity.Command);
+            var done = activity switch
+            {
+                { Kind: ActivityKind.Mood, Mood: { } mood } => await _service.SetMoodAsync(activity.Label, mood),
+                { Act: { } act } => await _service.RunActAsync(activity.Label, act),
+                _ => await _service.RunAsync(activity.Label, activity.Command),
+            };
             if (done && activity.Reaction is { } reaction)
             {
                 React(reaction);
