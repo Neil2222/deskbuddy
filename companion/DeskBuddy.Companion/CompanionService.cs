@@ -92,6 +92,20 @@ public sealed class CompanionService : IDisposable
         Tick();
     }
 
+    /// <summary>
+    /// Switches to <paramref name="port"/> (a COM port, <see cref="DeviceLink.SimulatorName"/>, or null for
+    /// auto-detect): a connection elsewhere is closed first. Then connects and keeps reconnecting, as <see cref="Connect"/>.
+    /// </summary>
+    public void ConnectTo(string? port)
+    {
+        SelectedPort = port;
+        if (_link is { } link && (port is null || link.PortName != port))
+        {
+            CloseLink(port is null ? "Switching to auto-detect" : $"Switching to {port}");
+        }
+        Connect();
+    }
+
     /// <summary>Disconnect and stay disconnected until <see cref="Connect"/>, e.g. to use the port elsewhere.</summary>
     public void Disconnect()
     {

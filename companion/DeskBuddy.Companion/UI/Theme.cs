@@ -9,6 +9,7 @@ namespace DeskBuddy.Companion.UI;
 public sealed class Theme : IDisposable
 {
     public static readonly Color Window = Color.FromArgb(14, 19, 32);
+    public static readonly Color Sidebar = Color.FromArgb(10, 14, 24);
     public static readonly Color Card = Color.FromArgb(22, 29, 46);
     public static readonly Color CardBorder = Color.FromArgb(36, 47, 71);
     public static readonly Color Tile = Color.FromArgb(29, 37, 58);
@@ -52,12 +53,17 @@ public sealed class Theme : IDisposable
     }
 
     // Segoe Fluent Icons / MDL2 Assets code points.
-    public const string GlyphSettings = "\uE713";
-    public const string GlyphChevronRight = "\uE76C";
     public const string GlyphChevronDown = "\uE70D";
     public const string GlyphSend = "\uE724";
     public const string GlyphSync = "\uE895";
     public const string GlyphRefresh = "\uE72C";
+    public const string GlyphBuddy = "\uE77B";      // Contact
+    public const string GlyphActivities = "\uE945"; // LightningBolt
+    public const string GlyphMessage = "\uE8BD";    // Message
+    public const string GlyphPdc = "\uE716";        // People
+    public const string GlyphDevice = "\uE88E";     // USB
+    public const string GlyphPlay = "\uE768";
+    public const string GlyphStop = "\uE71A";
 
     private static string? Installed(string family)
     {

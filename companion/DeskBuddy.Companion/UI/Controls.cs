@@ -59,6 +59,7 @@ public enum ButtonLook
     Accent, // filled amber; the main action of a section
     Quiet,  // flat, text only; secondary commands
     Pill,   // status: a coloured dot and text
+    Nav,    // a page in the sidebar: glyph and label, left-aligned; Selected marks the page that is open
 }
 
 /// <summary>
@@ -76,6 +77,8 @@ public sealed class FlatButton : Button
     public int IconHeight { get; set; } = 42;
     public string? Glyph { get; set; }
     public Color DotColor { get; set; } = Theme.Faint;
+    /// <summary>Nav: a status dot at the right end (in <see cref="DotColor"/>).</summary>
+    public bool ShowDot { get; set; }
 
     public Image? Icon
     {
@@ -170,6 +173,10 @@ public sealed class FlatButton : Button
             border = Look == ButtonLook.Pill ? Theme.CardBorder : Color.Empty;
             text = Enabled ? (Look == ButtonLook.Pill ? Theme.Text : Theme.Muted) : Theme.Faint;
             break;
+        case ButtonLook.Nav:
+            fill = _selected ? Theme.Tile : _pressed ? Theme.TilePressed : _hover ? Theme.Card : Parent?.BackColor ?? Theme.Window;
+            text = _selected ? Theme.Text : Theme.Muted;
+            break;
         default:
             fill = !Enabled ? Theme.Card : _pressed ? Theme.TilePressed : _hover ? Theme.TileHover : Theme.Tile;
             border = _selected ? Theme.Cyan : Enabled ? Theme.CardBorder : Theme.Tile;
@@ -183,7 +190,7 @@ public sealed class FlatButton : Button
             }
             if (border != Color.Empty)
             {
-                using var pen = new Pen(border, _selected ? LogicalToDeviceUnits(2) : 1);
+                using var pen = new Pen(border, _selected && Look == ButtonLook.Tile ? LogicalToDeviceUnits(2) : 1);
                 g.DrawPath(pen, path);
             }
         }
@@ -217,6 +224,35 @@ public sealed class FlatButton : Button
                 var m = LogicalToDeviceUnits(8);
                 using var dot = new SolidBrush(Theme.Cyan);
                 g.FillEllipse(dot, Width - m - d, m, d, d);
+            }
+            break;
+        }
+        case ButtonLook.Nav:
+        {
+            if (_selected)
+            {
+                // Buddy's eye colour on the left edge: this page is open.
+                using var bar = new SolidBrush(Theme.Cyan);
+                var h = Height / 2f;
+                g.FillRectangle(bar, LogicalToDeviceUnits(1), (Height - h) / 2, LogicalToDeviceUnits(3), h);
+            }
+            var x = LogicalToDeviceUnits(16);
+            var glyphWidth = LogicalToDeviceUnits(22);
+            if (Glyph is not null)
+            {
+                TextRenderer.DrawText(g, Glyph, _theme.Glyphs, new Rectangle(x, 0, glyphWidth, Height),
+                                      _selected ? Theme.Cyan : text, TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+            }
+            var dot = LogicalToDeviceUnits(8);
+            var right = ShowDot ? dot + LogicalToDeviceUnits(14) : LogicalToDeviceUnits(8);
+            var labelX = x + glyphWidth + LogicalToDeviceUnits(8);
+            TextRenderer.DrawText(g, Text, _selected ? _theme.Strong : _theme.Text10,
+                                  new Rectangle(labelX, 0, Width - labelX - right, Height), text,
+                                  flags & ~TextFormatFlags.HorizontalCenter);
+            if (ShowDot)
+            {
+                using var brush = new SolidBrush(DotColor);
+                g.FillEllipse(brush, Width - LogicalToDeviceUnits(12) - dot, (Height - dot) / 2f, dot, dot);
             }
             break;
         }
