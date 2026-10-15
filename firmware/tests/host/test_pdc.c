@@ -230,7 +230,7 @@ void test_pdc_confirmation_and_reaction(void)
         marks |= pose.props.particle[0].kind == BUDDY_PART_ANGER;
     }
     CHECK(angry && waving && marks);
-    CHECK(BUDDY_ZDMW_MS <= 3000); // short enough not to annoy
+    _Static_assert(BUDDY_ZDMW_MS <= 3000, "short enough not to annoy");
     buddy_brain_tick(&b, 30000 + BUDDY_ZDMW_MS, &pose);
     CHECK_EQ(pose.state, BUDDY_STATE_IDLE);
     CHECK_EQ(buddy_brain_mood(&b, 30000 + BUDDY_ZDMW_MS), BUDDY_MOOD_WORKING);

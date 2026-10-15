@@ -52,3 +52,42 @@ function Resolve-BoardPort([string] $Port) {
     if ($found.Count -eq 0) { throw 'No ESP32-S3 board port found. Connect the UART Type-C port or pass -Port / set ESPPORT.' }
     return $found[0] # CH343 entries come first
 }
+
+# Runs commands (cmd syntax) in the MSVC x64 environment from Visual Studio (Build Tools with the "Desktop
+# development with C++" workload, which includes the Windows SDK); used for the host tests and the simulator.
+function Invoke-Msvc([string[]] $Steps) {
+    $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+    if (-not (Test-Path $vswhere)) { throw 'Visual Studio Installer not found; install Visual Studio Build Tools with the C++ workload.' }
+    $vs = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+    if (-not $vs) { throw 'MSVC not found; install Visual Studio Build Tools with the C++ workload.' }
+
+    # VsDevCmd normally finds the Windows SDK with reg.exe, which group policy blocks on managed machines
+    # ("Registry editing has been disabled"). Locate the SDK here instead (PowerShell's registry provider is not
+    # affected) and pass it in with -winsdk=none.
+    $sdkDir = (Get-ItemProperty 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Microsoft SDKs\Windows\v10.0' -ErrorAction SilentlyContinue).InstallationFolder
+    if (-not $sdkDir) { throw 'Windows SDK not found; install it with the Visual Studio C++ workload.' }
+    $sdkVer = Get-ChildItem (Join-Path $sdkDir 'Include') -Directory |
+        Where-Object { Test-Path (Join-Path $_.FullName 'um\winsdkver.h') } |
+        Sort-Object { [version]$_.Name } | Select-Object -Last 1 -ExpandProperty Name
+    if (-not $sdkVer) { throw "No complete Windows SDK under $sdkDir" }
+    $env:WindowsSdkDir = $sdkDir
+    $env:WindowsSDKVersion = "$sdkVer\"
+    $env:UniversalCRTSdkDir = $sdkDir
+    $env:UCRTVersion = $sdkVer
+    $devcmd = Join-Path $vs 'Common7\Tools\VsDevCmd.bat'
+
+    # CMake and Ninja come with Visual Studio's "C++ CMake tools" component; without it, use ESP-IDF's (the same
+    # tools the firmware builds with).
+    if (-not (Test-Path (Join-Path $vs 'Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe'))) {
+        $tools = if ($env:IDF_TOOLS_PATH) { $env:IDF_TOOLS_PATH } else { Join-Path $env:USERPROFILE '.espressif' }
+        $cmake = Get-ChildItem (Join-Path $tools 'tools\cmake\*\bin\cmake.exe') -ErrorAction SilentlyContinue |
+            Sort-Object FullName | Select-Object -Last 1
+        $ninja = Get-ChildItem (Join-Path $tools 'tools\ninja\*\ninja.exe') -ErrorAction SilentlyContinue |
+            Sort-Object FullName | Select-Object -Last 1
+        if (-not $cmake -or -not $ninja) {
+            throw 'CMake/Ninja not found: add "C++ CMake tools for Windows" to Visual Studio, or run tools/setup-idf.ps1.'
+        }
+        $env:PATH = "$($cmake.DirectoryName);$($ninja.DirectoryName);$env:PATH"
+    }
+    cmd /c "`"$devcmd`" -no_logo -arch=x64 -host_arch=x64 -winsdk=none && $($Steps -join ' && ')"
+}

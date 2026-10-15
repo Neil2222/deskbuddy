@@ -34,7 +34,7 @@ public sealed class CompanionService : IDisposable
     private readonly string? _pdcWarning;
 
     public bool AutoConnect { get; private set; } = true;
-    /// <summary>Port chosen by the user; null: the first DeskBuddy (CH343) port found.</summary>
+    /// <summary>Port chosen by the user (a COM port or <see cref="DeviceLink.SimulatorName"/>); null: the first DeskBuddy (CH343) port, else the simulator if it is running.</summary>
     public string? SelectedPort { get; set; }
 
     public bool IsConnected { get; private set; }
@@ -204,7 +204,9 @@ public sealed class CompanionService : IDisposable
     {
         var now = DateTime.UtcNow;
         _ = Pdc.TickAsync(); // no network at all while the integration is off
-        var held = Mutex.TryOpenExisting(PortHoldMutex, out var hold);
+        // The hold concerns serial ports only; a simulator connection (TCP) carries on while a tool flashes.
+        var simulator = _link?.IsSimulator ?? SelectedPort == DeviceLink.SimulatorName;
+        var held = Mutex.TryOpenExisting(PortHoldMutex, out var hold) && !simulator;
         hold?.Dispose();
         if (held)
         {
@@ -247,20 +249,15 @@ public sealed class CompanionService : IDisposable
 
     private async Task ConnectAsync()
     {
-        var port = SelectedPort ?? PortFinder.List().FirstOrDefault(p => p.IsDeskBuddy)?.Name;
-        if (port is null)
-        {
-            SetConnection("Waiting for DeskBuddy (not plugged in?)");
-            _nextAttempt = DateTime.UtcNow.AddSeconds(2);
-            return;
-        }
+        var auto = SelectedPort is null;
+        var port = SelectedPort ?? PortFinder.List().FirstOrDefault(p => p.IsDeskBuddy)?.Name ?? DeviceLink.SimulatorName;
         _connecting = true;
         try
         {
             DeviceLink link;
             try
             {
-                link = DeviceLink.Open(port);
+                link = await Task.Run(() => DeviceLink.Open(port)); // a refused or slow TCP connect must not stall the UI
             }
             catch (UnauthorizedAccessException)
             {
@@ -268,10 +265,22 @@ public sealed class CompanionService : IDisposable
                 _nextAttempt = DateTime.UtcNow + RetryDelay;
                 return;
             }
+            catch (IOException) when (auto && port == DeviceLink.SimulatorName)
+            {
+                // No board and no simulator: keep looking
+                SetConnection("Waiting for DeskBuddy (not plugged in? or start the simulator)");
+                _nextAttempt = DateTime.UtcNow.AddSeconds(2);
+                return;
+            }
             catch (Exception e) when (e is IOException or ArgumentException or InvalidOperationException)
             {
                 SetConnection($"Cannot open {port}: {e.Message}");
                 _nextAttempt = DateTime.UtcNow + RetryDelay;
+                return;
+            }
+            if (!AutoConnect)
+            {
+                link.Dispose(); // disconnected while opening
                 return;
             }
             Attach(link);
@@ -336,7 +345,9 @@ public sealed class CompanionService : IDisposable
         {
             if (_link == link)
             {
-                CloseLink($"Connection lost ({reason}). Unplugged? Reconnecting...");
+                CloseLink(link.IsSimulator
+                    ? $"Connection lost ({reason}). Simulator closed? Reconnecting..."
+                    : $"Connection lost ({reason}). Unplugged? Reconnecting...");
                 _nextAttempt = DateTime.UtcNow.AddSeconds(2);
             }
         });

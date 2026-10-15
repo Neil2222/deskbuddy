@@ -8,7 +8,10 @@ public sealed record PortInfo(string Name, string Description, bool IsDeskBuddy)
     public override string ToString() => $"{Name}  {Description}";
 }
 
-/// <summary>Lists serial ports and recognises DeskBuddy's CH343 USB-UART (USB 1A86:55D3) by its USB ID.</summary>
+/// <summary>
+/// Lists serial ports and recognises DeskBuddy's CH343 USB-UART (USB 1A86:55D3) by its USB ID. The desktop simulator
+/// is always listed last (a TCP socket, not a port), so it can be selected before it is started.
+/// </summary>
 public static class PortFinder
 {
     private const string Ch343 = @"VID_1A86&PID_55D3";
@@ -23,6 +26,7 @@ public static class PortFinder
                 : new PortInfo(p, "other serial port", false))
             .OrderByDescending(p => p.IsDeskBuddy)
             .ThenBy(p => p.Name.Length).ThenBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
+            .Append(new PortInfo(DeviceLink.SimulatorName, $"DeskBuddy simulator (127.0.0.1:{DeviceLink.SimulatorPort})", false))
             .ToList();
     }
 

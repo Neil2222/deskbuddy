@@ -14,6 +14,9 @@ managed_components/
 sdkconfig
 sdkconfig.old
 
+# --- Desktop simulator build (tools/simulator.ps1) ---
+build-sim/
+
 # --- .NET build outputs (companion/) ---
 bin/
 obj/

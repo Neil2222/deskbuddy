@@ -3,12 +3,14 @@
 A standalone desk gadget with animated pixel-art characters, built on the Waveshare ESP32-S3-Touch-LCD-7B.
 
 Status: board bring-up done; rendering engine and a placeholder robot character running on the device, with personality: seven moods (idle, relaxed, a smoke break, angry, sleepy, working, happy), a Monster Energy animation (drinking a can through a charging cable), a touchscreen menu, and Clock Mode: Buddy zooms in until his face becomes a desk clock. A Windows companion app connects over USB: it sets the clock, chooses his mood, triggers actions and sends messages that scroll across a retro LED sign. No workplace integrations or persistent state yet.
-See [HANDOVER.md](HANDOVER.md) for project state and next steps. Measurements: [docs/bringup-results.md](docs/bringup-results.md) and [docs/rendering-results.md](docs/rendering-results.md).
+See [HANDOVER.md](HANDOVER.md) for project state and next steps. Measurements: [docs/bringup-results.md](docs/bringup-results.md) and [docs/rendering-results.md](docs/rendering-results.md). A desktop simulator runs the same application code on a Windows PC ([below](#desktop-simulator)).
 
 ## Layout
 
 ```
-firmware/deskbuddy/           Application: render loop, touch task, serial link to the companion, options (menuconfig "DeskBuddy")
+firmware/deskbuddy/           Board firmware: tasks, touch, UART link, the hardware under the application (port.c), options (menuconfig "DeskBuddy")
+firmware/components/app/      The application, shared by board and simulator: menu, companion commands, Clock Mode, messages, PDC (app.h, app_port.h)
+firmware/simulator/           Desktop simulator (Windows): the application in a window, mouse as touch, TCP link for the companion
 firmware/components/gfx/      Hardware-independent renderer: dirty rectangles, sprites, compositor, double-buffer repair
 firmware/components/buddy/    Placeholder character: behavior (moods, reactions, Monster sequence), ASCII programmer art, pose-to-sprite view
 firmware/components/layout/   Screen split: character stage + control panel
@@ -29,6 +31,7 @@ tools/idf.ps1                 Runs idf.py in the pinned environment (auto-detect
 tools/companion.ps1           Builds and starts the companion app; -Publish makes the double-clickable exe
 tools/pdc-fake-server.py      Local stand-in for PDC Manager's ZDMW (no Teams) to try the companion's PDC integration
 tools/host-test.ps1           Builds and runs the host tests with MSVC
+tools/simulator.ps1           Builds and starts the desktop simulator
 tools/flash-backup.ps1        Full 16 MB flash backup / verify / restore
 docs/                         Hardware findings, measured results, serial protocol
 ```
@@ -120,7 +123,7 @@ tools\companion.ps1 -Publish # companion\publish\DeskBuddy.Companion.exe: one se
 - **Starting it by double-click:** use `companion\publish\DeskBuddy.Companion.exe` (make it with `-Publish`; pin it to the taskbar or copy it anywhere, also to another PC). It has .NET built in. The exe in `bin\Release` is a small development build that needs the .NET runtime: double-clicked, Windows says *You must install .NET Desktop Runtime*, because the SDK from `setup-dotnet.ps1` is installed per user and only `tools\companion.ps1` tells the app where it is. Re-run `-Publish` after changes (close the published app first).
 
 - **Window:** Buddy's face in the header reacts (sleepy while disconnected, happy or surprised after an action); next to it a status pill. The pill or the gear opens the connection details (port, firmware, clock, *Sync clock*); *Diagnostics* at the bottom opens the log of commands, replies and the board's own log output (so a separate serial monitor is not needed). Both are folded away at start. All artwork is Buddy's own pixel art, scaled by whole numbers only.
-- **Connection:** finds DeskBuddy's UART port (CH343, USB `1A86:55D3`) by itself and reconnects after unplugging. Opening the port does not reset the board. *Disconnect* keeps it disconnected until *Connect*.
+- **Connection:** finds DeskBuddy's UART port (CH343, USB `1A86:55D3`) by itself and reconnects after unplugging; without a board it connects to the [desktop simulator](#desktop-simulator) if that is running. *Simulator* in the port list (connection details) chooses the simulator explicitly, also while a board is plugged in. Opening the port does not reset the board. *Disconnect* keeps it disconnected until *Connect*.
 - **Clock:** synced on connect, when the board restarts, every hour, and when Windows' time or time zone changes or the laptop wakes up. Daylight-saving switches happen on time even while the companion is not running.
 - **Activities:** tiles for modes (Buddy, Clock; the one that is on is outlined), actions (Surprise!, Sneeze, Stare, Meditate, Focus), Food & Drink (Monster, Water) and moods (Idle, Relaxed, Peukie, Angry, Sleepy, Working, Happy, with Buddy's face for each; the current one is outlined, and the header face shows it too). After an action the header shows Buddy's face for it for a moment. They come from the list in `companion/DeskBuddy.Companion/Activities.cs`: a new firmware command, mood or activity is one entry there, and its tile is enabled only when the board announces it (`caps=`, `moods=`, `acts=`).
 - **Messages:** type up to 100 characters and press Enter or *Send*: he jumps and the text scrolls across an amber LED sign above him (below the clock in Clock Mode, which stays on), one LED at a time, about 4 characters a second. Short messages repeat so they stay up at least 8 s; a full-length one takes about 28 s. A message sent during a Monster sequence or while another one is up waits its turn (one at a time). Accents show without accents, emoji as a box. The last 10 messages are listed under *Recent* (double-click or Enter to reuse); the list appears with the first message.
@@ -128,6 +131,21 @@ tools\companion.ps1 -Publish # companion\publish\DeskBuddy.Companion.exe: one se
 - **Flashing while it runs:** `tools\idf.ps1 ... flash` / `monitor` signals the companion to let go of the port and reconnects it afterwards. Other serial tools (for example PuTTY) need *Disconnect* first: Windows lets only one program open a COM port.
 - **Without the companion** DeskBuddy works as before; only the clock stays *CLOCK NOT SET* after a power-up until the companion connects.
 - Protocol: [docs/protocol.md](docs/protocol.md).
+
+## Desktop simulator
+
+```powershell
+tools\simulator.ps1                  # build and start: a 1024x600 window, the log in the console
+tools\simulator.ps1 -Scale 2         # every panel pixel as 2x2 screen pixels
+tools\simulator.ps1 -Stage 70 -PanelLeft -Verify   # menuconfig's layout options and GFX_VERIFY
+```
+
+- **Same code as the board:** everything above the hardware lives in `firmware/components/app` and is compiled unchanged into both: the character, menu, companion commands, Clock Mode, messages, PDC. Each side implements `app_port.h` (time, memory, frame buffers, backlight, the link): `firmware/deskbuddy/main/port.c` on the board, `firmware/simulator/sim_port.c` here. Behaviour changes go into `app` and show up in both.
+- **Touch:** the left mouse button is a finger: press, drag, release, like the GT911 reports it.
+- **Companion:** the simulator listens on `127.0.0.1:47801` and speaks the board's protocol byte for byte, log lines included (they show in the companion's *Diagnostics*). Choose *Simulator* in the companion's port list, or let auto-detect find it when no board is plugged in. Clock, moods, activities, messages and PDC work as with the board.
+- **Like the board:** the clock starts at 1970 and shows *CLOCK NOT SET* until the companion sets it; the screen stays black until both buffers are drawn; the firmware version is `git describe`, as ESP-IDF's.
+- **Not simulated:** the panel scanout and PSRAM timing (`PERF` lines show render times but `scanout 0.00 Hz`), the backlight controller and the IO expander; measure those on the board.
+- **Build:** MSVC like the host tests, in `firmware/tests/host/build-sim` (Release, no sanitizer). The host tests build it too, so a change in `app` that breaks the simulator fails `tools\host-test.ps1`.
 
 ## Host tests (no hardware)
 
@@ -137,7 +155,7 @@ tools\host-test.ps1 -Snapshot    # also renders poses, Monster key frames, a Mon
 tools\host-test.ps1 -Icons       # exports Buddy's art for the companion to assets\buddy\ (faces incl. the moods, can, moon, icon-16..256.png, buddy.ico)
 ```
 
-- **Requirements:** Visual Studio Build Tools with the C++ workload. On Linux/macOS, plain `cmake` + `ctest` in `firmware/tests/host` works too.
+- **Requirements:** Visual Studio Build Tools with the C++ workload, including *C++ AddressSanitizer* (the tests build with it). CMake and Ninja come from Visual Studio's *C++ CMake tools* or, without them, from ESP-IDF's tools. On Linux/macOS, plain `cmake` + `ctest` in `firmware/tests/host` works too (tests only; the simulator is Windows-only).
 - **Managed machines:** the script locates the Windows SDK itself, because group policy may block `reg.exe`, which Visual Studio's own environment script relies on.
 
 ## Factory firmware

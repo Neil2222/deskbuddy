@@ -1,17 +1,26 @@
 using System.Collections.Concurrent;
 using System.IO.Ports;
+using System.Net.Sockets;
 using System.Text;
 using DeskBuddy.Companion.Protocol;
 
 namespace DeskBuddy.Companion.Device;
 
 /// <summary>
-/// One open serial connection to DeskBuddy: sends commands, matches replies, and passes on events and the device's
-/// log output. Events are raised on a background thread.
+/// One open connection to DeskBuddy: sends commands, matches replies, and passes on events and the device's
+/// log output. The byte stream is the board's UART, either a real serial port or the desktop simulator's TCP socket
+/// (identical frames and log lines). Events are raised on a background thread.
 /// </summary>
 public sealed class DeviceLink : IDisposable
 {
-    private readonly SerialPort _port;
+    /// <summary>The name under which the desktop simulator is listed, selected and shown instead of a COM port.</summary>
+    public const string SimulatorName = "Simulator";
+    /// <summary>TCP port the desktop simulator listens on (127.0.0.1 only).</summary>
+    public const int SimulatorPort = 47801;
+    private const string SimulatorHost = "127.0.0.1";
+
+    private readonly Stream _stream;
+    private readonly IDisposable _owner; // the SerialPort or TcpClient behind the stream
     private readonly CancellationTokenSource _stop = new();
     private readonly ConcurrentDictionary<uint, TaskCompletionSource<Frame>> _pending = new();
     private readonly object _writeLock = new();
@@ -28,12 +37,30 @@ public sealed class DeviceLink : IDisposable
     /// <summary>The port went away (unplugged) or failed. Not raised by <see cref="Dispose"/>.</summary>
     public event Action<string>? Lost;
 
-    public string PortName => _port.PortName;
+    /// <summary>The COM port name, or <see cref="SimulatorName"/>.</summary>
+    public string PortName { get; }
 
-    private DeviceLink(SerialPort port) => _port = port;
+    public bool IsSimulator => PortName == SimulatorName;
 
-    /// <summary>Opens the port. DTR and RTS stay off: on the CH343 they reset the board or enter its bootloader.</summary>
+    private DeviceLink(string portName, Stream stream, IDisposable owner)
+    {
+        PortName = portName;
+        _stream = stream;
+        _owner = owner;
+    }
+
+    /// <summary>
+    /// Opens a serial port, or the simulator's TCP socket for <see cref="SimulatorName"/>. For serial, DTR and RTS
+    /// stay off: on the CH343 they reset the board or enter its bootloader.
+    /// </summary>
     public static DeviceLink Open(string portName)
+    {
+        var link = portName == SimulatorName ? OpenSimulator() : OpenSerial(portName);
+        _ = Task.Run(link.ReadLoop);
+        return link;
+    }
+
+    private static DeviceLink OpenSerial(string portName)
     {
         var port = new SerialPort(portName, 115200, Parity.None, 8, StopBits.One)
         {
@@ -44,9 +71,24 @@ public sealed class DeviceLink : IDisposable
             Encoding = Encoding.ASCII,
         };
         port.Open();
-        var link = new DeviceLink(port);
-        _ = Task.Run(link.ReadLoop);
-        return link;
+        return new DeviceLink(portName, port.BaseStream, port);
+    }
+
+    private static DeviceLink OpenSimulator()
+    {
+        var client = new TcpClient { NoDelay = true };
+        try
+        {
+            client.Connect(SimulatorHost, SimulatorPort);
+        }
+        catch (SocketException e)
+        {
+            client.Dispose();
+            throw new IOException($"the simulator is not running ({e.Message})", e);
+        }
+        var stream = client.GetStream();
+        stream.WriteTimeout = 1000;
+        return new DeviceLink(SimulatorName, stream, client);
     }
 
     /// <summary>Sends a command and waits for its reply (ok or err). Throws TimeoutException without a reply.</summary>
@@ -60,7 +102,7 @@ public sealed class DeviceLink : IDisposable
             var line = Frame.Command(seq, body);
             lock (_writeLock)
             {
-                _port.Write(line);
+                _stream.Write(Encoding.ASCII.GetBytes(line));
             }
             Traffic?.Invoke(line.TrimEnd(), true);
             return await reply.Task.WaitAsync(timeout, _stop.Token);
@@ -82,7 +124,7 @@ public sealed class DeviceLink : IDisposable
         var line = new StringBuilder();
         try
         {
-            var stream = _port.BaseStream;
+            var stream = _stream;
             while (!_stop.IsCancellationRequested)
             {
                 var n = await stream.ReadAsync(buffer, _stop.Token);
@@ -158,7 +200,7 @@ public sealed class DeviceLink : IDisposable
         _stop.Cancel();
         try
         {
-            _port.Dispose();
+            _owner.Dispose();
         }
         catch (IOException)
         {

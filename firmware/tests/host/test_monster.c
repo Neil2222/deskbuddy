@@ -18,7 +18,7 @@ static const uint32_t k_starts[] = {BUDDY_MONSTER_DISCOVER_AT, BUDDY_MONSTER_PRE
 
 void test_monster_phases_run_in_order_then_idle(void)
 {
-    CHECK(BUDDY_MONSTER_MS >= 5000 && BUDDY_MONSTER_MS <= 7000);
+    _Static_assert(BUDDY_MONSTER_MS >= 5000 && BUDDY_MONSTER_MS <= 7000, "Monster sequence length");
     for (unsigned i = 0; i < N_PHASES; i++) {
         CHECK_EQ(buddy_monster_phase(k_starts[i]), k_order[i]);
         if (k_starts[i] > 0) {

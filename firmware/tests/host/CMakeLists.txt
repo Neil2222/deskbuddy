@@ -1,6 +1,7 @@
-# Host-side unit tests for the hardware-independent components (gfx, buddy, layout, menu...). No ESP32 or ESP-IDF.
-# Windows: tools/host-test.ps1 (MSVC). Linux/macOS: cmake -S firmware/tests/host -B build && cmake --build build
-#                                                    && ctest --test-dir build --output-on-failure
+# Host-side unit tests for the hardware-independent components (gfx, buddy, layout, menu...), and the desktop
+# simulator (Windows: the board's application in a window, firmware/simulator). No ESP32 or ESP-IDF.
+# Windows: tools/host-test.ps1 (MSVC), tools/simulator.ps1. Linux/macOS (tests only): cmake -S firmware/tests/host
+#   -B build && cmake --build build && ctest --test-dir build --output-on-failure
 cmake_minimum_required(VERSION 3.16)
 project(deskbuddy_host_tests C)
 
@@ -18,7 +19,8 @@ file(GLOB CORE_SRCS CONFIGURE_DEPENDS
      ${COMPONENTS_DIR}/link/src/*.c
      ${COMPONENTS_DIR}/marquee/src/*.c
      ${COMPONENTS_DIR}/menu/src/*.c
-     ${COMPONENTS_DIR}/pdc/src/*.c)
+     ${COMPONENTS_DIR}/pdc/src/*.c
+     ${COMPONENTS_DIR}/app/src/*.c)
 
 if(MSVC)
     set(WARNINGS /W4 /WX)
@@ -43,7 +45,8 @@ target_include_directories(deskbuddy_core PUBLIC
     ${COMPONENTS_DIR}/link/include
     ${COMPONENTS_DIR}/marquee/include
     ${COMPONENTS_DIR}/menu/include
-    ${COMPONENTS_DIR}/pdc/include)
+    ${COMPONENTS_DIR}/pdc/include
+    ${COMPONENTS_DIR}/app/include)
 target_compile_options(deskbuddy_core PRIVATE ${WARNINGS})
 if(NOT MSVC)
     target_link_libraries(deskbuddy_core PUBLIC m)
@@ -63,6 +66,24 @@ target_compile_options(buddy_snapshot PRIVATE ${WARNINGS})
 add_executable(buddy_icons icons.c png.c)
 target_link_libraries(buddy_icons PRIVATE deskbuddy_core)
 target_compile_options(buddy_icons PRIVATE ${WARNINGS})
+
+# The desktop simulator: components/app with firmware/simulator as its platform (app_port.h). The version is the
+# one ESP-IDF gives the firmware (git describe at configure time).
+if(WIN32)
+    find_package(Git QUIET)
+    set(SIM_VERSION unknown)
+    if(GIT_FOUND)
+        execute_process(COMMAND ${GIT_EXECUTABLE} describe --always --tags --dirty
+                        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+                        OUTPUT_VARIABLE SIM_VERSION OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+    endif()
+    set(SIM_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../simulator)
+    add_executable(deskbuddy_sim ${SIM_DIR}/sim_main.c ${SIM_DIR}/sim_port.c)
+    target_include_directories(deskbuddy_sim PRIVATE ${SIM_DIR})
+    target_compile_definitions(deskbuddy_sim PRIVATE DESKBUDDY_SIM_VERSION="${SIM_VERSION}")
+    target_link_libraries(deskbuddy_sim PRIVATE deskbuddy_core ws2_32 winmm)
+    target_compile_options(deskbuddy_sim PRIVATE ${WARNINGS})
+endif()
 
 enable_testing()
 add_test(NAME host_tests COMMAND host_tests)

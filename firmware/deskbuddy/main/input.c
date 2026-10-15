@@ -32,12 +32,12 @@ IRAM_ATTR void input_touch_irq(void *ctx)
 }
 
 // Moves may be dropped when the consumer lags (newer ones follow); down/up must arrive, so they evict the oldest.
-static void push(const input_event_t *ev)
+static void push(const app_event_t *ev)
 {
-    if (xQueueSend(s_queue, ev, 0) == pdTRUE || ev->type == INPUT_MOVE) {
+    if (xQueueSend(s_queue, ev, 0) == pdTRUE || ev->type == APP_TOUCH_MOVE) {
         return;
     }
-    input_event_t oldest;
+    app_event_t oldest;
     xQueueReceive(s_queue, &oldest, 0);
     xQueueSend(s_queue, ev, 0);
 }
@@ -47,7 +47,7 @@ static void touch_task(void *arg)
     (void)arg;
     bool down = false;
     int failures = 0;
-    input_event_t last = {0};
+    app_event_t last = {0};
     for (;;) {
         const TickType_t wait = failures ? pdMS_TO_TICKS(ERROR_RETRY_MS)
                                 : down   ? pdMS_TO_TICKS(RELEASE_POLL_MS)
@@ -70,19 +70,19 @@ static void touch_task(void *arg)
         uint8_t count = 0;
         esp_lcd_touch_get_data(s_touch, pt, &count, 1);
 
-        input_event_t ev = {.irq_us = t};
+        app_event_t ev = {.at_us = t};
         if (count > 0) {
             ev.x = (int16_t)pt[0].x;
             ev.y = (int16_t)pt[0].y;
-            ev.type = down ? INPUT_MOVE : INPUT_DOWN;
-            if (ev.type == INPUT_MOVE && ev.x == last.x && ev.y == last.y) {
+            ev.type = down ? APP_TOUCH_MOVE : APP_TOUCH_DOWN;
+            if (ev.type == APP_TOUCH_MOVE && ev.x == last.x && ev.y == last.y) {
                 continue;
             }
             down = true;
         } else if (down) {
             ev = last;
-            ev.type = INPUT_UP;
-            ev.irq_us = t;
+            ev.type = APP_TOUCH_UP;
+            ev.at_us = t;
             down = false;
         } else {
             continue;
@@ -95,7 +95,7 @@ static void touch_task(void *arg)
 esp_err_t input_start(esp_lcd_touch_handle_t touch, QueueHandle_t *events)
 {
     s_touch = touch;
-    s_queue = xQueueCreate(QUEUE_LEN, sizeof(input_event_t));
+    s_queue = xQueueCreate(QUEUE_LEN, sizeof(app_event_t));
     if (!s_queue) {
         return ESP_ERR_NO_MEM;
     }

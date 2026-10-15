@@ -2,7 +2,9 @@
 
 DeskBuddy and the Windows companion (`companion/`) talk over the board's **UART** Type-C port (CH343, 115200 8N1). The same line carries the firmware's log output; protocol frames are whole lines that start with `>DB` or `<DB`, and everything else is log text.
 
-- **Firmware:** `firmware/components/link` (parsing and formatting, host-tested), `firmware/deskbuddy/main/serial_link.c` (UART task), `run_command()` in `main.c`.
+The desktop simulator (`tools/simulator.ps1`) carries the same byte stream, frames and log lines, over **TCP on 127.0.0.1:47801** instead of the UART. It accepts one companion at a time; the companion lists it as *Simulator*.
+
+- **Firmware:** `firmware/components/link` (parsing and formatting, host-tested), `firmware/components/app` (`app_link.c`: lines, `hello`/`ping`, `CAPS`; `run_command()` in `app.c`), and the transport underneath: `firmware/deskbuddy/main/serial_link.c` (UART task) or `firmware/simulator/sim_port.c` (TCP thread).
 - **Companion:** `companion/DeskBuddy.Companion/Protocol/Frame.cs`, `Device/DeviceLink.cs`.
 
 ## Frames
@@ -103,7 +105,7 @@ The optional "Ze Doen Maar Wat" button of PDC Manager (`https://pdcmanager`): a 
 
 ## Adding a command
 
-1. Firmware: add it to `link_cmd_t` and `COMMANDS` in `components/link`, decode its arguments in `decode_args()`, run it in `run_command()` (`main.c`), add its capability to `CAPS` in `serial_link.c`, and add host tests (`firmware/tests/host/test_link.c`).
+1. Firmware: add it to `link_cmd_t` and `COMMANDS` in `components/link`, decode its arguments in `decode_args()`, run it in `run_command()` (`components/app/src/app.c`), add its capability to `APP_LINK_CAPS` in `app_link.h`, and add host tests (`firmware/tests/host/test_link.c`).
 2. Companion: add a button (`MainForm.cs`) that sends it when the capability is present.
 3. Document it here.
 
