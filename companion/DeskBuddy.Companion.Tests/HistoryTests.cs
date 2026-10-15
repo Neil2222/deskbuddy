@@ -202,7 +202,7 @@ public sealed class HistoryTests : IDisposable
         Assert.Equal($"log.since boot={B2} seq=0", fetch.Command);
         l.Commit();
         var end = Assert.Single(l.Snapshot.BootEnds);
-        Assert.Equal((B1, 2u, false), (end.Boot, end.After, end.Complete));
+        Assert.Equal((B1, 2u, false), (end.Boot, end.After, end.SeenLive));
 
         // Seen again after a Companion restart: not closed twice.
         var again = Open();
@@ -212,7 +212,7 @@ public sealed class HistoryTests : IDisposable
     }
 
     [Fact]
-    public void A_restart_seen_live_with_nothing_missing_closes_the_boot_as_complete()
+    public void A_restart_seen_live_with_no_hole_is_marked_seen_live_not_complete()
     {
         var l = Open();
         var fetch = Connect(l);
@@ -226,8 +226,57 @@ public sealed class HistoryTests : IDisposable
         Live(l, Did(1, "water")); // the new boot counts from 1 again: a different key
         l.Commit();
         var end = Assert.Single(l.Snapshot.BootEnds);
-        Assert.Equal((B1, 2u, true), (end.Boot, end.After, end.Complete));
+        Assert.Equal((B1, 2u, true), (end.Boot, end.After, end.SeenLive));
         Assert.Equal(3, Events(l));
+        Assert.DoesNotContain("complete", LogLines().Single(x => x.Contains("\"kind\":\"boot_end\"")));
+    }
+
+    private static Frame BootEvt(string boot) => F($"<DB1 0 evt boot proto=1 fw=29f5c80 dev={Dev} boot={boot}");
+
+    [Fact]
+    public void A_restart_into_the_hellos_boot_during_the_handshake_drops_what_came_before_it()
+    {
+        var l = Open();
+        l.Received(Evt(Did(5, "work")), T0); // the old boot's, before it restarted: its boot cannot be named
+        l.Received(BootEvt(B2), T0);
+        l.Received(Evt(Did(1, "coffee")), T0); // the new boot's, before the hello reply was handled
+        var fetch = Connect(l, B2);
+        Assert.Equal($"log.since boot={B2} seq=1", fetch.Command); // its seq 1 is already stored
+        l.Commit();
+        var e = Assert.Single(l.Entries.OfType<EventEntry>());
+        Assert.Equal((B2, 1u, "evt did item=myday.coffee seq=1 t=" + Ms(1)), (e.Boot, e.Seq, e.Payload));
+    }
+
+    [Fact]
+    public void A_restart_after_the_hello_reply_but_before_it_was_handled_switches_to_the_new_boot()
+    {
+        var l = Open();
+        l.Received(BootEvt(B2), T0); // read before the hello reply (from B1) reached the history
+        l.Received(Evt(Did(1, "coffee")), T0);
+        l.Connected(Dev, B1, "29f5c80", T0);
+        var fetch = l.TakeFetch(T0);
+        Assert.NotNull(fetch);
+        Assert.Equal($"log.since boot={B2} seq=1", fetch.Command);
+        l.Commit();
+        Assert.Equal((B2, 1u), l.Entries.OfType<EventEntry>().Select(x => (x.Boot, x.Seq)).Single());
+        var end = Assert.Single(l.Snapshot.BootEnds);
+        Assert.Equal((B1, false), (end.Boot, end.SeenLive));
+    }
+
+    [Fact]
+    public void A_reply_for_another_boot_is_retried_a_few_times_not_forever()
+    {
+        var l = Open();
+        var fetch = Connect(l);
+        var at = T0;
+        for (var i = 0; i < HistoryLedger.MaxFetchAttempts; i++)
+        {
+            Assert.NotNull(fetch);
+            l.ReplayAnswered(fetch, Reply(B2, 0, 0), at);
+            at += HistoryLedger.RetryDelay;
+            fetch = l.TakeFetch(at);
+        }
+        Assert.Null(fetch);
     }
 
     [Fact]

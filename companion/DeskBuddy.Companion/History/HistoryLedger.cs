@@ -21,8 +21,11 @@ public sealed record FetchRequest(long Session, string Boot, uint Since)
 ///   passes a seq that is neither; it is written (atomically) only after the log lines it covers are on disk.
 /// - A hole (a seq above checkpoint + 1) asks for <c>log.since</c>; the reply's <c>lost=</c> is written as a gap only
 ///   when it accounts exactly for what is missing; anything it does not explain stays open and is asked again.
-/// - A new boot closes the previous ones: completely when the restart was seen live with nothing missing, otherwise
-///   with "events after seq N may have been missed".
+/// - A new boot closes the previous ones: "seen live" when the restart arrived on a live connection with no hole
+///   detected (never a proof that its last event was received), otherwise "events after seq N may have been missed".
+/// - A restart during the handshake (evt boot before the hello reply was handled) is kept in order with the events:
+///   events before an evt boot naming the hello's boot belong to an earlier, unknown boot and are not stored; a later
+///   evt boot switches to the new boot and asks it for everything.
 /// Nothing is ever invented to fill a gap.
 /// </summary>
 public sealed class HistoryLedger
@@ -141,9 +144,16 @@ public sealed class HistoryLedger
         _fetchWanted = true; // whatever happened while we were away
         var pending = _pending.ToList();
         _pending.Clear();
-        foreach (var (frame, when) in pending)
+        // The hello reply came from `boot`. An evt boot for it among the frames that arrived first means the device
+        // restarted into it during the handshake: whatever came before belongs to an earlier boot we cannot name.
+        var start = pending.FindLastIndex(p => p.Frame.Name == "boot" && p.Frame.Arg("boot") == boot) + 1;
+        if (pending.Take(start).Count(p => p.Frame.Name != "boot") is var dropped and > 0)
         {
-            Received(frame, when);
+            Log?.Invoke($"History: {dropped} event(s) from before a restart during the handshake are not stored (their boot is unknown)");
+        }
+        foreach (var (frame, when) in pending.Skip(start))
+        {
+            Received(frame, when); // an evt boot for a newer boot switches to it here
         }
     }
 
@@ -230,7 +240,8 @@ public sealed class HistoryLedger
         if (_current is not { } cur || reply.Arg("boot") is not { } boot || boot != cur.Boot ||
             !uint.TryParse(reply.Arg("last"), out var last) || !uint.TryParse(reply.Arg("lost"), out var lost))
         {
-            _fetchWanted = true; // it restarted meanwhile (evt boot follows), or a reply we do not understand
+            // It restarted meanwhile (its evt boot is handled before the next request), or a reply we do not understand.
+            RetryLater(at, $"log.since answered for boot {reply.Arg("boot") ?? "?"} instead of {request.Boot}");
             return;
         }
         var since = request.Boot == boot ? request.Since : 0;
@@ -345,12 +356,8 @@ public sealed class HistoryLedger
         }
         if (_current is not { } cur)
         {
-            if (_pending.Count > 0)
-            {
-                Log?.Invoke($"History: {_pending.Count} event(s) from before a restart arrived before the handshake; their boot is unknown, so they are not stored");
-                _pending.Clear();
-            }
-            return; // the hello reply names the boot
+            _pending.Add((frame, at)); // during the handshake: sorted out when the hello reply is handled
+            return;
         }
         BootSeen(dev, boot, frame.Arg("fw"), at, restartSeenLive: cur.Dev == dev);
         if (cur.Boot != boot)
@@ -374,12 +381,11 @@ public sealed class HistoryLedger
             {
                 continue;
             }
-            var complete = restartSeenLive && state.Drained && state.Ahead.Count == 0;
-            Append(new BootEndEntry(dev, other, state.Checkpoint, complete, at));
-            if (!complete)
-            {
-                Log?.Invoke($"History: {dev} restarted (boot {other} ended); events after seq {state.Checkpoint} of that boot may have been missed, how many is unknown");
-            }
+            var seenLive = restartSeenLive && state.Drained && state.Ahead.Count == 0;
+            Append(new BootEndEntry(dev, other, state.Checkpoint, seenLive, at));
+            Log?.Invoke(seenLive
+                ? $"History: {dev} restarted (boot {other} ended after seq {state.Checkpoint}, seen live; a last event lost on the way could not be detected)"
+                : $"History: {dev} restarted (boot {other} ended); events after seq {state.Checkpoint} of that boot may have been missed, how many is unknown");
         }
     }
 

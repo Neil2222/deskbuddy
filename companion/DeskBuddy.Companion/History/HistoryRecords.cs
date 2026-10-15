@@ -44,10 +44,13 @@ public sealed record GapEntry(string Dev, string Boot, uint From, uint To, DateT
 }
 
 /// <summary>
-/// A boot is over (a newer one was seen). <see cref="Complete"/>: every event of it was received (seen live up to
-/// the restart); otherwise events after <see cref="After"/> may have been missed, how many is unknown.
+/// A boot is over (a newer one was seen). Never a claim that every event of it was received: the device cannot say
+/// which seq it ended at, so a final event lost on the way stays undetectable.
+/// <see cref="SeenLive"/>: the restart was seen on a live connection with no hole detected up to <see cref="After"/>.
+/// Otherwise it restarted while the Companion was away: events after <see cref="After"/> may have been missed, how many
+/// is unknown.
 /// </summary>
-public sealed record BootEndEntry(string Dev, string Boot, uint After, bool Complete, DateTimeOffset ReceivedUtc)
+public sealed record BootEndEntry(string Dev, string Boot, uint After, bool SeenLive, DateTimeOffset ReceivedUtc)
     : LogEntry(Dev, Boot, ReceivedUtc);
 
 /// <summary>An activity the Companion asked the device to start (companion-events.jsonl), written before sending.</summary>
@@ -94,7 +97,7 @@ public static class HistoryCodec
             o["kind"] = "boot_end";
             Key(o, e);
             o["after"] = end.After;
-            o["complete"] = end.Complete;
+            o["seen_live"] = end.SeenLive;
             break;
         }
         o["src"] = source;
@@ -131,8 +134,8 @@ public static class HistoryCodec
             return from is null or 0 || to is null || to < from ? null : new GapEntry(dev, boot, from.Value, to.Value, recv.Value);
         case "boot_end":
             var after = UInt(o["after"]);
-            var complete = o["complete"] is JsonValue c && c.TryGetValue<bool>(out var cv) ? cv : (bool?)null;
-            return after is null || complete is null ? null : new BootEndEntry(dev, boot, after.Value, complete.Value, recv.Value);
+            var seenLive = o["seen_live"] is JsonValue c && c.TryGetValue<bool>(out var cv) ? cv : (bool?)null;
+            return after is null || seenLive is null ? null : new BootEndEntry(dev, boot, after.Value, seenLive.Value, recv.Value);
         default:
             return null;
         }
