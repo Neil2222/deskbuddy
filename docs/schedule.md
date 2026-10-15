@@ -148,19 +148,38 @@ skipped. A mood override does not block actions (moods and actions are independe
   link lost and `status act=` reports another or no interaction) is recorded as `unconfirmed` or `lost`, never as
   `no`, `timeout` or anything else that claims behaviour. The device itself never turns an interruption into an
   answer (`interrupted`, host-tested).
-- **No duplicates.** Retries reuse the `iid` (the device answers `ok dup=1` and starts nothing). Every device event
-  is keyed by `(dev, boot, seq)`; storing is an idempotent upsert on that key, so a live copy and any number of
-  replayed copies (`replay=1`, identical apart from that flag) give one record. Answered questions are additionally
-  folded per interaction id.
-- **Replay checkpoint (P5).** The Companion keeps, per `(dev, boot)`, the highest `seq` it has stored, and advances it
-  only after the event lines up to that `seq` are durably written (appended and flushed to disk). After every
-  `hello` (and on a jump in the live `seq`) it sends `log.since boot=<b> seq=<checkpoint>`; with a new `boot` it
-  asks from 0. A crash between storing and advancing re-fetches events already stored: harmless by the key above. It
-  never advances past an event it has not stored. `lost=<k>` in the reply, and a `boot` that ended with events never
-  fetched, are written as explicit gap records (count known or unknown), never as invented activity.
+- **The device event log is the source of truth (P5).** Every `evt act` / `evt did` received is appended to
+  `device-events.jsonl` (+`.sim`), one line per `(dev, boot, seq)`, with the received line verbatim, `t` or `up`,
+  and the Companion's receive time. It is append-only and keyed: a live copy and any number of replayed copies
+  (`replay=1`, otherwise identical) store once; a second copy is detected by the key and not appended. Activity and
+  interaction records are *derived* from this log; each derived record's id is a pure function of the source event
+  key (e.g. `<dev>/<boot>/<seq>`), so deriving again, after a replay, a restart or a rebuild, gives the same record
+  and never a second activity. Answered questions are additionally folded per interaction id; retries reuse the
+  `iid` (the device answers `ok dup=1` and starts nothing).
+- **Order and gaps.** Events can arrive out of order: live events with a new `seq` can arrive while a replay is still
+  sending older ones (the device sends both; the replay covers exactly the seqs up to the `last=` of its reply, live
+  events carry higher seqs), and a lost line leaves a hole. So the Companion does not assume arrival order:
+  - It stores whatever arrives (by key), in any order.
+  - Per `(dev, boot)` it keeps a **checkpoint = the highest seq such that every seq from 1 to it is accounted for**:
+    stored, or covered by a written gap record. Not the highest seq seen.
+  - A seq above checkpoint + 1 (a hole) triggers `log.since boot=<b> seq=<checkpoint>` (one at a time; the device
+    answers `err busy` to a second); so does every `hello`.
+  - When the reply arrives, every seq up to its `last=` has either been received (stored) or is gone: the device
+    reports those as `lost=<k>`, and they are exactly the lowest missing ones (the oldest dropped first). Only then
+    does the Companion write one gap record for them (`gap`, `dev`, `boot`, `from_seq`, `to_seq`, count known) and
+    advance the checkpoint over them. A hole the reply does not explain (a replayed line itself lost on the wire)
+    stays a hole: ask again.
+  - **Durability:** the checkpoint is persisted only after the event lines (and gap records) it covers are appended
+    and flushed. A crash in between re-fetches events already stored: harmless by the key. The checkpoint never
+    passes a seq that is neither stored nor recorded as a gap.
+  - **A new boot** (in `hello` / `evt boot`) closes the previous one: if its last fetch did not end in a reply after
+    which nothing newer was seen, a gap record "possibly unfetched events after seq N, count unknown" is written for
+    it; then the new boot is fetched from 0.
+  - Events are never invented to fill a gap, and a gap is never read as "nothing happened".
 - **Device time.** A `t=` event stores that UTC time (and the local time and offset derived from it on the
   Companion). An `up=` event (the clock was not set yet) stores `time_known=false` with `boot` and `uptime_ms`, never
-  a date guessed from the reception time; P5 records must be able to hold both forms.
+  a date guessed from the reception time; P5 records must be able to hold both forms. Ordering within a boot is by
+  `seq`, not by time.
 - **Installation id.** Each Companion installation gets a stable random id (stored next to the journals, created on
   first use); every record carries it.
 - **Globally unique ids.** Records use GUIDv7 ids (time-ordered); an occurrence id is `<installation>/<block id>/<local
