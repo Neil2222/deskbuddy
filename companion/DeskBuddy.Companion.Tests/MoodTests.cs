@@ -50,7 +50,7 @@ public class MoodTests
     public void Only_the_current_moods_tile_is_on_and_modes_are_unaffected()
     {
         var on = Activities.All.Where(a => Activities.IsOn(a, "office", "working")).Select(a => a.Label);
-        Assert.Equal(["Office", "Working"], on);
+        Assert.Equal(["Clock", "Working"], on);
         Assert.Equal(["Buddy", "Idle"], Activities.All.Where(a => Activities.IsOn(a, "monster", "idle")).Select(a => a.Label));
         Assert.DoesNotContain(Activities.All, a => a.Kind == ActivityKind.Mood && Activities.IsOn(a, "normal", "grumpy"));
     }

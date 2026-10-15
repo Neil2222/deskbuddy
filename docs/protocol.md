@@ -28,15 +28,17 @@ DeskBuddy and the Windows companion (`companion/`) talk over the board's **UART*
 |---|---|---|
 | `hello` | | `ok proto=1 fw=<version> caps=<list> styles=<list> moods=<list>` |
 | `ping` | | `ok` |
-| `status` | | `ok mode=<normal\|office\|monster> mood=<mood> time=<set\|unset> msg=<showing\|idle> queued=<0\|1> uptime=<s>` |
-| `poke` | | `ok`, or `err busy mode=<mode>` (Office Mode, Monster running, screen not up yet) |
+| `status` | | `ok mode=<normal\|office\|monster> mood=<mood> time=<set\|unset> msg=<showing\|idle> queued=<0\|1> uptime=<s>` (`office`: Clock Mode, see below) |
+| `poke` | | `ok`, or `err busy mode=<mode>` (Clock Mode, Monster running, a zoom under way, screen not up yet) |
 | `monster` | | `ok`, or `err busy mode=<mode>` |
-| `mode.set` | `mode=office\|normal` | `ok` (switches like *Office* in the touchscreen menu / a tap on the clock: Buddy zooms into the clock or out of it, about 1.5 s; `evt mode` follows when the new scene is on screen; a request during a zoom is carried out after it), or `err unavailable` |
+| `mode.set` | `mode=office\|clock\|normal` | `ok` (switches like *Clock* in the touchscreen menu / a tap on the clock: Buddy zooms into the clock or out of it, about 1.5 s; `evt mode` follows when the new scene is on screen; a request during a zoom is carried out after it), or `err unavailable` |
 | `time.set` | `utc=<s> [ms=<0-999>] off=<min> [next=<utc s> next_off=<min>]` | `ok` |
 | `msg.show` | `id=<1-4294967295> [style=marquee] text=<percent-encoded UTF-8>` | `ok` (on the sign now), `ok queued=1` (waits its turn), `ok dup=1` (this id was already taken), `err busy mode=<mode>` (one is already waiting), `err unsupported` (unknown style), `err bad_args` |
 | `mood.set` | `name=<mood> [secs=<1-86400>]` | `ok`, `err unsupported` (a mood this firmware does not have), `err bad_args` |
 
 **Capabilities:** `hello` lists what the firmware supports (`poke,monster,mode,time,status,msg,mood`), which message styles it draws (`styles=marquee`) and which moods it has (`moods=idle,relaxed,peukie,angry,sleepy,working,happy`, in display order). The companion only enables the matching buttons, so new commands, styles and moods can be added without breaking older companions or firmware.
+
+**Clock Mode is `office` on the wire.** It was first called Office Mode; `status`, `evt mode` and `mode.set` keep that name, so existing companions and scripts work unchanged. `mode.set mode=clock` is accepted as an alias (firmware from 2026-10-15 on; older firmware answers `err bad_args`, so clients that must work with any firmware send `office`).
 
 **Unknown arguments are ignored**, so newer companions can send more. Unknown commands get `err unknown_cmd`; missing or invalid arguments get `err bad_args`.
 
@@ -47,14 +49,14 @@ DeskBuddy and the Windows companion (`companion/`) talk over the board's **UART*
 - **What the LED font shows:** printable ASCII; accented Latin letters without their accents (`café` shows as `cafe`); typographic quotes, dashes and the ellipsis as `' " - .`; € ° and hearts as their own glyphs; control characters as spaces; emoji variation selectors and zero-width characters dropped; everything else (emoji, other scripts) as a hollow box. The companion sends the text as typed (normalised to NFC, line breaks and tabs as spaces).
 - **`id`:** chosen by the companion (random start per run, then counting up). The same id again is acknowledged with `ok dup=1` and not shown twice, so a resent command cannot show a message twice. The companion never resends on its own.
 - **Queue:** one message can wait. It waits while another message is on the sign, or while a Monster sequence runs (it never interrupts one). A second waiting message gets `err busy`.
-- **Office Mode** stays on: the sign appears below the clock, without the robot's reaction.
+- **Clock Mode** stays on: the sign appears below the clock, without the robot's reaction.
 - **`style`:** how to present it; only `marquee` exists. Later styles (speech bubble, notification) get their own names here and in `hello`'s `styles` list; the command stays the same.
 
 **Moods (`mood.set`)** say how Buddy is; activities (`poke`, `monster`) are things he does, on top of his mood:
 - **The moods:** `idle` (the default, after every start), `relaxed` (calm and content), `peukie` (a smoke break), `angry`, `sleepy`, `working`, `happy`. Names are lower-case letters and `_`, at most 15; a well-formed name the firmware does not know gets `err unsupported`, so integrations can ask for newer moods safely.
 - **Exactly one at a time:** a new mood replaces the current one and starts its animation from the beginning; the same mood again keeps running (only its duration changes).
 - **`secs`:** back to `idle` after that many seconds (`evt mood` reports it); without it the mood stays until changed. Useful for events: `mood.set name=happy secs=30` after a successful build.
-- **Always accepted,** also in Office Mode and during a Monster sequence or a tap reaction: those play to their end, then the new mood shows. Messages, taps and Monster still interrupt any mood, which then resumes.
+- **Always accepted,** also in Clock Mode and during a Monster sequence or a tap reaction: those play to their end, then the new mood shows. Messages, taps and Monster still interrupt any mood, which then resumes.
 - **One source of truth:** the device owns the mood. Moods picked on the touchscreen menu go the same way as `mood.set`, and every change, from either side, is announced with `evt mood`; the companion shows what the device reports.
 - **For integrations:** an AI agent working, a build or a download in progress → `working`; done → `happy secs=…`; failed → `angry secs=…`; a coffee or smoke break → `peukie`; quiet, nothing going on → `relaxed`; an idle computer → `sleepy`; back → `idle`.
 

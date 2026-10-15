@@ -11,7 +11,7 @@ All numbers come from the device's own `PERF` logs (5-second windows). The bring
 | `components/buddy` | Placeholder robot: behavior state machine and events (`buddy_brain`), the Monster Energy sequence (`buddy_monster`), ASCII programmer art (`buddy_art`), pose-to-sprite mapping including the procedural arm and cable (`buddy_view`) | No (host-tested) |
 | `components/layout` | Character stage (default 65 % of the width, rounded to 672 px) and the control panel (352 px); background painting | No (host-tested) |
 | `components/menu` | The touchscreen menu in the control panel: item table, navigation and touch rules (`menu`), and its view: one sprite per button at 2x, redrawn in place only when it changes, tiles flipping in one by one on a page change (`menu_view`) | No (host-tested) |
-| `components/office` | Office Mode: antialiased stroke font rasterized into indexed images, the desk-clock face, the moon art, the scene switch (`office_switch`), and Buddy's zoom into the clock and back (`office_zoom`: a camera and a pose timeline on top of the switch) | No (host-tested) |
+| `components/office` | Clock Mode (first called Office Mode): antialiased stroke font rasterized into indexed images, the desk-clock face, the moon art, the scene switch (`office_switch`), and Buddy's zoom into the clock and back (`office_zoom`: a camera and a pose timeline on top of the switch) | No (host-tested) |
 | `components/display` | Application-owned frame buffers, the scanout fill, and the buffer-swap proof | Yes |
 | `deskbuddy/main` | Touch task (GT911 → events), serial link to the Windows companion (commands → events, replies), render loop, Office Mode switching, backlight at boot, wall-clock time with the companion's time zone, layout configuration (Kconfig), performance log, verify mode | Yes |
 
@@ -109,7 +109,7 @@ The switch between DeskBuddy and the clock repaints the whole screen: the scene 
 
   An ESPHome user on the same board reports dimming that works a couple of times after a reboot and then stops. The expander's registers do not read back reliably (values lag or come from another register), so its state cannot be checked from firmware. Decision: the backlight is set once at boot (PWM register, then the enable bit, as in the original bring-up) and never changed afterwards; Office Mode is not dimmed.
 
-### Zooming into Office Mode (2026-10-15)
+### Zooming into Clock Mode (2026-10-15; then still called Office Mode)
 Buddy's head comes toward the viewer until his face screen fills the display, goes dark and becomes the clock; leaving reverses it with a wake-up. The zoom is a camera on the view: every sprite is drawn at a larger integer scale (8 → 75) by the compositor, which fills scaled sprites in runs, so a frame costs its area and no image is scaled or allocated. The large frames are full-screen redraws, which the measurements below show to be as safe as the scene switch's own.
 
 Measured on the device over 12 transitions (6 in, 6 out; `ZOOM` log lines), including one during a Monster sequence and a burst of contrary requests:

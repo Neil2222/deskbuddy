@@ -195,7 +195,7 @@ static void run_menu_action(const menu_result_t *r, buddy_brain_t *brain, uint32
         break;
     case MENU_DO_OFFICE:
         office_zoom_request(&s_zoom, true); // he zooms into the clock
-        ESP_LOGI(TAG, "Office Mode on");
+        ESP_LOGI(TAG, "Clock Mode on");
         break;
     default:
         break;
@@ -297,7 +297,7 @@ static void run_command(const link_command_t *c, buddy_brain_t *brain, office_sw
             snprintf(body, sizeof(body), "err busy mode=%s", mode_name(screen, brain));
         } else {
             office_zoom_request(&s_zoom, c->u.office); // the same way in and out as from the menu and a tap
-            ESP_LOGI(TAG, "Office Mode %s (companion)", c->u.office ? "on" : "off");
+            ESP_LOGI(TAG, "Clock Mode %s (companion)", c->u.office ? "on" : "off");
         }
         break;
     case LINK_CMD_TIME_SET: {
@@ -410,7 +410,7 @@ static void render_task(void *arg)
     uint8_t *clock_mem = heap_caps_malloc(OFFICE_CLOCK_MEMORY, MALLOC_CAP_SPIRAM);
     const bool has_office = office_clock_init(&clock, &s_scene, s_layout.screen, clock_mem, OFFICE_CLOCK_MEMORY, 20);
     if (!has_office) {
-        ESP_LOGW(TAG, "Office Mode unavailable (no memory for the clock)");
+        ESP_LOGW(TAG, "Clock Mode unavailable (no memory for the clock)");
     }
     office_switch_init(&screen);
     office_zoom_init(&s_zoom);
@@ -462,7 +462,7 @@ static void render_task(void *arg)
                 if (screen.office) {
                     if (ev.type == INPUT_UP) {
                         office_zoom_request(&s_zoom, false); // he wakes up
-                        ESP_LOGI(TAG, "Office Mode off");
+                        ESP_LOGI(TAG, "Clock Mode off");
                     }
                     continue;
                 }
@@ -505,7 +505,7 @@ static void render_task(void *arg)
 #if CONFIG_DESKBUDDY_DEMO_OFFICE_S > 0
         if ((int32_t)(now - next_office) >= 0 && has_office && presented >= 2) {
             office_zoom_request(&s_zoom, !s_zoom.want_office);
-            ESP_LOGI(TAG, "Office Mode %s (demo)", s_zoom.want_office ? "on" : "off");
+            ESP_LOGI(TAG, "Clock Mode %s (demo)", s_zoom.want_office ? "on" : "off");
             next_office = now + CONFIG_DESKBUDDY_DEMO_OFFICE_S * 1000u;
         }
 #endif

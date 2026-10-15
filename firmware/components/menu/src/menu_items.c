@@ -29,7 +29,7 @@ static const menu_item_t k_items[] = {
     MOOD("happy", "HAPPY", BUDDY_MOOD_HAPPY),
 
     {"activity.surprise", "SURPRISE!", MENU_ACTIVITIES, MENU_ICON_SURPRISE, MENU_DO_EVENT, BUDDY_EVENT_POKE, false},
-    {"activity.office", "OFFICE", MENU_ACTIVITIES, MENU_ICON_OFFICE, MENU_DO_OFFICE, 0, false},
+    {"activity.clock", "CLOCK", MENU_ACTIVITIES, MENU_ICON_OFFICE, MENU_DO_OFFICE, 0, false},
 
     {"food.monster", "MONSTER", MENU_FOOD, MENU_ICON_MONSTER, MENU_DO_EVENT, BUDDY_EVENT_DRINK_MONSTER, false},
     {"food.water", "WATER", MENU_FOOD, MENU_ICON_WATER, MENU_DO_NOTHING, 0, true},

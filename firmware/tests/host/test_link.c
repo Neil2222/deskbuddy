@@ -34,6 +34,8 @@ void test_link_parses_commands(void)
     CHECK(c.cmd == LINK_CMD_MODE_SET && c.u.office && c.seq == 4294967295u);
     CHECK_EQ(parse(frame(">DB1 1 mode.set mode=normal"), &c), LINK_OK);
     CHECK(!c.u.office);
+    CHECK_EQ(parse(frame(">DB1 2 mode.set mode=clock"), &c), LINK_OK); // Clock Mode's new name, an alias of office
+    CHECK(c.cmd == LINK_CMD_MODE_SET && c.u.office);
 
     // Arguments in any order; unknown keys are ignored (newer companions may send more).
     CHECK_EQ(parse(frame(">DB1 9 time.set off=120 utc=1792000000 ms=250 next=1792800000 next_off=60 x=1"), &c),

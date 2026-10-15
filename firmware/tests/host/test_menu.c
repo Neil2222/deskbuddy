@@ -198,7 +198,7 @@ void test_menu_activities_and_availability(void)
     menu_result_t r = tap(&m, slot_of(&m, &k_idle, "activity.surprise"), &k_idle, t);
     CHECK_EQ(r.action, MENU_DO_EVENT);
     CHECK_EQ(r.arg, BUDDY_EVENT_POKE);
-    r = tap(&m, slot_of(&m, &k_idle, "activity.office"), &k_idle, t += 500);
+    r = tap(&m, slot_of(&m, &k_idle, "activity.clock"), &k_idle, t += 500);
     CHECK_EQ(r.action, MENU_DO_OFFICE);
 
     // While a Monster sequence runs, Buddy ignores reactions: those buttons are dimmed and do nothing.
@@ -210,12 +210,12 @@ void test_menu_activities_and_availability(void)
     CHECK_EQ(menu_item_avail(items[surprise], &busy), MENU_ITEM_BUSY);
     CHECK_EQ(tap(&m, surprise, &busy, t += 500).action, MENU_DO_NOTHING);
     CHECK_EQ(m.pressed, MENU_HIT_NONE);
-    CHECK_EQ(tap(&m, slot_of(&m, &busy, "activity.office"), &busy, t += 500).action, MENU_DO_OFFICE);
+    CHECK_EQ(tap(&m, slot_of(&m, &busy, "activity.clock"), &busy, t += 500).action, MENU_DO_OFFICE);
 
-    // Without the clock there is no Office Mode to offer: hidden, not a dead button.
+    // Without the clock there is no Clock Mode to offer: hidden, not a dead button.
     menu_status_t no_office = k_idle;
     no_office.office = false;
-    CHECK_EQ(slot_of(&m, &no_office, "activity.office"), -1);
+    CHECK_EQ(slot_of(&m, &no_office, "activity.clock"), -1);
     CHECK_EQ(menu_page_items(&m, &no_office, items, NULL), 1);
 
     // Food & Drink: Monster works (and is busy during its own sequence); the rest is planned.
@@ -354,7 +354,7 @@ void test_menu_pages_and_swipes(void)
     menu_touch(&m, MENU_TOUCH_UP, x + 100 - MENU_SWIPE_PX - 10, y, &k_idle, t + 40);
     CHECK_EQ(m.page, 1);
 
-    // Fewer items (Office hidden): the last page shrinks; a page that no longer exists is clamped.
+    // Fewer items (Clock hidden): the last page shrinks; a page that no longer exists is clamped.
     menu_status_t no_office = k_idle;
     no_office.office = false;
     CHECK_EQ(menu_page_items(&m, &no_office, items, &pages), 3);
@@ -424,7 +424,7 @@ void test_menu_view_follows_the_state(void)
     menu_view_apply(&v, &m, &st, 6200);
     CHECK_EQ(v.face_shown, BUDDY_MOOD_COUNT);
 
-    // Office Mode hides everything; back, everything is drawn again as it is then.
+    // Clock Mode hides everything; back, everything is drawn again as it is then.
     menu_view_show(&v, false);
     CHECK_EQ(menu_view_apply(&v, &m, &st, 6300), UINT32_MAX);
     for (int i = 0; i < MENU_SLOTS; i++) {

@@ -39,12 +39,13 @@ menu "DeskBuddy"
             Normally it is started from the menu (Food & Drink) or by the companion.
 
     config DESKBUDDY_DEMO_OFFICE_S
-        int "Toggle Office Mode automatically every N seconds (0 = off)"
+        int "Toggle Clock Mode automatically every N seconds (0 = off)"
         range 0 3600
         default 0
         help
-            Switches between DeskBuddy and the Office Mode clock without touching the screen, for hands-off
-            tests of the scene switch. Normally it is switched on in the menu (Activities) and off with a tap.
+            Switches between DeskBuddy and Clock Mode (zooming in and out) without touching the screen, for
+            hands-off tests. Normally it is switched on in the menu (Activities -> Clock) and off with a tap.
+            (The symbol keeps Clock Mode's first name, Office Mode, so existing configurations stay valid.)
 
     config DESKBUDDY_GFX_VERIFY
         bool "Verify every presented frame against a full redraw (debug, slow)"

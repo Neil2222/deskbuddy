@@ -214,7 +214,7 @@ static int menu_slot_of(const menu_t *m, const menu_status_t *st, const char *id
 }
 
 // The render loop as the firmware runs it (scene, Buddy and his brain, the menu, the clock, the sign, the zoom and the
-// scene switch, double-buffer repair): Office from the menu's Activities page with Buddy relaxed, a mood change and a
+// scene switch, double-buffer repair): Clock from the menu's Activities page with Buddy relaxed, a mood change and a
 // message while the clock shows, a burst of taps to come back. Every presented buffer must equal a full redraw.
 void test_zoom_whole_loop_into_the_clock_and_back(void)
 {
@@ -258,9 +258,9 @@ void test_zoom_whole_loop_into_the_clock_and_back(void)
         const menu_status_t st = {buddy_brain_mood(&brain, t), brain.state == BUDDY_STATE_MONSTER, true};
         const bool settled = !office_zoom_busy(&z) && !office_switch_busy(&sw) && sw.want_office == sw.office &&
                              z.want_office == sw.office;
-        if (!tapped && t >= 1000) { // Office, tapped on the menu
+        if (!tapped && t >= 1000) { // Clock, tapped on the menu
             int x, y;
-            CHECK(menu_slot_of(&menu, &st, "activity.office", &x, &y) >= 0);
+            CHECK(menu_slot_of(&menu, &st, "activity.clock", &x, &y) >= 0);
             menu_touch(&menu, MENU_TOUCH_DOWN, x, y, &st, t);
             const menu_result_t r = menu_touch(&menu, MENU_TOUCH_UP, x, y, &st, t);
             CHECK_EQ(r.action, MENU_DO_OFFICE);

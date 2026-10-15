@@ -210,11 +210,13 @@ static link_result_t decode_args(link_command_t *c, const arg_t *args, int n)
 {
     char v[5][VALUE_MAX];
     if (c->cmd == LINK_CMD_MODE_SET) {
+        // Clock Mode is called "office" on the wire (its first name), which stays valid; "clock" is an alias.
         const char *mode = get_arg(args, n, "mode", v[0]);
-        if (!mode || (strcmp(mode, "office") != 0 && strcmp(mode, "normal") != 0)) {
+        const bool clock = mode && (strcmp(mode, "office") == 0 || strcmp(mode, "clock") == 0);
+        if (!mode || (!clock && strcmp(mode, "normal") != 0)) {
             return LINK_ERR_ARGS;
         }
-        c->u.office = strcmp(mode, "office") == 0;
+        c->u.office = clock;
     } else if (c->cmd == LINK_CMD_TIME_SET) {
         const char *utc = get_arg(args, n, "utc", v[0]), *ms = get_arg(args, n, "ms", v[1]);
         const char *off = get_arg(args, n, "off", v[2]), *next = get_arg(args, n, "next", v[3]);

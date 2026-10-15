@@ -7,7 +7,7 @@
 // stage every 200 ms of the sequence, at half size, on one sheet), mood_sheet.png (one row per mood: the stage
 // every MOOD_STEP_MS of its loop, as the brain plays it), the touchscreen menu (menu_<screen>.png, and
 // menu_sheet.png: the control panel in every state side by side), the message marquee (marquee_intro.png,
-// marquee.png, office_marquee.png) and the Office Mode clock: office_clock.png and office_not_set.png.
+// marquee.png, office_marquee.png) and the Clock Mode clock: office_clock.png and office_not_set.png.
 #include <stdio.h>
 #include <string.h>
 
@@ -246,7 +246,7 @@ static bool menu_screens(void)
     return write("menu_sheet", &sheet);
 }
 
-// --- The zoom into Office Mode and back --------------------------------------------------------------------------
+// --- The zoom into Clock Mode and back ---------------------------------------------------------------------------
 
 enum { ZOOM_STEP_MS = 40, ZOOM_COLS = 6, ZOOM_TILE_W = W / 2, ZOOM_TILE_H = H / 2 };
 enum { ZOOM_ROWS = (OFFICE_LEAVE_MS / ZOOM_STEP_MS + 2 + ZOOM_COLS - 1) / ZOOM_COLS };
@@ -285,7 +285,7 @@ static void zoom_render(const office_zoom_t *z, const menu_status_t *st, uint32_
     gfx_scene_render(&s_scene, &s_all, &dst);
 }
 
-// Office from the menu's Activities page with Buddy relaxed, then a tap on the clock: every ZOOM_STEP_MS of both ways
+// Clock from the menu's Activities page with Buddy relaxed, then a tap on the clock: every ZOOM_STEP_MS of both ways
 // on a sheet (zoom_in_sheet.png, zoom_out_sheet.png, the clock in between), and full-size key moments.
 static bool zoom_screens(office_clock_t *clock)
 {
@@ -482,7 +482,7 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    // Office Mode, as the firmware switches to it.
+    // Clock Mode, as the firmware switches to it.
     buddy_view_hide(&s_view);
     menu_view_show(&s_menu_view, false);
     office_clock_show(&clock, true);

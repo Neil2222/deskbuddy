@@ -31,7 +31,7 @@ public static class Activities
     public static readonly IReadOnlyList<Activity> All =
     [
         new("Buddy", ActivityKind.Mode, "face-neutral", "mode", "mode.set mode=normal", Mode: "normal"),
-        new("Office", ActivityKind.Mode, "moon", "mode", "mode.set mode=office", Mode: "office"),
+        new("Clock", ActivityKind.Mode, "moon", "mode", "mode.set mode=office", Mode: "office"), // the wire name stays
         new("Surprise!", ActivityKind.Action, "face-surprised", "poke", "poke", Reaction: "surprised"),
         new("Monster", ActivityKind.Action, "can", "monster", "monster", Reaction: "happy"),
         MoodTile("Idle", "face-neutral", DeviceMood.Idle),
