@@ -173,9 +173,24 @@ Looping animations (`components/buddy/src/buddy_mood.c`). They use the same path
 
 Slow swaps stayed at 0 throughout. The one large redraw (284 k px, 30.7 ms to render) came when a message arrived during Sleepy: the sign appearing, Buddy jumping and three Zs vanishing in one frame, plus the previous frame's rectangles, probably overflowed the 16-entry dirty list, which then merges into larger boxes [INFERENCE]. It costs one late frame, not a glitch, and is not chased further. Host test `mood_redraws_match_full_redraw`: 2,338 frames over every mood with rapid switching, taps and a Monster sequence, all equal to a full redraw, largest redraw 107,520 px (17 % of the screen).
 
-### Clock faces: Mechanical Skeleton (2026-10-17; failed on the device)
+### Clock faces: Mechanical Skeleton (2026-10-17; failed on the device, repaired, passed the second device test)
 
-**Device test of `b4ddf91` (2026-10-17): failed the display-stability test; the board is back on `29f5c80`.** The user saw the old left-edge glitch lines again, only on the clock face (the Skeleton showed for most of the test; whether Classic showed them too is not known), and none after restoring `29f5c80`. Start-up also regressed: drawing the faces took **8,395 ms** (35 ms on the PC, about 240 times slower), the task watchdog fired once (`IDLE1` starved by the render task; a warning, no reset), and the screen stayed dark about 9 s longer. What the logs showed (they do not explain the glitch):
+**Second device test, `fa4455d` (2026-10-17, about 11:55–12:00): passed.** Flashed over COM6 (`Hash of data verified`, `verify_flash` digests matched for bootloader, partition table and app; `App version: fa4455d`). The user watched every step and saw **no left-edge glitch lines, tearing, flicker or stale pixels**: the stationary Skeleton (clock not yet set, so nothing moved), the Skeleton ticking for over 2 minutes (with a minute roll), the hour's whir (clock set to xx:59:30 over the serial link, then back to the real time), the zoom in, and the tap out (Buddy zoomed out and carried on happy, the menu back). No watchdog warning, crash or allocation failure in the log. `fa4455d` stays on the board. Which of the repairs removed the lines is not known (not tested one at a time).
+
+| | Measured on the board (`fa4455d`) |
+|---|---|
+| Boot | `clock faces ready in 68.3 ms` (`b4ddf91`: 8,395 ms); `frame 25081 B in internal RAM` (not the fallback); `started in 147 ms; free internal 201,159 B, PSRAM 5,438,224 B`; after `app_init`: free internal **77,379 B** (`b4ddf91`: 101,455 B), PSRAM 4,922,372 B (4,895,732 B); first full redraw 62.2 ms; backlight on at 1.06 s |
+| Render task stack | 2,900 of 6,144 B never used (3,244 B used); this high-water mark did not change through the whole test (it is logged whenever it drops) |
+| Classic (60 s, ticking) | 2.0 frames/s, render max 2.3 ms, 11.4 k px; fill max 77–235 µs; STRIPS: start late max 5–6 µs, margin min 368–372 µs, close 0, missed 0 |
+| Skeleton stationary (clock not set) | 0 frames; fill max 57 µs; STRIPS: late max 5–6 µs, margin min 387 µs, close 0, missed 0 |
+| Skeleton ticking (> 2 min) | 1.0 frames/s, render avg 15–28 / max 39.5 ms, redraw max 193 k px; fill max 110–235 µs; STRIPS: late max 5–7 µs (while drawing 4–7), margin min 235–339 µs, close 0, missed 0 |
+| Skeleton: the hour's whir | 25 frames in the 6 s window, render avg 55 / max 83 ms (`b4ddf91`: 101 ms), redraw max 469 k px, fill max 281 µs; STRIPS: late max 8 µs, margin min 168 µs, close 0, missed 0 |
+| Zoom in / out, face changes (both faces) | 25–29 frames, 0 resyncs, fill max 427–430 µs (as `29f5c80`); STRIPS: late max 8–10 µs, margin min 19–23 µs, close 4–8 per zoom, all while drawing (the full-screen frames), missed 0 |
+| While dark at boot (backlight off) | fill max 468 µs, 0 resyncs; STRIPS: margin min −40 µs, close 9, missed 3 (estimated) — the full redraws before the backlight comes on, not visible (`29f5c80` measured fill max 544 µs there) |
+
+Read with care: strip copies never started more than 10 µs late, on either face, drawing or not, so the PSRAM traffic of the Skeleton's redraws does not delay the copies' start as far as the interrupt can see. The STRIPS figures exclude the interrupt's own entry latency, so zero estimated misses does not by itself prove a stable picture; the user's visual check is the evidence. The only close copies on the lit screen are those of full-screen frames (zoom, face change), as with Classic before this work.
+
+**Device test of `b4ddf91` (2026-10-17): failed the display-stability test; the board went back to `29f5c80` until the second test.** The user saw the old left-edge glitch lines again, only on the clock face (the Skeleton showed for most of the test; whether Classic showed them too is not known), and none after restoring `29f5c80`. Start-up also regressed: drawing the faces took **8,395 ms** (35 ms on the PC, about 240 times slower), the task watchdog fired once (`IDLE1` starved by the render task; a warning, no reset), and the screen stayed dark about 9 s longer. What the logs showed (they do not explain the glitch):
 
 | | Measured on the board |
 |---|---|
@@ -189,7 +204,7 @@ Slow swaps stayed at 0 throughout. The one large redraw (284 k px, 30.7 ms to re
 
 The measured fills stay well inside the 449 µs budget, so whatever draws the lines is not the fill's duration as measured (from the start of the fill interrupt to its end). New compared with every earlier screen: the Skeleton's sprite pixels are read from PSRAM on every redraw (the full-screen frame image and the wheels, tens of KB per tick); everything else that redraws often keeps its pixels in internal RAM (menu, thought, Buddy's art, palettes).
 
-**Off-board repair and diagnostics (2026-10-17, not yet on the board; the glitch is not known to be fixed):**
+**Off-board repair and diagnostics (2026-10-17, before the second device test):**
 
 | Change | Result (measured off the board unless marked) |
 |---|---|
