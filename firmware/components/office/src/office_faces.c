@@ -24,7 +24,7 @@ bool office_face_parse(const char *name, office_face_t *out)
 }
 
 bool office_faces_init(office_faces_t *f, gfx_scene_t *scene, gfx_rect_t screen, uint8_t *classic_mem,
-                       uint8_t *skeleton_mem, int z)
+                       uint8_t *skeleton_mem, uint8_t *skeleton_frame_mem, office_skeleton_flush_fn flush, int z)
 {
     memset(f, 0, sizeof(*f));
     f->face = OFFICE_FACE_CLASSIC;
@@ -34,7 +34,8 @@ bool office_faces_init(office_faces_t *f, gfx_scene_t *scene, gfx_rect_t screen,
         return false;
     }
     f->has[OFFICE_FACE_SKELETON] =
-        skeleton_mem && office_skeleton_init(&f->skeleton, scene, screen, skeleton_mem, OFFICE_SKELETON_MEMORY, z);
+        skeleton_mem && office_skeleton_init(&f->skeleton, scene, screen, skeleton_mem, OFFICE_SKELETON_MEMORY,
+                                             skeleton_frame_mem, office_skeleton_frame_memory(), flush, z);
     return true;
 }
 

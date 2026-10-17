@@ -28,9 +28,23 @@ typedef struct {
     uint32_t slow_waits;    // presents that waited longer than DISPLAY_SLOW_WAIT_MS
     int64_t wait_us_sum;    // time present() spent waiting for the swap
     int64_t wait_us_max;
+    // Strip-copy timing (see display_bounce_fill): how late fills started, and how close they came to the moment
+    // the scanout needs the strip. Fills of the first two strips of a frame are not counted (they have the vertical
+    // blanking as slack).
+    uint32_t fills_checked;
+    uint32_t late_us_max;         // latest start, relative to the previous fill plus one bounce period
+    uint32_t late_us_max_drawing; // ...among fills that ran while the renderer was drawing a frame
+    int32_t margin_us_min;        // least time left: bounce period - lateness - fill duration
+    uint32_t close;               // fills with less than DISPLAY_CLOSE_US left
+    uint32_t close_drawing;       // ...of which while drawing
+    uint32_t missed;              // fills that ended after their deadline (as estimated: stale pixels)
 } display_stats_t;
 
 #define DISPLAY_SLOW_WAIT_MS 100 // > 3 panel frames: something is wrong with the scanout
+// One bounce buffer's worth of scanout: 10 lines x 1386 pixel clocks at about 30.88 MHz (448.8 us measured from the
+// 33.71 Hz frame rate). Rounded up, so small errors only ever lower the lateness estimate, never raise it.
+#define DISPLAY_BOUNCE_PERIOD_US 449
+#define DISPLAY_CLOSE_US 50 // a fill that leaves less than this before its deadline counts as close
 
 // Allocates two width x height RGB565 frame buffers in PSRAM (cleared to black). Buffer 0 is scanned first.
 // Call before board_init() so the scanout has pixels from its first frame.
@@ -48,6 +62,10 @@ void display_present(void);
 
 // Copies the statistics accumulated since the previous call and resets them. Call from the presenting task.
 void display_stats_take(display_stats_t *out);
+
+// The renderer is drawing a frame into the back buffer (true) or done (false): fills are counted apart while it draws,
+// to see whether its memory traffic delays them. Call from the presenting task.
+void display_set_drawing(bool drawing);
 
 #ifdef __cplusplus
 }

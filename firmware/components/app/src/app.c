@@ -76,6 +76,13 @@ static void *alloc_internal_first(size_t size)
     return p ? p : app_port_alloc(size, APP_MEM_LARGE);
 }
 
+// Pixels written into PSRAM outside the frame buffers (the clock faces' images): out of the cache at once, as the
+// frame buffers' rows are, so the scanout never has to evict them.
+static void flush_bytes(const void *px, size_t bytes)
+{
+    app_port_flush((const gfx_color_t *)px, (int)((bytes + sizeof(gfx_color_t) - 1) / sizeof(gfx_color_t)));
+}
+
 static gfx_color_t *s_verify_px; // gfx_verify only
 
 // Draws the whole scene into a scratch buffer and compares it with the incrementally repaired frame.
@@ -132,6 +139,20 @@ static bool scene_settled(const office_switch_t *screen)
            s_zoom.want_office == screen->office;
 }
 
+// The strip-copy timing of a window (app_scanout_stats_t), on its own line after the window's line; nothing where
+// there is no scanout (the simulator).
+static void strips_log(const char *window, const app_scanout_stats_t *d)
+{
+    if (d->fills_checked == 0) {
+        return;
+    }
+    APP_LOGI(TAG,
+             "STRIPS %s: %" PRIu32 " fills | start late max %" PRIu32 " us (while drawing %" PRIu32
+             " us) | margin min %" PRId32 " us | close %" PRIu32 " (while drawing %" PRIu32 ") | missed %" PRIu32,
+             window, d->fills_checked, d->late_us_max, d->late_us_max_drawing, d->margin_us_min, d->close,
+             d->close_drawing, d->missed);
+}
+
 // What a zoom cost, like a performance window: everything since the window was restarted for it.
 static void zoom_log(const char *way, const perf_t *p, int64_t window_us)
 {
@@ -143,6 +164,7 @@ static void zoom_log(const char *way, const perf_t *p, int64_t window_us)
              " max %d px | scanout resync %" PRIu32 ", fill max %" PRIu32 " us",
              way, p->renders, window_us / 1000.0, p->renders / (window_us / 1e6), p->render_us_sum / 1000.0 / n,
              p->render_us_max / 1000.0, p->px_sum / n, p->px_max, d.resyncs, d.fill_us_max);
+    strips_log(way, &d);
 }
 
 static void perf_log(const perf_t *p, int64_t window_us)
@@ -161,6 +183,7 @@ static void perf_log(const perf_t *p, int64_t window_us)
              p->render_us_sum / 1000.0 / n, p->render_us_max / 1000.0, p->px_sum / n, p->px_max,
              d.wait_us_sum / 1000.0 / presents, d.wait_us_max / 1000.0, d.slow_waits, p->touches,
              p->touch_us_sum / 1000.0 / touches, p->touch_us_max / 1000.0);
+    strips_log("PERF", &d);
     if (s_cfg.gfx_verify) {
         APP_LOGI(TAG, "VERIFY %.1fs: %" PRIu32 " frames checked, %" PRIu32 " mismatched", s, p->verified,
                  p->mismatched);
@@ -713,17 +736,22 @@ bool app_init(const app_config_t *config)
         APP_LOGW(TAG, "Buddy's thoughts cannot be shown (no memory, or they do not fit the stage)");
     }
     // The faces' pixels are only read when the clock redraws: PSRAM. Classic is Clock Mode itself; Mechanical
-    // Skeleton is left out if its memory is missing.
+    // Skeleton is left out if its memory is missing. Its frame (runs read on every redraw of the face) goes into
+    // internal RAM if there is room, else it is read from the firmware's constant data.
     uint8_t *clock_mem = app_port_alloc(OFFICE_CLOCK_MEMORY, APP_MEM_LARGE);
     uint8_t *skeleton_mem = app_port_alloc(OFFICE_SKELETON_MEMORY, APP_MEM_LARGE);
+    uint8_t *frame_mem = app_port_alloc(office_skeleton_frame_memory(), APP_MEM_INTERNAL);
     const int64_t faces_t0 = app_port_time_us();
-    s.has_office = clock_mem && office_faces_init(&s_faces, &s_scene, s_layout.screen, clock_mem, skeleton_mem, 20);
+    s.has_office = clock_mem && office_faces_init(&s_faces, &s_scene, s_layout.screen, clock_mem, skeleton_mem,
+                                                  frame_mem, flush_bytes, 20);
     if (!s.has_office) {
         APP_LOGW(TAG, "Clock Mode unavailable (no memory for the clock)");
     } else {
-        APP_LOGI(TAG, "clock faces ready in %.0f ms: classic%s (skeleton %u KB of %u KB)",
+        APP_LOGI(TAG, "clock faces ready in %.1f ms: classic%s (skeleton %u KB of %u KB, frame %u B in %s)",
                  (app_port_time_us() - faces_t0) / 1000.0, s_faces.has[OFFICE_FACE_SKELETON] ? ", skeleton" : "",
-                 (unsigned)(s_faces.skeleton.mem_used / 1024), (unsigned)(OFFICE_SKELETON_MEMORY / 1024));
+                 (unsigned)(s_faces.skeleton.mem_used / 1024), (unsigned)(OFFICE_SKELETON_MEMORY / 1024),
+                 (unsigned)office_skeleton_frame_memory(),
+                 s_faces.skeleton.frame_copied ? "internal RAM" : "constant data");
     }
     office_switch_init(&s.screen);
     office_zoom_init(&s_zoom);
@@ -936,6 +964,7 @@ uint32_t app_frame(void)
             app_port_scanout_stats(&sw);
             APP_LOGI(TAG, "clock face drawn (%" PRIu32 " scanout resyncs, fill max %" PRIu32 " us)", sw.resyncs,
                      sw.fill_us_max);
+            strips_log("face", &sw);
             s.face_redraw = false;
         } else if (s.screen.office) {
             zoom_log("in", &s.perf, app_port_time_us() - s.perf_since);
@@ -944,6 +973,7 @@ uint32_t app_frame(void)
             app_port_scanout_stats(&sw);
             APP_LOGI(TAG, "DeskBuddy drawn (%" PRIu32 " scanout resyncs, fill max %" PRIu32 " us)", sw.resyncs,
                      sw.fill_us_max);
+            strips_log("DeskBuddy", &sw);
         }
         memset(&s.perf, 0, sizeof(s.perf));
         s.perf_since = app_port_time_us();
@@ -1102,6 +1132,7 @@ uint32_t app_frame(void)
             app_port_scanout_stats(&boot);
             APP_LOGI(TAG, "both buffers drawn, backlight on (while dark: %" PRIu32 " scanout resyncs, fill max %" PRIu32
                      " us)", boot.resyncs, boot.fill_us_max);
+            strips_log("boot", &boot);
             memset(&s.perf, 0, sizeof(s.perf)); // performance windows cover the lit screen only
             s.perf_since = app_port_time_us();
         }

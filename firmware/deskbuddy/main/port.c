@@ -84,6 +84,7 @@ void *app_port_alloc(size_t size, app_mem_t kind)
 
 gfx_color_t *app_port_back_buffer(void)
 {
+    display_set_drawing(true); // the renderer asks for the buffer when it starts drawing a frame
     return display_back_buffer();
 }
 
@@ -103,6 +104,7 @@ void app_port_flush(const gfx_color_t *px, int count)
 
 void app_port_present(void)
 {
+    display_set_drawing(false);
     display_present();
 }
 
@@ -123,5 +125,6 @@ void app_port_scanout_stats(app_scanout_stats_t *out)
     display_stats_t d;
     display_stats_take(&d);
     *out = (app_scanout_stats_t){d.presents, d.frames, d.resyncs, d.fill_us_max, d.slow_waits, d.wait_us_sum,
-                                 d.wait_us_max};
+                                 d.wait_us_max, d.fills_checked, d.late_us_max, d.late_us_max_drawing,
+                                 d.margin_us_min, d.close, d.close_drawing, d.missed};
 }

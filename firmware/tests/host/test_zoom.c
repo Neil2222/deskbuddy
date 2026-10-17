@@ -241,7 +241,7 @@ static void whole_loop(office_face_t face, loop_result_t *out)
     CHECK(buddy_view_init(&view, &scene, layout.stage, 10, 0));
     CHECK(menu_init(&menu, &menu_default, layout_panel_content(&layout), 0));
     CHECK(menu_view_init(&mview, &scene, &menu, s_menu_mem, sizeof(s_menu_mem), 10));
-    CHECK(office_faces_init(&faces, &scene, layout.screen, s_clock_mem, s_skeleton_mem, 20));
+    CHECK(office_faces_init(&faces, &scene, layout.screen, s_clock_mem, s_skeleton_mem, NULL, NULL, 20));
     CHECK(office_faces_select(&faces, face));
     CHECK(marquee_init(&sign, &scene, 30));
     gfx_dirty_init(&changes, W, H, ALIGN);

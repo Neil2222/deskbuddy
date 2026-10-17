@@ -70,6 +70,7 @@ extern int g_test_failed;
     X(office_pauses_character_mid_monster)           \
     X(office_switch_redraws_fully_only_while_switching) \
     X(office_switch_redraws_a_new_face)              \
+    X(office_skeleton_assets_match_the_drawing)      \
     X(office_skeleton_keeps_the_time_on_top)         \
     X(office_skeleton_moves_like_clockwork)          \
     X(office_skeleton_redraws_match_full_redraw)     \

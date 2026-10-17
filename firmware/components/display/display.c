@@ -25,6 +25,14 @@ typedef struct {
     uint32_t resyncs; // frame starts that did not follow the previous frame's last chunk
     int last_end;     // pixel position right after the previous fill
     uint32_t fill_us_max;
+    // Strip-copy timing (display_stats_t). The lateness of fill k is that of fill k - 1 plus how much longer than one
+    // bounce period it came after it, never below zero: an on-time fill resets it.
+    int64_t prev_start;
+    int prev_chunk;
+    int32_t late_us;
+    volatile bool drawing; // set by the presenting task
+    uint32_t fills_checked, late_us_max, late_us_max_drawing, close, close_drawing, missed;
+    int32_t margin_us_min;
     portMUX_TYPE lock;
 
     SemaphoreHandle_t idle; // given by the ISR when a buffer that is no longer scanned has no readers left
@@ -34,7 +42,7 @@ typedef struct {
     uint32_t frames_taken, resyncs_taken;
 } display_state_t;
 
-static DRAM_ATTR display_state_t s = {.lock = portMUX_INITIALIZER_UNLOCKED};
+static DRAM_ATTR display_state_t s = {.lock = portMUX_INITIALIZER_UNLOCKED, .margin_us_min = INT32_MAX};
 
 esp_err_t display_init(int width, int height)
 {
@@ -80,6 +88,18 @@ IRAM_ATTR bool display_bounce_fill(void *dst, int pos_px, int len_bytes, void *c
     s.last_end = pos_px + n_px;
     const int src = s.scan;
     s.readers[src]++;
+    // How late this strip's fill starts: chunk k is filled when the scanout has finished chunk k - 2, one bounce
+    // period after the fill of chunk k - 1 (chunks 0 and 1 are filled before the vertical blanking: not counted).
+    const int chunk = n_px > 0 ? pos_px / n_px : 0;
+    int32_t late = 0;
+    if (chunk >= 3 && s.prev_chunk == chunk - 1) {
+        late = s.late_us + (int32_t)(t0 - s.prev_start) - DISPLAY_BOUNCE_PERIOD_US;
+        late = late < 0 ? 0 : late;
+    }
+    s.late_us = late;
+    s.prev_start = t0;
+    s.prev_chunk = chunk;
+    const bool drawing = s.drawing;
     portEXIT_CRITICAL_ISR(&s.lock);
 
     memcpy(dst, s.fb[src] + pos_px, (size_t)len_bytes);
@@ -95,6 +115,20 @@ IRAM_ATTR bool display_bounce_fill(void *dst, int pos_px, int len_bytes, void *c
     const uint32_t fill_us = (uint32_t)(esp_timer_get_time() - t0);
     if (fill_us > s.fill_us_max) {
         s.fill_us_max = fill_us;
+    }
+    if (chunk >= 2) { // counters only: no logging from the interrupt
+        const int32_t margin = DISPLAY_BOUNCE_PERIOD_US - late - (int32_t)fill_us;
+        s.fills_checked++;
+        s.late_us_max = (uint32_t)late > s.late_us_max ? (uint32_t)late : s.late_us_max;
+        if (drawing && (uint32_t)late > s.late_us_max_drawing) {
+            s.late_us_max_drawing = (uint32_t)late;
+        }
+        s.margin_us_min = margin < s.margin_us_min ? margin : s.margin_us_min;
+        if (margin < DISPLAY_CLOSE_US) {
+            s.close++;
+            s.close_drawing += drawing;
+        }
+        s.missed += margin < 0;
     }
     portEXIT_CRITICAL_ISR(&s.lock);
 
@@ -156,7 +190,12 @@ void display_stats_take(display_stats_t *out)
 {
     portENTER_CRITICAL(&s.lock);
     const uint32_t frames = s.frames, resyncs = s.resyncs, fill_us_max = s.fill_us_max;
+    const display_stats_t timing = {.fills_checked = s.fills_checked, .late_us_max = s.late_us_max,
+                                    .late_us_max_drawing = s.late_us_max_drawing, .margin_us_min = s.margin_us_min,
+                                    .close = s.close, .close_drawing = s.close_drawing, .missed = s.missed};
     s.fill_us_max = 0;
+    s.fills_checked = s.late_us_max = s.late_us_max_drawing = s.close = s.close_drawing = s.missed = 0;
+    s.margin_us_min = INT32_MAX;
     portEXIT_CRITICAL(&s.lock);
     *out = s.stats;
     out->frames = frames - s.frames_taken;
@@ -164,5 +203,17 @@ void display_stats_take(display_stats_t *out)
     s.resyncs_taken = resyncs;
     s.frames_taken = frames;
     out->fill_us_max = fill_us_max;
+    out->fills_checked = timing.fills_checked;
+    out->late_us_max = timing.late_us_max;
+    out->late_us_max_drawing = timing.late_us_max_drawing;
+    out->margin_us_min = timing.fills_checked ? timing.margin_us_min : DISPLAY_BOUNCE_PERIOD_US;
+    out->close = timing.close;
+    out->close_drawing = timing.close_drawing;
+    out->missed = timing.missed;
     memset(&s.stats, 0, sizeof(s.stats));
+}
+
+void display_set_drawing(bool drawing)
+{
+    s.drawing = drawing;
 }

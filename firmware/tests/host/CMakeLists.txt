@@ -68,6 +68,12 @@ target_link_libraries(buddy_icons PRIVATE deskbuddy_core)
 target_compile_options(buddy_icons PRIVATE ${WARNINGS})
 target_include_directories(buddy_icons PRIVATE ${COMPONENTS_DIR}/menu/src) # menu_art.h: the menu's icons
 
+# The Mechanical Skeleton's artwork as firmware data (tools/host-test.ps1 -Assets writes
+# components/office/src/office_skeleton_assets.c; the host tests check that file against the drawing code).
+add_executable(skeleton_assets skeleton_assets.c)
+target_link_libraries(skeleton_assets PRIVATE deskbuddy_core)
+target_compile_options(skeleton_assets PRIVATE ${WARNINGS})
+
 # The desktop simulator: components/app with firmware/simulator as its platform (app_port.h). The version is the
 # one ESP-IDF gives the firmware (git describe at configure time).
 if(WIN32)

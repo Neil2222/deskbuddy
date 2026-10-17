@@ -65,6 +65,13 @@ typedef struct {
     uint32_t slow_waits;  // presents that waited unusually long
     int64_t wait_us_sum;  // time app_port_present() spent waiting
     int64_t wait_us_max;
+    // Strip-copy timing (the board's bounce fills; zero where there is no scanout): fills counted, the latest start
+    // (overall and while a frame was being drawn), the least time left before a strip was needed, fills that came
+    // within 50 us of that (and how many of them while drawing), and fills estimated to have missed it.
+    uint32_t fills_checked;
+    uint32_t late_us_max, late_us_max_drawing;
+    int32_t margin_us_min;
+    uint32_t close, close_drawing, missed;
 } app_scanout_stats_t;
 
 // The scanout's statistics since the previous call (then reset). Called from the application's thread.

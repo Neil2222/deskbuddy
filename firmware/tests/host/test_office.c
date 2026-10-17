@@ -9,6 +9,7 @@
 #include "layout.h"
 #include "office_clock.h"
 #include "office_skeleton.h"
+#include "office_skeleton_art.h"
 #include "office_switch.h"
 #include "test.h"
 
@@ -364,6 +365,58 @@ static struct tm sk_time(int h, int m, int s)
                        .tm_sec = s};
 }
 
+// The firmware's packed artwork is exactly what the drawing code draws today (else: tools/host-test.ps1 -Assets):
+// every image, every position, and the frame's runs.
+void test_office_skeleton_assets_match_the_drawing(void)
+{
+    static office_skeleton_art_t art;
+    CHECK(office_skeleton_art_draw(&art));
+    const office_skeleton_assets_t *as = &office_skeleton_assets;
+    const office_skeleton_layout_t *a = &art.layout, *b = &as->layout;
+    bool same = memcmp(a->w, b->w, sizeof(a->w)) == 0 && memcmp(a->h, b->h, sizeof(a->h)) == 0 &&
+                memcmp(a->x, b->x, sizeof(a->x)) == 0 && memcmp(a->y, b->y, sizeof(a->y)) == 0 &&
+                memcmp(a->dir, b->dir, sizeof(a->dir)) == 0 && memcmp(a->shadow, b->shadow, sizeof(a->shadow)) == 0 &&
+                memcmp(a->plate_shadow, b->plate_shadow, sizeof(a->plate_shadow)) == 0 &&
+                memcmp(a->digit_x, b->digit_x, sizeof(a->digit_x)) == 0 && a->digit_y == b->digit_y &&
+                a->date_x == b->date_x && a->date_y == b->date_y && a->date_w == b->date_w && a->date_h == b->date_h;
+    if (!same) {
+        printf("    the layout differs from office_skeleton_assets.c: run tools/host-test.ps1 -Assets\n");
+    }
+    static uint8_t px[128 * 1024];
+    for (int i = 0; same && i < OFFICE_SKELETON_IMAGES; i++) {
+        const size_t n = (size_t)a->w[i] * a->h[i];
+        same = n <= sizeof(px) &&
+               office_skeleton_unpack(as->packed + as->offset[i], as->offset[i + 1] - as->offset[i], px, n) &&
+               memcmp(px, art.px[i], n) == 0;
+        if (!same) {
+            printf("    image %d differs from office_skeleton_assets.c: run tools/host-test.ps1 -Assets\n", i);
+        }
+    }
+    // The frame, rebuilt from its runs.
+    enum { FW = OFFICE_SKELETON_DESIGN_W / OFFICE_SKELETON_SCALE, FH = OFFICE_SKELETON_DESIGN_H / OFFICE_SKELETON_SCALE };
+    static uint8_t frame[FW * FH];
+    memset(frame, 0, sizeof(frame));
+    same = same && as->frame.w == FW && as->frame.h == FH && art.frame_w == FW && art.frame_h == FH;
+    for (int y = 0; same && y < FH; y++) {
+        const uint8_t *r = as->frame.runs + as->frame.row[y], *end = as->frame.runs + as->frame.row[y + 1];
+        while (same && r < end) {
+            const int col = r[0] | r[1] << 8, n = r[2] | r[3] << 8;
+            same = n > 0 && col + n <= FW;
+            if (same) {
+                memcpy(frame + (size_t)y * FW + col, r + 4, (size_t)n);
+            }
+            r += 4 + n;
+        }
+    }
+    same = same && memcmp(frame, art.frame, sizeof(frame)) == 0;
+    office_skeleton_art_free(&art);
+    CHECK(same);
+    // Corrupt data is refused, never unpacked past its end.
+    const uint8_t bad[] = {5, 1, 2};
+    CHECK(!office_skeleton_unpack(bad, sizeof(bad), px, 6));
+    CHECK(!office_skeleton_unpack(as->packed, as->offset[1], px, (size_t)b->w[0] * b->h[0] + 1));
+}
+
 // The time stays on top: every part of the movement lies under the timeplate, which is solid under every digit,
 // so no wheel, at any position, changes a pixel of the time.
 void test_office_skeleton_keeps_the_time_on_top(void)
@@ -371,19 +424,20 @@ void test_office_skeleton_keeps_the_time_on_top(void)
     static gfx_scene_t scene;
     static office_skeleton_t k;
     CHECK(gfx_scene_init(&scene, W, H, office_skeleton_background, &k, s_strip, 16 * 1024, ALIGN));
-    CHECK(!office_skeleton_init(&k, &scene, (gfx_rect_t){0, 0, W, H}, s_sk_mem, 100 * 1024, 20)); // too little
+    CHECK(!office_skeleton_init(&k, &scene, (gfx_rect_t){0, 0, W, H}, s_sk_mem, 100 * 1024, NULL, 0, NULL, 20));
     CHECK(gfx_scene_init(&scene, W, H, office_skeleton_background, &k, s_strip, 16 * 1024, ALIGN));
-    CHECK(!office_skeleton_init(&k, &scene, (gfx_rect_t){0, 0, 800, 480}, s_sk_mem, sizeof(s_sk_mem), 20));
+    CHECK(!office_skeleton_init(&k, &scene, (gfx_rect_t){0, 0, 800, 480}, s_sk_mem, sizeof(s_sk_mem), NULL, 0, NULL,
+                                20));
     CHECK(gfx_scene_init(&scene, W, H, office_skeleton_background, &k, s_strip, 16 * 1024, ALIGN));
-    CHECK(office_skeleton_init(&k, &scene, (gfx_rect_t){0, 0, W, H}, s_sk_mem, sizeof(s_sk_mem), 20));
+    CHECK(office_skeleton_init(&k, &scene, (gfx_rect_t){0, 0, W, H}, s_sk_mem, sizeof(s_sk_mem), NULL, 0, NULL, 20));
     CHECK(k.mem_used <= OFFICE_SKELETON_MEMORY);
     office_skeleton_show(&k, true);
     struct tm tm = sk_time(14, 37, 21);
     office_skeleton_apply(&k, &tm, 300);
 
-    gfx_sprite_t *movement[OFFICE_SKELETON_GEARS + 3] = {&k.frame, &k.anchor, &k.cock};
+    gfx_sprite_t *movement[OFFICE_SKELETON_GEARS + 2] = {&k.anchor, &k.cock};
     for (int g = 0; g < OFFICE_SKELETON_GEARS; g++) {
-        movement[3 + g] = &k.gear[g];
+        movement[2 + g] = &k.gear[g];
     }
     const int plate_z = z_of(&scene, &k.plate);
     for (unsigned i = 0; i < sizeof(movement) / sizeof(movement[0]); i++) {
@@ -434,7 +488,7 @@ void test_office_skeleton_moves_like_clockwork(void)
     static gfx_scene_t scene;
     static office_skeleton_t k;
     CHECK(gfx_scene_init(&scene, W, H, office_skeleton_background, &k, s_strip, 16 * 1024, ALIGN));
-    CHECK(office_skeleton_init(&k, &scene, (gfx_rect_t){0, 0, W, H}, s_sk_mem, sizeof(s_sk_mem), 20));
+    CHECK(office_skeleton_init(&k, &scene, (gfx_rect_t){0, 0, W, H}, s_sk_mem, sizeof(s_sk_mem), NULL, 0, NULL, 20));
     enum { ESC = OFFICE_SKELETON_GEARS - 1, LEFT = 0, RIGHT = 3 };
     office_skeleton_show(&k, true);
     const gfx_image_t *img[3];
@@ -525,6 +579,31 @@ void test_office_skeleton_moves_like_clockwork(void)
 #undef SAMPLE
 }
 
+// What a redraw reads from sprite pixels, in 64-byte cache lines (on the board all of the Skeleton's sprite pixels
+// live in PSRAM): for each sprite and each rectangle, the lines its source rows touch. A model: rows shared between
+// rectangles and lines still cached from earlier frames are counted again.
+static long sprite_read_lines(const gfx_scene_t *scene, const gfx_dirty_t *redraw)
+{
+    long lines = 0;
+    for (int i = 0; i < scene->count; i++) {
+        const gfx_sprite_t *sp = scene->sprite[i];
+        const gfx_rect_t b = gfx_sprite_bounds(sp);
+        for (int r = 0; r < redraw->count && !gfx_rect_is_empty(b); r++) {
+            const gfx_rect_t c = gfx_rect_intersect(b, redraw->rect[r]);
+            if (gfx_rect_is_empty(c)) {
+                continue;
+            }
+            const int s = sp->scale, y0 = (c.y - sp->y) / s, y1 = (c.y + c.h - 1 - sp->y) / s;
+            const int x0 = (c.x - sp->x) / s, x1 = (c.x + c.w - 1 - sp->x) / s;
+            for (int y = y0; y <= y1; y++) {
+                const uintptr_t row = (uintptr_t)sp->image->px + (uintptr_t)y * sp->image->w;
+                lines += (long)((row + (uintptr_t)x1) / 64 - (row + (uintptr_t)x0) / 64 + 1);
+            }
+        }
+    }
+    return lines;
+}
+
 // The face over a minute and an hour, as the render loop draws it: every presented buffer equals a full redraw, no
 // frame redraws the whole screen, and the ticks stay small.
 void test_office_skeleton_redraws_match_full_redraw(void)
@@ -534,7 +613,11 @@ void test_office_skeleton_redraws_match_full_redraw(void)
     static gfx_dirty_t changes, redraw, all;
     static gfx_repair_t repair;
     CHECK(gfx_scene_init(&scene, W, H, office_skeleton_background, &k, s_strip, 16 * 1024, ALIGN));
-    CHECK(office_skeleton_init(&k, &scene, (gfx_rect_t){0, 0, W, H}, s_sk_mem, sizeof(s_sk_mem), 20));
+    static uint8_t frame_mem[64 * 1024];
+    CHECK(office_skeleton_frame_memory() <= sizeof(frame_mem));
+    CHECK(office_skeleton_init(&k, &scene, (gfx_rect_t){0, 0, W, H}, s_sk_mem, sizeof(s_sk_mem), frame_mem,
+                               sizeof(frame_mem), NULL, 20));
+    CHECK(k.frame_copied);
     office_skeleton_show(&k, true);
     gfx_dirty_init(&changes, W, H, ALIGN);
     gfx_dirty_init(&redraw, W, H, ALIGN);
@@ -549,6 +632,7 @@ void test_office_skeleton_redraws_match_full_redraw(void)
     const int start = 19 * 3600 + 59 * 60 + 44;
     int back = 0, bad = 0, frames = 0, full = 0;
     int max_second = 0, max_train = 0, max_flourish = 0;
+    long reads_second = 0, reads_train = 0, reads_flourish = 0, reads_total = 0; // largest per frame; all frames
     uint32_t t = 0;
     while (t < 20000) {
         const int secs = start + (int)(t / 1000);
@@ -572,6 +656,10 @@ void test_office_skeleton_redraws_match_full_redraw(void)
                 const bool train = !flourish && (s5 == 0 || s5 == 1 || s15 == 7 || s15 == 8) && ms < 500;
                 int *max = flourish ? &max_flourish : train ? &max_train : &max_second;
                 *max = area > *max ? area : *max;
+                const long lines = sprite_read_lines(&scene, &redraw);
+                long *rmax = flourish ? &reads_flourish : train ? &reads_train : &reads_second;
+                *rmax = lines > *rmax ? lines : *rmax;
+                reads_total += lines;
             }
             frames++;
         }
@@ -580,6 +668,9 @@ void test_office_skeleton_redraws_match_full_redraw(void)
     printf("    skeleton: %d frames over 20 s; largest redraw: escapement tick %d px, train step %d px, "
            "flourish %d px; %u KB of pixels\n", frames, max_second, max_train, max_flourish,
            (unsigned)(k.mem_used / 1024));
+    printf("    skeleton sprite-pixel reads (64-B lines x 64, largest frame): escapement tick %ld KB, train step %ld KB, "
+           "flourish %ld KB; %ld KB over the 20 s\n", reads_second * 64 / 1024, reads_train * 64 / 1024,
+           reads_flourish * 64 / 1024, reads_total * 64 / 1024);
     CHECK_EQ(bad, 0);
     CHECK_EQ(full, 0);
     CHECK(max_second > 0 && max_second < W * H / 12);

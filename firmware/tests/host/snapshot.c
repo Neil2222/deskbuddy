@@ -560,7 +560,7 @@ int main(int argc, char **argv)
         !buddy_view_init(&s_view, &s_scene, s_layout.stage, 10, 0) ||
         !menu_init(&s_menu, &menu_default, layout_panel_content(&s_layout), 0) ||
         !menu_view_init(&s_menu_view, &s_scene, &s_menu, menu_mem, sizeof(menu_mem), 10) ||
-        !office_faces_init(&faces, &s_scene, s_layout.screen, clock_mem, skeleton_mem, 20) ||
+        !office_faces_init(&faces, &s_scene, s_layout.screen, clock_mem, skeleton_mem, NULL, NULL, 20) ||
         !marquee_init(&marquee, &s_scene, 30) ||
         !menu_ask_init(&ask, &s_scene, s_layout.stage, s_view.home_y0 - BUDDY_MAX_LIFT * s_view.home_scale, 25) ||
         !menu_thought_init(&thought, &s_scene, s_layout.stage, s_view.home_x0 + s_view.art->w * s_view.home_scale / 2,

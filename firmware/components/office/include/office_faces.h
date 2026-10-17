@@ -39,10 +39,11 @@ typedef struct {
 } office_faces_t;
 
 // Sets up Classic (classic_mem: OFFICE_CLOCK_MEMORY bytes) and Mechanical Skeleton (skeleton_mem:
-// OFFICE_SKELETON_MEMORY bytes; NULL leaves it out), Classic selected. Returns false only if Classic could not be set
-// up (then Clock Mode is unavailable).
+// OFFICE_SKELETON_MEMORY bytes, NULL leaves it out; skeleton_frame_mem: office_skeleton_frame_memory() bytes of fast
+// memory for its frame, or NULL; flush: see office_skeleton_flush_fn), Classic selected. Returns false only if Classic
+// could not be set up (then Clock Mode is unavailable).
 bool office_faces_init(office_faces_t *f, gfx_scene_t *scene, gfx_rect_t screen, uint8_t *classic_mem,
-                       uint8_t *skeleton_mem, int z);
+                       uint8_t *skeleton_mem, uint8_t *skeleton_frame_mem, office_skeleton_flush_fn flush, int z);
 
 // Selects a face. If the clock is showing, its sprites change at once and the caller must redraw the whole screen
 // (the background changes too: office_faces_background). false: not available (nothing changes).

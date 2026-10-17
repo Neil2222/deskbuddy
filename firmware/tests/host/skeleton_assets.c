@@ -1,0 +1,189 @@
+// Packs the Mechanical Skeleton's artwork into firmware data: draws it with office_skeleton_art.c (the same code the
+// host tests check), PackBits-packs every image, turns the full-screen frame into runs of visible pixels, and writes
+// office_skeleton_assets.c. Deterministic: the same code always writes the same file.
+//
+//   skeleton_assets <path to office_skeleton_assets.c>       (tools/host-test.ps1 -Assets)
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "office_skeleton_art.h"
+
+typedef struct {
+    uint8_t *p;
+    size_t n, cap;
+} buf_t;
+
+static void put(buf_t *b, uint8_t v)
+{
+    if (b->n == b->cap) {
+        b->cap = b->cap ? b->cap * 2 : 4096;
+        b->p = realloc(b->p, b->cap);
+        if (!b->p) {
+            fprintf(stderr, "out of memory\n");
+            exit(1);
+        }
+    }
+    b->p[b->n++] = v;
+}
+
+// PackBits: runs of 2..129 equal bytes as (126 + run, byte); everything else in literal blocks of 1..128.
+static void pack(buf_t *out, const uint8_t *src, size_t n)
+{
+    size_t i = 0;
+    while (i < n) {
+        size_t run = 1;
+        while (i + run < n && run < 129 && src[i + run] == src[i]) {
+            run++;
+        }
+        if (run >= 2) {
+            put(out, (uint8_t)(126 + run));
+            put(out, src[i]);
+            i += run;
+            continue;
+        }
+        size_t lit = 1; // up to the next pair of equal bytes
+        while (i + lit < n && lit < 128 && !(i + lit + 1 < n && src[i + lit] == src[i + lit + 1])) {
+            lit++;
+        }
+        put(out, (uint8_t)(lit - 1));
+        for (size_t k = 0; k < lit; k++) {
+            put(out, src[i + k]);
+        }
+        i += lit;
+    }
+}
+
+static void write_bytes(FILE *f, const char *name, const uint8_t *p, size_t n)
+{
+    fprintf(f, "static const uint8_t %s[%zu] = {\n", name, n);
+    for (size_t i = 0; i < n; i++) {
+        fprintf(f, "%s%u,%s", i % 24 == 0 ? "    " : "", p[i], i % 24 == 23 || i + 1 == n ? "\n" : "");
+    }
+    fprintf(f, "};\n\n");
+}
+
+static void write_float(FILE *f, float v)
+{
+    char s[32];
+    snprintf(s, sizeof(s), "%.9g", v);
+    fprintf(f, "%s%sf", s, strpbrk(s, ".e") ? "" : ".0");
+}
+
+#define LIST(fmt, arr, n)                                                                                              \
+    do {                                                                                                               \
+        fprintf(f, "{");                                                                                               \
+        for (int i_ = 0; i_ < (n); i_++) {                                                                             \
+            fprintf(f, "%s" fmt, i_ ? ", " : "", (arr)[i_]);                                                           \
+        }                                                                                                              \
+        fprintf(f, "}");                                                                                               \
+    } while (0)
+
+int main(int argc, char **argv)
+{
+    if (argc != 2) {
+        fprintf(stderr, "usage: skeleton_assets <office_skeleton_assets.c>\n");
+        return 2;
+    }
+    static office_skeleton_art_t art;
+    if (!office_skeleton_art_draw(&art)) {
+        fprintf(stderr, "drawing failed\n");
+        return 1;
+    }
+    const office_skeleton_layout_t *l = &art.layout;
+
+    buf_t packed = {0};
+    uint32_t offset[OFFICE_SKELETON_IMAGES + 1];
+    size_t raw = 0;
+    for (int i = 0; i < OFFICE_SKELETON_IMAGES; i++) {
+        offset[i] = (uint32_t)packed.n;
+        const size_t n = (size_t)l->w[i] * l->h[i];
+        pack(&packed, art.px[i], n);
+        raw += n;
+    }
+    offset[OFFICE_SKELETON_IMAGES] = (uint32_t)packed.n;
+
+    // The frame: per row, runs of visible pixels (first column and length, little-endian, then the indices).
+    buf_t runs = {0};
+    uint32_t *row = calloc((size_t)art.frame_h + 1, sizeof(uint32_t));
+    if (!row) {
+        return 1;
+    }
+    for (int y = 0; y < art.frame_h; y++) {
+        row[y] = (uint32_t)runs.n;
+        const uint8_t *src = art.frame + (size_t)y * art.frame_w;
+        for (int x = 0; x < art.frame_w;) {
+            if (!src[x]) {
+                x++;
+                continue;
+            }
+            int n = 0;
+            while (x + n < art.frame_w && src[x + n]) {
+                n++;
+            }
+            put(&runs, (uint8_t)(x & 0xff));
+            put(&runs, (uint8_t)(x >> 8));
+            put(&runs, (uint8_t)(n & 0xff));
+            put(&runs, (uint8_t)(n >> 8));
+            for (int k = 0; k < n; k++) {
+                put(&runs, src[x + k]);
+            }
+            x += n;
+        }
+    }
+    row[art.frame_h] = (uint32_t)runs.n;
+
+    FILE *f = fopen(argv[1], "w");
+    if (!f) {
+        fprintf(stderr, "cannot write %s\n", argv[1]);
+        return 1;
+    }
+    fprintf(f, "// The Mechanical Skeleton's artwork, packed. Generated by firmware/tests/host/skeleton_assets.c from\n"
+               "// office_skeleton_art.c (tools/host-test.ps1 -Assets); do not edit. %zu bytes of images in %zu packed,\n"
+               "// the frame's %d x %d pixels in %zu bytes of runs.\n",
+            raw, packed.n, art.frame_w, art.frame_h, runs.n);
+    fprintf(f, "#include \"office_skeleton_assets.h\"\n\n");
+    write_bytes(f, "k_packed", packed.p, packed.n);
+    fprintf(f, "static const uint32_t k_frame_row[%d] = ", art.frame_h + 1);
+    LIST("%u", row, art.frame_h + 1);
+    fprintf(f, ";\n\n");
+    write_bytes(f, "k_frame_runs", runs.p, runs.n);
+    fprintf(f, "const office_skeleton_assets_t office_skeleton_assets = {\n    .layout =\n        {\n");
+    fprintf(f, "            .w = ");
+    LIST("%u", l->w, OFFICE_SKELETON_IMAGES);
+    fprintf(f, ",\n            .h = ");
+    LIST("%u", l->h, OFFICE_SKELETON_IMAGES);
+    fprintf(f, ",\n            .x = ");
+    LIST("%d", l->x, OFFICE_SKELETON_IMAGES);
+    fprintf(f, ",\n            .y = ");
+    LIST("%d", l->y, OFFICE_SKELETON_IMAGES);
+    fprintf(f, ",\n            .dir = ");
+    LIST("%d", l->dir, OFFICE_SKELETON_WHEELS);
+    fprintf(f, ",\n            .shadow = {");
+    for (int g = 0; g < OFFICE_SKELETON_WHEELS; g++) {
+        fprintf(f, "%s{", g ? ", " : "");
+        for (int c = 0; c < 3; c++) {
+            fprintf(f, "%s", c ? ", " : "");
+            write_float(f, l->shadow[g][c]);
+        }
+        fprintf(f, "}");
+    }
+    fprintf(f, "},\n            .plate_shadow = ");
+    LIST("%d", l->plate_shadow, 4);
+    fprintf(f, ",\n            .digit_x = ");
+    LIST("%d", l->digit_x, 4);
+    fprintf(f, ",\n            .digit_y = %d,\n            .date_x = %d,\n            .date_y = %d,\n"
+               "            .date_w = %d,\n            .date_h = %d,\n        },\n",
+            l->digit_y, l->date_x, l->date_y, l->date_w, l->date_h);
+    fprintf(f, "    .offset = ");
+    LIST("%u", offset, OFFICE_SKELETON_IMAGES + 1);
+    fprintf(f, ",\n    .packed = k_packed,\n    .frame = {%d, %d, k_frame_row, k_frame_runs, %zu},\n};\n",
+            art.frame_w, art.frame_h, runs.n);
+    fclose(f);
+    printf("%s: %zu bytes of images packed into %zu; frame runs %zu bytes\n", argv[1], raw, packed.n, runs.n);
+    office_skeleton_art_free(&art);
+    free(row);
+    free(packed.p);
+    free(runs.p);
+    return 0;
+}
