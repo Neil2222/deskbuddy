@@ -23,11 +23,24 @@ internal sealed class StillClock(DateTimeOffset now) : TimeProvider
     public override TimeZoneInfo LocalTimeZone => Amsterdam;
 }
 
-/// <summary>The History page in a real (off-screen) window on an STA thread, as WinForms needs.</summary>
+/// <summary>Pages in a real (off-screen) window on an STA thread, as WinForms needs.</summary>
 internal static class TestWindow
 {
+    /// <summary>The History page over the given sources.</summary>
     public static void Run(Func<HistorySource, IHistoryAccess> access, TimeProvider clock, WeekSchedule schedule,
-                           Action<HistoryPage, Pump> body, Func<string, string, string, bool>? confirm = null)
+                           Action<HistoryPage, Pump> body, Func<string, string, string, bool>? confirm = null) =>
+        Sta((form, theme, art, tips) =>
+        {
+            var page = new HistoryPage(theme, art, tips, access, () => true, () => schedule, clock, confirm ?? ((_, _, _) => true)) { Dock = DockStyle.Fill };
+            form.Controls.Add(page);
+            return pump => body(page, pump);
+        });
+
+    /// <summary>
+    /// A window with the Companion's theme, art and tooltips: <paramref name="build"/> fills it (before it is shown, as
+    /// the Companion builds its pages) and returns the test, which runs once the window is shown.
+    /// </summary>
+    public static void Sta(Func<Form, Theme, BuddyArt, ToolTip, Action<Pump>> build)
     {
         ExceptionDispatchInfo? failure = null;
         var thread = new Thread(() =>
@@ -40,11 +53,10 @@ internal static class TestWindow
                 using var art = new BuddyArt();
                 using var tips = new ToolTip();
                 using var form = new Form { ClientSize = new Size(1000, 700), StartPosition = FormStartPosition.Manual, Location = new Point(-3000, 0), ShowInTaskbar = false };
-                var page = new HistoryPage(theme, art, tips, access, () => true, () => schedule, clock, confirm ?? ((_, _, _) => true)) { Dock = DockStyle.Fill };
-                form.Controls.Add(page);
+                var test = build(form, theme, art, tips);
                 form.Show();
                 Pump.Events();
-                body(page, new Pump());
+                test(new Pump());
             }
             catch (Exception e)
             {

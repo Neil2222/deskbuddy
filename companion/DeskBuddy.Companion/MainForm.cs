@@ -22,6 +22,9 @@ public sealed class MainForm : Form
     private readonly SimulatorLauncher _simulator;
     private readonly SchedulePage _schedule;
     private readonly HistoryPage _historyPage;
+    private readonly ScheduleQuickControls _quick;
+    // The bottom of the sidebar: the connection status, and under it the schedule's (both on every page).
+    private readonly Panel _sidebarBottom = new() { Dock = DockStyle.Bottom, Height = 74 };
     private readonly ToolTip _tips = new();
     private readonly System.Windows.Forms.Timer _reactionTimer = new() { Interval = 1800 };
     private string? _reaction; // a face shown for a moment after something happened
@@ -171,8 +174,12 @@ public sealed class MainForm : Form
                 schedulePage.Nav.Invalidate();
             }
             _historyPage?.ScheduleChanged(); // today's plan on the History page
+            _quick?.UpdateStatus();          // the sidebar's schedule status (also on the page's clock: a pause that ends)
         };
         _schedule.ResumeRequested += _service.ResumeSchedule;
+        _quick = new ScheduleQuickControls(_theme, _tips, _schedule, () => _service.IsConnected, () => ShowPage(schedulePage));
+        _quick.Pill.Dock = DockStyle.Bottom;
+        _sidebarBottom.Controls.Add(_quick.Pill);
         _historyPage = new HistoryPage(_theme, _art, _tips, _service.HistoryOf, () => _service.HasSimulatorHistory, () => _schedule.Schedule);
         AddPage(nav, "History", "Buddy's day journal: what you did, what he asked and how it went", Theme.GlyphHistory, _historyPage);
         _service.HistoryChanged += _historyPage.HistoryChanged;
@@ -248,7 +255,9 @@ public sealed class MainForm : Form
         nav = new Panel { Dock = DockStyle.Fill };
         sidebar.Controls.Add(nav);
         sidebar.Controls.Add(brand);
-        sidebar.Controls.Add(_status);
+        _status.Dock = DockStyle.Top;
+        _sidebarBottom.Controls.Add(_status);
+        sidebar.Controls.Add(_sidebarBottom);
 
         _status.Click += (_, _) => ShowPage(_devicePage);
         return sidebar;
@@ -923,6 +932,7 @@ public sealed class MainForm : Form
     {
         var connected = _service.IsConnected;
         var (status, dot) = StatusSummary();
+        _quick.UpdateStatus(); // connected or not changes what a live schedule can do
         _status.Text = status;
         _status.DotColor = dot;
         _status.Invalidate();
@@ -1008,6 +1018,7 @@ public sealed class MainForm : Form
         if (disposing)
         {
             Icon?.Dispose();
+            _quick.Dispose();
             _art.Dispose();
             _theme.Dispose();
         }

@@ -154,6 +154,25 @@ public sealed class SchedulePage : Panel
 
     public WeekSchedule Schedule => _schedule;
 
+    /// <summary>Switches the schedule Live or Off (saved at once), as the header's switch does.</summary>
+    public void SetLive(bool live)
+    {
+        if (_schedule.Live != live)
+        {
+            Save(_schedule.WithLive(live));
+        }
+    }
+
+    /// <summary>Pauses the schedule until then (<see cref="WeekSchedule.UntilResumed"/>: until resumed), saved at once.</summary>
+    public void Pause(DateTimeOffset until) => Save(_schedule.WithPause(until));
+
+    /// <summary>Ends a pause (saved at once); the Companion then follows the schedule again, ending a manual mood choice.</summary>
+    public void Resume()
+    {
+        Save(_schedule.WithPause(null));
+        ResumeRequested?.Invoke();
+    }
+
     /// <summary>Reads the stored schedule (warnings go to the log) and shows today.</summary>
     public void LoadSchedule()
     {
@@ -196,13 +215,12 @@ public sealed class SchedulePage : Panel
 
     private void BuildHeader()
     {
-        _toggle.Click += (_, _) => Save(_schedule.WithLive(!_schedule.Live));
+        _toggle.Click += (_, _) => SetLive(!_schedule.Live);
         _pause.Click += (_, _) =>
         {
             if (_schedule.IsPaused(DateTimeOffset.Now))
             {
-                Save(_schedule.WithPause(null));
-                ResumeRequested?.Invoke();
+                Resume();
             }
             else
             {
@@ -217,13 +235,17 @@ public sealed class SchedulePage : Panel
         _pauseMenu.Renderer = new DarkMenuRenderer();
         _pauseMenu.BackColor = Theme.Input;
         _pauseMenu.ForeColor = Theme.Text;
-        _pauseMenu.Items.Add("For 1 hour", null, (_, _) => Save(_schedule.WithPause(DateTimeOffset.Now.AddHours(1))));
-        _pauseMenu.Items.Add("For the rest of today", null, (_, _) => Save(_schedule.WithPause(LocalMidnight(1))));
-        _pauseMenu.Items.Add("Until I resume", null, (_, _) => Save(_schedule.WithPause(WeekSchedule.UntilResumed)));
+        // The same presets as the sidebar's quick controls (ScheduleStatus): one definition of every pause.
+        void Preset(ToolStripItemCollection items, string label, ScheduleCommand command) =>
+            items.Add(label, null, (_, _) => Pause(ScheduleStatus.PauseUntil(command, DateTimeOffset.Now, TimeZoneInfo.Local)!.Value));
+        Preset(_pauseMenu.Items, "For 1 hour", new(ScheduleCommandKind.PauseHour));
+        Preset(_pauseMenu.Items, "For the rest of today", new(ScheduleCommandKind.PauseToday));
+        Preset(_pauseMenu.Items, "Until I resume", new(ScheduleCommandKind.PauseUntilResumed));
         var days = new ToolStripMenuItem("For days (holiday)") { ForeColor = Theme.Text };
-        foreach (var n in new[] { 2, 3, 5, 7, 14 })
+        foreach (var n in ScheduleStatus.AwayDays)
         {
-            days.DropDownItems.Add($"{n} days (today and the next {n - 1})", null, (_, _) => Save(_schedule.WithPause(LocalMidnight(n))));
+            var away = new ScheduleCommand(ScheduleCommandKind.Away, n);
+            Preset(days.DropDownItems, ScheduleStatus.Label(away), away);
         }
         days.DropDown.BackColor = Theme.Input;
         days.DropDown.ForeColor = Theme.Text;
@@ -470,9 +492,6 @@ public sealed class SchedulePage : Panel
         (b.Name.Length > 0 ? b.Name + " " : "") + $"{DayTime.Format(b.Start)}–{DayTime.Format(b.End)}";
 
     private static string DayName(DayOfWeek day) => day.ToString();
-
-    // The start of the local day `days` from today: "rest of today" is 1, "N days" is N (today counts as the first).
-    private static DateTimeOffset LocalMidnight(int days) => new(DateTime.Today.AddDays(days));
 
     private ScheduleBlock? SelectedBlock() => _selected is { } id ? _schedule[_day].FirstOrDefault(b => b.Id == id) : null;
 
