@@ -106,7 +106,8 @@ public sealed class SchedulePage : Panel
         Controls.Add(body);
         Controls.Add(new Panel { Dock = DockStyle.Top, Height = 12 });
         Controls.Add(_week);
-        Controls.Add(new Panel { Dock = DockStyle.Top, Height = 10 });
+        Controls.Add(new Panel { Dock = DockStyle.Top, Height = 6 });
+        Controls.Add(BuildStatusRow());
         Controls.Add(BuildHeaderRow());
 
         _week.DaySelected += day => ShowDay(day, scrollToNow: true);
@@ -170,10 +171,7 @@ public sealed class SchedulePage : Panel
     private Panel BuildHeaderRow()
     {
         var row = new Panel { Dock = DockStyle.Top, Height = 36 };
-        _status.Font = _theme.Small;
-        _status.ForeColor = Theme.Muted;
-        _status.Padding = new Padding(12, 0, 0, 0);
-        row.Controls.Add(_status); // fills the middle
+        row.Controls.Add(new Panel { Dock = DockStyle.Fill }); // the room between the switches and the edit buttons
         row.Controls.Add(_pause);
         row.Controls.Add(new Panel { Dock = DockStyle.Left, Width = 6 });
         row.Controls.Add(_toggle);
@@ -182,6 +180,17 @@ public sealed class SchedulePage : Panel
         row.Controls.Add(_copy);
         row.Controls.Add(new Panel { Dock = DockStyle.Right, Width = 8 });
         row.Controls.Add(_newBlock);
+        return row;
+    }
+
+    // The status line, on a row of its own under the header buttons: the whole width, so it is read without a tooltip.
+    private Panel BuildStatusRow()
+    {
+        var row = new Panel { Dock = DockStyle.Top, Height = 26 };
+        _status.Font = _theme.Small;
+        _status.ForeColor = Theme.Muted;
+        _status.Padding = new Padding(4, 0, 0, 0);
+        row.Controls.Add(_status);
         return row;
     }
 
