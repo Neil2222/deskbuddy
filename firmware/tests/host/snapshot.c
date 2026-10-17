@@ -9,24 +9,28 @@
 // menu_sheet.png: the control panel in every state side by side), the message marquee (marquee_intro.png,
 // marquee.png, office_marquee.png), the Clock Mode clock: office_clock.png and office_not_set.png, and the
 // Mechanical Skeleton face (skeleton_*.png: the face, its tick positions, the minute roll, the hourly flourish,
-// a close-up, the menu page that picks it, and the zoom arriving at it).
+// a close-up, the menu page that picks it, and the zoom arriving at it), and Tic-Tac-Toe (ttt_*.png and ttt_sheet.png:
+// the game's page, Buddy watching, thinking, winning, losing, puzzled by a draw, and asking for a rematch).
 #include <stdio.h>
 #include <string.h>
 
 #include "buddy_activity.h"
 #include "buddy_brain.h"
-#include "buddy_monster.h"
+#include "buddy_game.h"
 #include "buddy_kitt.h"
+#include "buddy_monster.h"
 #include "buddy_view.h"
 #include "layout.h"
 #include "marquee.h"
 #include "menu.h"
 #include "menu_ask.h"
 #include "menu_thought.h"
+#include "menu_ttt.h"
 #include "menu_view.h"
 #include "office_faces.h"
 #include "office_zoom.h"
 #include "png.h"
+#include "ttt.h"
 
 enum { W = 1024, H = 600, ALIGN = 32, STAGE_PERCENT = 65 }; // firmware defaults (Kconfig)
 
@@ -634,6 +638,112 @@ static bool kitt_menu_screen(office_faces_t *faces)
     return shot("kitt_menu_moods");
 }
 
+// Tic-Tac-Toe: moments of rounds set up on the board (the game's own state, so each is exactly that moment), with
+// his face, his line and the panel as the firmware draws them; full size, and halved on ttt_sheet.png (3 x 3).
+enum { TTT_COLS = 3, TTT_ROWS = 3, TTT_TILE_W = W / 2, TTT_TILE_H = H / 2 };
+static gfx_color_t s_ttt_sheet[TTT_COLS * TTT_TILE_W * TTT_ROWS * TTT_TILE_H];
+
+static void ttt_tile(int i)
+{
+    const int sheet_w = TTT_COLS * TTT_TILE_W, ox = (i % TTT_COLS) * TTT_TILE_W, oy = (i / TTT_COLS) * TTT_TILE_H;
+    for (int y = 0; y < TTT_TILE_H; y++) {
+        for (int x = 0; x < TTT_TILE_W; x++) {
+            s_ttt_sheet[(size_t)(oy + y) * sheet_w + ox + x] =
+                x == 0 || y == 0 ? GFX_RGB(255, 255, 255) : s_px[(size_t)(2 * y) * W + 2 * x];
+        }
+    }
+}
+
+// A round at a moment: the board ("X.O" row by row), the phase and since when, the result and its line.
+static void ttt_set(ttt_t *g, const char *board, ttt_phase_t phase, uint32_t phase_at, ttt_result_t result)
+{
+    g->moves = 0;
+    for (int i = 0; i < TTT_CELLS; i++) {
+        g->board[i] = board[i] == 'X' ? TTT_X : board[i] == 'O' ? TTT_O : TTT_EMPTY;
+        g->moves += g->board[i] != TTT_EMPTY;
+    }
+    g->phase = (uint8_t)phase;
+    g->phase_at = phase_at;
+    g->round_at = phase_at - 20000; // well into the round: no opening line
+    g->touched_at = phase_at;
+    g->last = -1;
+    g->hey = false;
+    g->result = (uint8_t)result;
+    ttt_judge(g->board, &g->line);
+}
+
+static bool ttt_moment(const char *name, int tile, ttt_t *g, uint8_t face, uint8_t attitude, uint32_t since,
+                       uint32_t now, menu_ask_t *ask)
+{
+    const buddy_game_t f = {face, attitude, 1, since};
+    buddy_pose_t pose = {.state = BUDDY_STATE_GAME};
+    buddy_game_pose(&f, now - since, &pose);
+    buddy_view_apply(&s_view, &pose, now);
+    menu_game_t look;
+    menu_ttt_look(&look, g, NULL, now);
+    menu_status_t st = {.mood = BUDDY_MOOD_IDLE, .office = true, .busy = g->phase != TTT_OFF};
+    st.game = g->phase != TTT_OFF ? &look : NULL;
+    menu_view_apply(&s_menu_view, &s_menu, &st, now);
+    menu_ask_say(ask, g->phase != TTT_OFF ? ttt_line(g, now) : NULL);
+    if (!shot(name)) {
+        return false;
+    }
+    ttt_tile(tile);
+    return true;
+}
+
+static bool ttt_screens(menu_ask_t *ask)
+{
+    const uint32_t t0 = 20000000;
+    const menu_status_t idle = {.mood = BUDDY_MOOD_IDLE, .office = true};
+    menu_open(&s_menu, MENU_GAMES, t0);
+    menu_view_apply(&s_menu_view, &s_menu, &idle, t0 + 1000);
+    ttt_t g;
+    ttt_init(&g, 3);
+    if (!ttt_moment("ttt_menu_games", 0, &g, BUDDY_GAME_WATCH, BUDDY_GAME_EVEN, t0, t0 + 1000, ask)) {
+        return false;
+    }
+    menu_open(&s_menu, MENU_TTT, t0 + 2000);
+    uint32_t t = t0 + 3000;
+    ttt_start(&g, t); // you start: "YOU START!"
+    bool ok = ttt_moment("ttt_your_turn", 1, &g, BUDDY_GAME_WATCH, BUDDY_GAME_EVEN, t, t + 900, ask);
+
+    t += 10000; // a few moves in: he thinks about blocking you
+    ttt_set(&g, "X...X...O", TTT_THINKING, t, TTT_OPEN);
+    ok = ok && ttt_moment("ttt_thinking", 2, &g, BUDDY_GAME_THINK, BUDDY_GAME_EVEN, t, t + 700, ask);
+
+    t += 10000; // he wins: the line blinks, he hops with sparkles; then smug, asking for another one
+    g.buddy = 1;
+    g.streak = 1;
+    g.say = 0;
+    ttt_set(&g, "XXO.O.OX.", TTT_REACTION, t, TTT_O_WINS);
+    ok = ok && ttt_moment("ttt_buddy_wins", 3, &g, BUDDY_GAME_WON, BUDDY_GAME_EVEN, t, t + 400, ask);
+    ttt_set(&g, "XXO.O.OX.", TTT_REMATCH, t + TTT_REACTION_MS, TTT_O_WINS);
+    ok = ok && ttt_moment("ttt_buddy_smug", 4, &g, BUDDY_GAME_WON, BUDDY_GAME_EVEN, t, t + 4000, ask);
+
+    t += 10000; // you win: frustrated, then drooping; then sulking, asking for a rematch
+    g.you = 1;
+    g.streak = -1;
+    ttt_set(&g, "XOO.X.O.X", TTT_REACTION, t, TTT_X_WINS);
+    ok = ok && ttt_moment("ttt_buddy_loses", 5, &g, BUDDY_GAME_LOST, BUDDY_GAME_EVEN, t, t + 1300, ask);
+    ttt_set(&g, "XOO.X.O.X", TTT_REMATCH, t + TTT_REACTION_MS, TTT_X_WINS);
+    ok = ok && ttt_moment("ttt_rematch", 6, &g, BUDDY_GAME_LOST, BUDDY_GAME_EVEN, t, t + 4000, ask);
+
+    t += 10000; // a draw: confused, then puzzled, asking to play again
+    g.draws = 1;
+    g.streak = 0;
+    ttt_set(&g, "XOXXOOOXX", TTT_REACTION, t, TTT_DRAW);
+    ok = ok && ttt_moment("ttt_draw", 7, &g, BUDDY_GAME_DREW, BUDDY_GAME_EVEN, t, t + 700, ask);
+    ttt_set(&g, "XOXXOOOXX", TTT_REMATCH, t + TTT_REACTION_MS, TTT_DRAW);
+    ok = ok && ttt_moment("ttt_again", 8, &g, BUDDY_GAME_DREW, BUDDY_GAME_EVEN, t, t + 4000, ask);
+    if (!ok) {
+        return false;
+    }
+    const int sheet_w = TTT_COLS * TTT_TILE_W;
+    const gfx_surface_t sheet = {s_ttt_sheet, sheet_w, TTT_ROWS * TTT_TILE_H, sheet_w};
+    return write("ttt_sheet", &sheet);
+}
+
 int main(int argc, char **argv)
 {
     s_dir = argc > 1 ? argv[1] : ".";
@@ -886,5 +996,8 @@ int main(int argc, char **argv)
         return 1;
     }
     office_faces_apply(&faces, &tm, 100);
-    return zoom_screens(&faces) && skeleton_screens(&faces, &marquee) && kitt_menu_screen(&faces) ? 0 : 1;
+    return zoom_screens(&faces) && skeleton_screens(&faces, &marquee) && kitt_menu_screen(&faces) &&
+                   ttt_screens(&ask)
+               ? 0
+               : 1;
 }

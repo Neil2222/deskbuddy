@@ -26,6 +26,7 @@ typedef enum {
     BUDDY_STATE_ZDMW,      // PDC Manager confirmed the click: exasperated, briefly
     BUDDY_STATE_FOCUS,     // deep in thought, building a plan... until someone asks "do you have 1 sec?"
     BUDDY_STATE_KITT,      // turned into a Knight Rider scanner, until a tap or a mood brings him back (buddy_kitt.h)
+    BUDDY_STATE_GAME,      // playing a game against you (buddy_game.h), for as long as the game lasts
 } buddy_state_t;
 
 typedef enum {
@@ -203,6 +204,7 @@ typedef struct {
     uint16_t flow;    // how far the energy pulses have travelled, in art pixels
     bool port;        // charging port open on the side of the head
     bool alert;       // "!" above the head
+    bool query;       // "?" above the head (in the same place; "!" wins if both)
     uint8_t battery;  // 0 = hidden; 1 + filled segments; BUDDY_BATTERY_OVER(+1) = overflowing
     uint8_t bolts;    // lightning bolts around the head, 0..BUDDY_MAX_BOLTS
     uint16_t strike;  // changes whenever the bolts strike anew (selects their places and shapes)

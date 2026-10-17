@@ -178,15 +178,28 @@ void test_menu_navigates_and_goes_back(void)
     CHECK_EQ(m.category, MENU_HOME);
     CHECK(menu_hit(&m, &k_idle, x, y, t + 1000) != MENU_HIT_BACK); // Home has no Back
 
-    // Planned categories do not open; the tap only makes their tag blink.
+    // Games opens its page; Tic-Tac-Toe opens the game's page (the header only: no items), which Back leaves for
+    // Games. While a show plays the game cannot start (its tile is dimmed and does nothing).
     t += 1000;
-    const int games = slot_of(&m, &k_idle, "games");
-    CHECK(games >= 0);
-    r = tap(&m, games, &k_idle, t);
-    CHECK_EQ(r.action, MENU_DO_NOTHING);
+    CHECK_EQ(tap(&m, slot_of(&m, &k_idle, "games"), &k_idle, t).action, MENU_DO_OPEN);
+    CHECK_EQ(m.category, MENU_GAMES);
+    const menu_status_t busy = {.mood = BUDDY_MOOD_IDLE, .office = true, .busy = true};
+    t += 1000;
+    const int ttt = slot_of(&m, &k_idle, "game.ttt");
+    CHECK(ttt >= 0);
+    CHECK_EQ(tap(&m, ttt, &busy, t).action, MENU_DO_NOTHING);
+    CHECK_EQ(m.category, MENU_GAMES);
+    t += 1000;
+    CHECK_EQ(tap(&m, ttt, &k_idle, t).action, MENU_DO_OPEN);
+    CHECK_EQ(m.category, MENU_TTT);
+    CHECK_EQ(menu_page_items(&m, &k_idle, items, &pages), 0);
+    t += 1000;
+    back_center(&m, &x, &y);
+    tap_at(&m, x, y, &k_idle, t);
+    CHECK_EQ(m.category, MENU_GAMES);
+    t += 1000;
+    tap_at(&m, x, y, &k_idle, t);
     CHECK_EQ(m.category, MENU_HOME);
-    CHECK_EQ(m.nope, games);
-    CHECK_EQ(m.pressed, MENU_HIT_NONE);
 
     // Every other category opens and comes back.
     static const char *const k_open[] = {"activities", "food"};

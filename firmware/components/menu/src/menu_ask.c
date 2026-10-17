@@ -201,9 +201,10 @@ uint32_t menu_ask_apply(menu_ask_t *a, const char *question, uint32_t left_ms, u
         }
         return UINT32_MAX;
     }
-    if (!a->visible || question != a->shown_question) {
+    if (!a->visible || question != a->shown_question || a->saying) {
         draw_bubble(a, question);
         a->visible = true;
+        a->saying = false;
     }
     if (a->pressed != a->shown_pressed) {
         for (int i = 0; i < 2; i++) {
@@ -230,6 +231,25 @@ uint32_t menu_ask_apply(menu_ask_t *a, const char *question, uint32_t left_ms, u
     return next ? next : 1;
 }
 
+uint32_t menu_ask_say(menu_ask_t *a, const char *line)
+{
+    if (!line) {
+        return menu_ask_apply(a, NULL, 0, 0);
+    }
+    if (!a->visible || line != a->shown_question || !a->saying) {
+        set_hidden(&a->button[0], true);
+        set_hidden(&a->button[1], true);
+        set_hidden(&a->timer, true);
+        a->shown_pressed = -2; // a question after this draws its buttons and bar afresh
+        a->shown_bar = -1;
+        cancel(a);
+        draw_bubble(a, line);
+        a->visible = true;
+        a->saying = true;
+    }
+    return UINT32_MAX;
+}
+
 static int hit(const menu_ask_t *a, int x, int y)
 {
     for (int i = 0; i < 2; i++) {
@@ -244,7 +264,7 @@ static int hit(const menu_ask_t *a, int x, int y)
 
 menu_answer_t menu_ask_touch(menu_ask_t *a, menu_touch_t type, int x, int y)
 {
-    if (!a->visible) {
+    if (!a->visible || a->saying) {
         cancel(a);
         return MENU_ANSWER_NONE;
     }

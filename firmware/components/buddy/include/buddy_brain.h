@@ -8,6 +8,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "buddy_game.h"
 #include "buddy_mood.h"
 #include "buddy_pose.h"
 
@@ -62,6 +63,7 @@ typedef struct {
     uint32_t cycle_start, cycle_len, cycle_n, cycle_seed; // where the mood's loop is
     buddy_answer_t answer; // how the last peukie question ended
     uint32_t kitt_out;     // KITT: ms after its start at which he turns back; 0: he stays KITT
+    buddy_game_t game;     // BUDDY_STATE_GAME: the face he pulls
 } buddy_brain_t;
 
 void buddy_brain_init(buddy_brain_t *b, uint32_t now_ms, uint32_t seed);
@@ -71,8 +73,17 @@ void buddy_brain_init(buddy_brain_t *b, uint32_t now_ms, uint32_t seed);
 // Unknown events are ignored.
 bool buddy_brain_event(buddy_brain_t *b, buddy_event_t ev, uint32_t now_ms);
 
-// True while an activity plays (events are ignored then). KITT counts as one for as long as he is KITT.
+// True while an activity plays (events are ignored then). KITT counts as one for as long as he is KITT, and so does
+// a game for as long as it lasts.
 bool buddy_brain_busy(const buddy_brain_t *b, uint32_t now_ms);
+
+// He plays a game (BUDDY_STATE_GAME) and pulls this face (buddy_game.h), over his mood, until
+// buddy_brain_game_leave(). Called again during the game, it changes the face. Returns false (nothing changes) if
+// another activity is playing. A mood chosen meanwhile is taken, and shows when the game ends.
+bool buddy_brain_game(buddy_brain_t *b, const buddy_game_t *face, uint32_t now_ms);
+
+// The game is over: his mood carries on. Nothing happens if he is not playing.
+void buddy_brain_game_leave(buddy_brain_t *b, uint32_t now_ms);
 
 // A tap on him while he is KITT: once fully turned (the scanner sweeping), he turns back, and his mood carries on.
 // Returns false (nothing happens) otherwise, so the caller can treat the tap as usual.

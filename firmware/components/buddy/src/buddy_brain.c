@@ -66,8 +66,8 @@ static void enter(buddy_brain_t *b, buddy_state_t state, uint32_t now_ms)
 
 bool buddy_brain_busy(const buddy_brain_t *b, uint32_t now_ms)
 {
-    if (b->state == BUDDY_STATE_KITT) {
-        return true; // until he has turned back
+    if (b->state == BUDDY_STATE_KITT || b->state == BUDDY_STATE_GAME) {
+        return true; // until he has turned back / the game is over
     }
     const uint32_t ms = buddy_activity_ms(b->state);
     return ms && now_ms - b->state_start < ms;
@@ -91,6 +91,18 @@ static bool kitt_leave(buddy_brain_t *b, uint32_t now_ms, bool defer)
 bool buddy_brain_kitt_leave(buddy_brain_t *b, uint32_t now_ms)
 {
     return kitt_leave(b, now_ms, false);
+}
+
+bool buddy_brain_game(buddy_brain_t *b, const buddy_game_t *face, uint32_t now_ms)
+{
+    if (b->state != BUDDY_STATE_GAME) {
+        if (buddy_brain_busy(b, now_ms)) {
+            return false; // the show goes on
+        }
+        enter(b, BUDDY_STATE_GAME, now_ms);
+    }
+    b->game = *face;
+    return true;
 }
 
 bool buddy_brain_event(buddy_brain_t *b, buddy_event_t ev, uint32_t now_ms)
@@ -149,6 +161,13 @@ void buddy_brain_rest(buddy_brain_t *b, uint32_t now_ms)
 {
     enter(b, BUDDY_STATE_IDLE, now_ms);
     resume_mood(b, now_ms);
+}
+
+void buddy_brain_game_leave(buddy_brain_t *b, uint32_t now_ms)
+{
+    if (b->state == BUDDY_STATE_GAME) {
+        buddy_brain_rest(b, now_ms);
+    }
 }
 
 void buddy_brain_set_mood(buddy_brain_t *b, buddy_mood_t mood, uint32_t duration_ms, uint32_t now_ms)
@@ -290,6 +309,8 @@ uint32_t buddy_brain_tick(buddy_brain_t *b, uint32_t now_ms, buddy_pose_t *pose)
         break;
     case BUDDY_STATE_KITT:
         return buddy_kitt_pose(t, b->kitt_out, pose);
+    case BUDDY_STATE_GAME:
+        return buddy_game_pose(&b->game, now_ms - b->game.since, pose);
     default: // an activity
         return buddy_activity_pose(b->state, t, pose);
     }

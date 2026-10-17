@@ -251,6 +251,25 @@ static const char *const k_gear[] = { // a brass gear: the Mechanical Skeleton f
     ".......KddK.......",
     ".......KKKK.......",
 };
+static const char *const k_ttt[] = { // a little board: your X in amber, Buddy's O in his eyes' cyan
+    "a...aL.EEE.L.....",
+    ".a.a.LE...EL.....",
+    "..a..LE...EL.....",
+    ".a.a.LE...EL.....",
+    "a...aL.EEE.L.....",
+    "LLLLLLLLLLLLLLLLL",
+    ".....La...aL.EEE.",
+    ".....L.a.a.LE...E",
+    ".....L..a..LE...E",
+    ".....L.a.a.LE...E",
+    ".....La...aL.EEE.",
+    "LLLLLLLLLLLLLLLLL",
+    ".EEE.L.....La...a",
+    "E...EL.....L.a.a.",
+    "E...EL.....L..a..",
+    "E...EL.....L.a.a.",
+    ".EEE.L.....La...a",
+};
 static const char *const k_led[] = {
     ".KKKK.",
     "KEWEEK",
@@ -271,7 +290,7 @@ static const struct {
     [MENU_ICON_SCHEDULE] = ART(k_calendar), [MENU_ICON_OFFICE] = ART(k_moon), [MENU_ICON_WATER] = ART(k_water),
     [MENU_ICON_COFFEE] = ART(k_coffee),   [MENU_ICON_LUNCH] = ART(k_burger), [MENU_ICON_SNACKS] = ART(k_cookie),
     [MENU_ICON_MEETING] = ART(k_bubbles), [MENU_ICON_WALK] = ART(k_sneaker),
-    [MENU_ICON_GEAR] = ART(k_gear),
+    [MENU_ICON_GEAR] = ART(k_gear), [MENU_ICON_TTT] = ART(k_ttt),
 };
 
 static uint8_t s_pool[4096]; // decoded pixels, internal RAM

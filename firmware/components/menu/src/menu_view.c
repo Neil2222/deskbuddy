@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "menu_art.h"
+#include "menu_ttt_art.h"
 
 #define TITLE_X 48 // menu pixels: between Back and the face
 #define TITLE_Y 12
@@ -15,6 +16,13 @@
 #define LED_ON_MS 900       // the active light: a slow heartbeat
 #define LED_OFF_MS 300
 #define NOPE_STEP_MS 150    // the SOON tag flashes in steps of this
+
+// A game's pieces live in the slots' memory, which is one block from slot 0 on (menu_view_init).
+#define SLOTS_MEMORY                                                                                                 \
+    (MENU_LIST_ROWS * MENU_ROW_W * MENU_ROW_H + (MENU_SLOTS - MENU_LIST_ROWS) * MENU_TILE_W * MENU_TILE_H)
+#define GAME_ROW_PX (MENU_TTT_ROW_W * MENU_TTT_CELL)
+_Static_assert(MENU_TTT_MEMORY <= SLOTS_MEMORY, "the game's pieces must fit the tiles' memory");
+_Static_assert(MENU_TTT_PIECES <= MENU_SLOTS, "the game's pieces use slot sprites");
 
 // How a slot looks (bits).
 enum {
@@ -244,7 +252,8 @@ static void draw_footer(menu_view_t *v, const menu_t *m, const menu_status_t *st
 static void forget(menu_view_t *v)
 {
     memset(v->shown, 0, sizeof(v->shown));
-    v->back_look = v->title_shown = v->face_shown = -1;
+    memset(v->game_shown, 0, sizeof(v->game_shown));
+    v->back_look = v->title_shown = v->face_shown = v->layout_shown = -1;
     v->footer_shown = 0;
     v->doing_shown = NULL;
 }
@@ -334,6 +343,10 @@ static uint32_t apply_close(menu_view_t *v, uint32_t now)
             return (uint32_t)i * MENU_FLIP_MS - t;
         }
         set_slot(v, i, NULL, MENU_GRID, 0, -1);
+        if (i < MENU_TTT_PIECES && v->game_shown[i]) { // a game's piece goes the same way
+            set_hidden(&v->slot[i], true);
+            v->game_shown[i] = 0;
+        }
     }
     if (t < MENU_SLOTS * MENU_FLIP_MS) {
         return MENU_SLOTS * MENU_FLIP_MS - t;
@@ -342,19 +355,78 @@ static uint32_t apply_close(menu_view_t *v, uint32_t now)
     return UINT32_MAX;
 }
 
-uint32_t menu_view_apply(menu_view_t *v, const menu_t *m, const menu_status_t *st, uint32_t now)
+// Entering or leaving a game's page: whatever the slots showed goes at once (the game draws over the tiles' memory,
+// so nothing of the old page may wait for its turn), and the pieces of the new page flip in as tiles do.
+static void switch_layout(menu_view_t *v, menu_layout_t layout)
 {
-    if (!v->visible) {
-        return UINT32_MAX;
+    if (v->layout_shown != (int)layout && (layout == MENU_GAME || v->layout_shown == MENU_GAME)) {
+        for (int i = 0; i < MENU_SLOTS; i++) {
+            set_hidden(&v->slot[i], true);
+        }
+        memset(v->shown, 0, sizeof(v->shown));
+        memset(v->game_shown, 0, sizeof(v->game_shown));
+        v->footer_shown = 0;
+        v->doing_shown = NULL;
     }
-    if (v->closing) {
-        return apply_close(v, now);
+    v->layout_shown = (int)layout;
+}
+
+// A game's page: the board's rows and the strip in the first slots, the status in the footer.
+static uint32_t apply_game(menu_view_t *v, const menu_t *m, const menu_game_t *g, uint32_t now)
+{
+    static const menu_game_t k_empty = {.fresh = -1, .pressed = MENU_TTT_HIT_NONE};
+    g = g ? g : &k_empty;
+    uint32_t next = UINT32_MAX;
+    uint8_t *mem = v->slot_px[0];
+    menu_canvas_t scratch = {mem + 3 * GAME_ROW_PX + MENU_TTT_ROW_W * MENU_TTT_STRIP_H, MENU_TTT_CELL, MENU_TTT_CELL};
+    for (int i = 0; i < MENU_TTT_PIECES; i++) {
+        if (!menu_slot_shown(m, i, now)) {
+            next = sooner(next, m->opened + (uint32_t)i * MENU_FLIP_MS - now);
+            continue;
+        }
+        const uint32_t since = now - (m->opened + (uint32_t)i * MENU_FLIP_MS);
+        const bool sunk = since < MENU_POP_MS; // a row pops up as a tile does
+        if (sunk) {
+            next = sooner(next, MENU_POP_MS - since);
+        }
+        const uint64_t key = menu_ttt_piece_key(g, i, sunk);
+        if (key == v->game_shown[i]) {
+            continue;
+        }
+        v->game_shown[i] = key;
+        const gfx_rect_t r = menu_slot_rect(MENU_GAME, i);
+        uint8_t *px = mem + (size_t)(i < 3 ? i : 3) * GAME_ROW_PX;
+        v->slot_img[i] = (gfx_image_t){(uint16_t)r.w, (uint16_t)r.h, px};
+        menu_canvas_t c = {px, r.w, r.h};
+        if (i < 3) {
+            menu_ttt_draw_row(&c, &scratch, g, i, sunk);
+        } else {
+            menu_ttt_draw_strip(&c, g);
+        }
+        gfx_sprite_t *sp = &v->slot[i];
+        sp->image = &v->slot_img[i];
+        sp->palette = menu_art_palette(MENU_PAL_NORMAL);
+        place(v, sp, r.x, r.y);
+        redrawn(v, sp);
     }
+    set_hidden(&v->led, true);
+    const uint32_t footer = menu_ttt_footer_key(g);
+    if (footer != v->footer_shown) {
+        v->footer_shown = footer;
+        menu_canvas_t c = {v->footer_px, MENU_FOOTER_W, MENU_FOOTER_H};
+        menu_ttt_draw_footer(&c, g);
+        redrawn(v, &v->footer);
+    }
+    return next;
+}
+
+// The tiles or rows of a category's page.
+static uint32_t apply_tiles(menu_view_t *v, const menu_t *m, const menu_status_t *st, menu_layout_t layout,
+                            uint32_t now)
+{
     uint32_t next = UINT32_MAX;
     const menu_item_t *items[MENU_SLOTS];
-    int pages;
-    const int n = menu_page_items(m, st, items, &pages);
-    const menu_layout_t layout = (menu_layout_t)m->def->categories[m->category].layout;
+    const int n = menu_page_items(m, st, items, NULL);
 
     // Slots whose turn has come show the page; the others keep the old page's tile until theirs.
     gfx_rect_t fresh[MENU_SLOTS];
@@ -398,6 +470,23 @@ uint32_t menu_view_apply(menu_view_t *v, const menu_t *m, const menu_status_t *s
     } else {
         set_hidden(&v->led, true);
     }
+    return next;
+}
+
+uint32_t menu_view_apply(menu_view_t *v, const menu_t *m, const menu_status_t *st, uint32_t now)
+{
+    if (!v->visible) {
+        return UINT32_MAX;
+    }
+    if (v->closing) {
+        return apply_close(v, now);
+    }
+    const menu_item_t *items[MENU_SLOTS];
+    int pages;
+    menu_page_items(m, st, items, &pages);
+    const menu_layout_t layout = (menu_layout_t)m->def->categories[m->category].layout;
+    switch_layout(v, layout);
+    uint32_t next = layout == MENU_GAME ? apply_game(v, m, st->game, now) : apply_tiles(v, m, st, layout, now);
 
     // Header.
     const int back = m->category == MENU_HOME ? -1 : m->pressed == MENU_HIT_BACK;
@@ -422,7 +511,10 @@ uint32_t menu_view_apply(menu_view_t *v, const menu_t *m, const menu_status_t *s
     v->face.image = &v->face_img[blink < BLINK_MS];
     next = sooner(next, blink < BLINK_MS ? BLINK_MS - blink : BLINK_EVERY_MS - blink);
 
-    // Footer: a summary of what it shows, so it is only redrawn when that changes.
+    // Footer: a summary of what it shows, so it is only redrawn when that changes (a game's page draws its own).
+    if (layout == MENU_GAME) {
+        return next;
+    }
     const uint32_t footer = 1u | (pages > 1 ? 2u : 0u) | (uint32_t)m->page << 2 |
                             (m->pressed == MENU_HIT_PREV ? 1u << 10 : 0u) | (m->pressed == MENU_HIT_NEXT ? 1u << 11 : 0u) |
                             (pages > 1 ? 0u : (uint32_t)st->mood << 12) | (uint32_t)pages << 21;

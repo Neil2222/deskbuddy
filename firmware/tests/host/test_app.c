@@ -18,7 +18,9 @@
 #include "layout.h"
 #include "menu.h"
 #include "menu_ask.h"
+#include "menu_ttt.h"
 #include "test.h"
+#include "ttt.h"
 
 enum { W = 1024, H = 600, ALIGN = 32 };
 enum { KEPT = 64 };                    // APP_EVENTS_KEPT
@@ -625,6 +627,172 @@ void test_app_kitt_until_a_tap_a_mood_or_the_clock(void)
     command(99, "status");
     CHECK(sent(" mode=normal mood=happy "));
     command(100, "mood.set name=idle");
+    tap_back(); // Home, for whatever runs next
+    run(600);
+}
+
+// ---- Tic-Tac-Toe, played on the touchscreen as you would: everything read back from the presented frames ----
+
+static void tap_cell(int cell)
+{
+    const gfx_rect_t r = cell < TTT_CELLS ? menu_ttt_cell_rect(cell) : menu_ttt_strip_rect();
+    touch(s_where.area.x + (r.x + r.w / 2) * MENU_SCALE, s_where.area.y + (r.y + r.h / 2) * MENU_SCALE);
+}
+
+// The mark in a cell of the last presented frame, from its colours: your X amber, his O cyan (white while his
+// line is lit).
+static int cell_mark(int cell)
+{
+    const gfx_rect_t r = menu_ttt_cell_rect(cell);
+    const uint16_t *front = s_fb[s_back ^ 1];
+    const gfx_color_t amber = GFX_RGB(255, 170, 40), hot = GFX_RGB(255, 232, 160), cyan = GFX_RGB(96, 232, 255);
+    const gfx_color_t white = GFX_RGB(236, 242, 255);
+    int x_px = 0, o_px = 0;
+    // Inside the rim only (a lit rim is coloured too).
+    for (int y = (r.y + 6) * MENU_SCALE; y < (r.y + r.h - 6) * MENU_SCALE; y++) {
+        for (int x = (r.x + 6) * MENU_SCALE; x < (r.x + r.w - 6) * MENU_SCALE; x++) {
+            const gfx_color_t c = front[(s_where.area.y + y) * W + s_where.area.x + x];
+            x_px += c == amber || c == hot;
+            o_px += c == cyan || c == white;
+        }
+    }
+    return x_px > 100 ? TTT_X : o_px > 100 ? TTT_O : TTT_EMPTY;
+}
+
+static void read_board(uint8_t board[TTT_CELLS])
+{
+    for (int i = 0; i < TTT_CELLS; i++) {
+        board[i] = (uint8_t)cell_mark(i);
+    }
+}
+
+static int marks(const uint8_t board[TTT_CELLS], int mark)
+{
+    int n = 0;
+    for (int i = 0; i < TTT_CELLS; i++) {
+        n += board[i] == mark;
+    }
+    return n;
+}
+
+static void open_game(void)
+{
+    tap_slot(MENU_LIST, 4); // GAMES (no PDC offered: the fifth row)
+    run(600);
+    tap_slot(MENU_GRID, 0); // TIC-TAC-TOE
+    run(700);
+}
+
+// Its tile opens the game (mode=game, busy for shows), the X goes where you tap and only on your turn, Buddy answers
+// after his pause, a round ends with the rematch button, which starts the next (he starts it). Leaving it restores
+// his mood, also one chosen meanwhile; Clock Mode and boredom end it too, and so does holding his head for the faces.
+void test_app_tic_tac_toe_on_the_touchscreen(void)
+{
+    CHECK(start());
+    command(200, "mood.set name=happy");
+    run(100);
+    clear_out();
+    open_game();
+    CHECK(sent("evt mode mode=game"));
+    command(201, "status");
+    CHECK(sent(" mode=game mood=happy "));
+    command(202, "act name=water iid=202");
+    command(203, "poke");
+    CHECK(sent("<DB1 202 err busy mode=game #"));
+    CHECK(sent("<DB1 203 err busy mode=game #"));
+    CHECK(!sent("evt act"));
+
+    // You start the first round after boot: an empty board, your X where you tap, then his O.
+    uint8_t board[TTT_CELLS];
+    read_board(board);
+    CHECK_EQ(marks(board, TTT_X) + marks(board, TTT_O), 0);
+    tap_cell(4);
+    run(300);
+    read_board(board);
+    CHECK_EQ(board[4], TTT_X);
+    CHECK_EQ(marks(board, TTT_O), 0); // he thinks first...
+    tap_cell(0);                      // ...and a tap meanwhile does nothing (he protests)
+    run(TTT_THINK_MAX_MS + 300);
+    read_board(board);
+    CHECK_EQ(marks(board, TTT_X), 1);
+    CHECK_EQ(marks(board, TTT_O), 1); // ...then answers
+    command(204, "mood.set name=relaxed"); // taken, shown after the game
+    command(205, "status");
+    CHECK(sent(" mode=game mood=relaxed "));
+
+    // Play on (the first free cell each time) until the round is decided.
+    for (int move = 0; move < 5 && ttt_judge(board, NULL) == TTT_OPEN; move++) {
+        int free_cell = 0;
+        while (board[free_cell] != TTT_EMPTY) {
+            free_cell++;
+        }
+        const int before = marks(board, TTT_X);
+        tap_cell(free_cell);
+        run(TTT_THINK_MAX_MS + 300);
+        read_board(board);
+        CHECK_EQ(marks(board, TTT_X), before + 1);
+        CHECK(ttt_judge(board, NULL) != TTT_OPEN || marks(board, TTT_O) == marks(board, TTT_X)); // he answered
+    }
+    CHECK(ttt_judge(board, NULL) != TTT_OPEN);
+    tap_cell(TTT_CELLS); // the button is not there during his reaction
+    run(TTT_REACTION_MS);
+    read_board(board);
+    CHECK(ttt_judge(board, NULL) != TTT_OPEN); // the board stays while he waits for the rematch
+    tap_cell(TTT_CELLS);                       // REMATCH / AGAIN: a fresh board, and he starts this one
+    run(300);
+    read_board(board);
+    CHECK_EQ(marks(board, TTT_X) + marks(board, TTT_O), 0);
+    run(TTT_OPENING_MS + TTT_THINK_MAX_MS);
+    read_board(board);
+    CHECK_EQ(marks(board, TTT_X), 0);
+    CHECK_EQ(marks(board, TTT_O), 1);
+
+    // Back: the game is over, his mood (chosen meanwhile) carries on, the GAMES page shows.
+    clear_out();
+    tap_back();
+    run(600);
+    CHECK(sent("evt mode mode=normal"));
+    command(206, "status");
+    CHECK(sent(" mode=normal mood=relaxed "));
+    command(207, "poke");
+    CHECK(sent("<DB1 207 ok #"));
+    run(2000);
+
+    // Clock Mode from the game (a tap on his head): the round ends; back from the clock, the GAMES page.
+    tap_slot(MENU_GRID, 0);
+    run(700);
+    clear_out();
+    int hx, hy;
+    head_point(&hx, &hy);
+    touch(hx, hy);
+    run(4000);
+    CHECK(sent("evt mode mode=normal")); // the game ended first...
+    CHECK(sent("evt mode mode=office")); // ...then the clock
+    touch(W / 2, H / 2);
+    run(3000);
+    command(208, "status");
+    CHECK(sent(" mode=normal mood=relaxed "));
+    clear_out();
+    tap_slot(MENU_GRID, 0); // still on GAMES: its tile starts a new game
+    run(700);
+    CHECK(sent("evt mode mode=game"));
+
+    // Holding his head opens CLOCK FACES, which ends the game as well.
+    clear_out();
+    hold_head(MENU_HOLD_MS + 100);
+    run(600);
+    CHECK(sent("evt mode mode=normal"));
+    tap_back(); // Home
+    run(600);
+
+    // Nobody plays: after two minutes he gets bored and the game ends by itself.
+    open_game();
+    clear_out();
+    run(TTT_IDLE_MS - 1000);
+    CHECK(!sent("evt mode mode=normal"));
+    run(2000);
+    CHECK(sent("evt mode mode=normal"));
+    command(209, "mood.set name=idle");
     tap_back(); // Home, for whatever runs next
     run(600);
 }

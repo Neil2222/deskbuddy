@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "buddy_brain.h" // BUDDY_EVENT_KITT
+#include "menu_ttt.h"
 
 #define MARGIN 5     // menu pixels around and between the buttons
 #define HEADER_H 38  // the grid and list start below the header
@@ -32,6 +33,9 @@ menu_avail_t menu_item_avail(const menu_item_t *it, const menu_status_t *st)
     if ((it->action == MENU_DO_EVENT || it->action == MENU_DO_PDC) && st->busy) {
         return MENU_ITEM_BUSY;
     }
+    if (it->action == MENU_DO_OPEN && it->arg == MENU_TTT && st->busy) {
+        return MENU_ITEM_BUSY; // he plays once the show is over
+    }
     if (it->action == MENU_DO_PDC && !st->pdc_ready) {
         return MENU_ITEM_BUSY; // a click is under way, or just went out (cooldown)
     }
@@ -51,6 +55,12 @@ gfx_rect_t menu_slot_rect(menu_layout_t layout, int slot)
 {
     if (layout == MENU_LIST) {
         return (gfx_rect_t){MARGIN, HEADER_H + slot * (MENU_ROW_H + MARGIN), MENU_ROW_W, MENU_ROW_H};
+    }
+    if (layout == MENU_GAME) { // the game's pieces in the first slots (menu_ttt.h)
+        return slot < 3   ? (gfx_rect_t){MARGIN, MENU_TTT_TOP + slot * (MENU_TTT_CELL + MENU_TTT_GAP), MENU_TTT_ROW_W,
+                                         MENU_TTT_CELL}
+               : slot == 3 ? menu_ttt_strip_rect()
+                           : (gfx_rect_t){0, 0, 0, 0};
     }
     return (gfx_rect_t){MARGIN + (slot % 2) * (MENU_TILE_W + MARGIN),
                         HEADER_H + (slot / 2) * (MENU_TILE_H + MARGIN), MENU_TILE_W, MENU_TILE_H};

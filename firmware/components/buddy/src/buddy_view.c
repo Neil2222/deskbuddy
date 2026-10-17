@@ -540,9 +540,9 @@ static void apply_props(buddy_view_t *v, const buddy_props_t *pr, int bx, int by
     } else {
         hide(&v->battery);
     }
-    if (pr->alert) {
-        show(&v->alert, &p->alert);
-        place(v, &v->alert, p->alert_at, dx_px, dy_px);
+    if (pr->alert || pr->query) { // one sprite: "!" or "?"
+        show(&v->alert, pr->alert ? &p->alert : &p->query);
+        place(v, &v->alert, pr->alert ? p->alert_at : p->query_at, dx_px, dy_px);
     } else {
         hide(&v->alert);
     }

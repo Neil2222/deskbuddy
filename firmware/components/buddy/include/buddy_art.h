@@ -39,7 +39,7 @@ typedef struct {
 // the head (wobble, nod); the others stand on the ground.
 typedef struct {
     gfx_image_t can[BUDDY_CAN_LEVELS], can_crushed, can_shadow;
-    gfx_image_t port, plug, coil, hand, alert;
+    gfx_image_t port, plug, coil, hand, alert, query; // query: "?", where the "!" goes
     gfx_image_t bolt[BUDDY_BOLT_SHAPES];
     gfx_image_t spark[BUDDY_SPARK_FRAMES], poof[BUDDY_POOF_FRAMES];
     gfx_image_t battery[BUDDY_BATTERY_FRAMES]; // indexed by buddy_props_t.battery - 1
@@ -66,6 +66,7 @@ typedef struct {
     buddy_point_t from[BUDDY_FROM_COUNT]; // particle start points (BUDDY_FROM_EMBER is worked out from hand_rest)
     buddy_point_t battery_at;
     buddy_point_t alert_at;   // body
+    buddy_point_t query_at;   // body: beside the head (the space above it is his speech bubble's)
     buddy_point_t bolt_at[BUDDY_BOLT_SLOTS]; // body
     int ground_y;  // lowest art row on the ground (bottom of the feet)
     int cable_len; // art pixels

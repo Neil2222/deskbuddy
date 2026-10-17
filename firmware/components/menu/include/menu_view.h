@@ -8,6 +8,9 @@
 // The header holds Back, the page title in amber, and Buddy's head wearing his current mood (it blinks now and then,
 // and shows lightning eyes while he charges on a Monster). The footer tells his mood, or holds the page arrows when a
 // category has more pages. The active item (his mood) has a cyan rim and a small blinking light.
+//
+// A game's page (MENU_GAME: Tic-Tac-Toe, menu_ttt.h) keeps the header; its board and strip are drawn in the first
+// slot sprites and the tiles' memory, its status in the footer.
 #pragma once
 
 #include <stdbool.h>
@@ -16,6 +19,7 @@
 
 #include "gfx_scene.h"
 #include "menu.h"
+#include "menu_ttt.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -54,6 +58,8 @@ typedef struct {
     int face_shown;  // buddy_mood_t, BUDDY_MOOD_COUNT for the charging face; -1: not drawn
     uint32_t footer_shown; // a summary of what the footer shows; 0: not drawn
     const char *doing_shown; // ...and what he was doing then (menu_status_t.doing)
+    int layout_shown;        // the layout the slots were last drawn for; -1: none
+    uint64_t game_shown[MENU_TTT_PIECES]; // on a game's page: what each piece shows (menu_ttt_art.h); 0: not drawn
     bool closing;          // folding away (menu_view_close) since close_at
     uint32_t close_at;
 } menu_view_t;

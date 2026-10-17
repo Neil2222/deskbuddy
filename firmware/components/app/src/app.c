@@ -22,11 +22,13 @@
 #include "menu.h"
 #include "menu_ask.h"
 #include "menu_thought.h"
+#include "menu_ttt.h"
 #include "menu_view.h"
 #include "office_faces.h"
 #include "office_switch.h"
 #include "office_zoom.h"
 #include "pdc.h"
+#include "ttt.h"
 
 static const char *TAG = "deskbuddy";
 
@@ -204,7 +206,7 @@ static menu_status_t menu_status(buddy_brain_t *brain, bool has_office, uint32_t
     return (menu_status_t){buddy_brain_mood(brain, now), brain->state == BUDDY_STATE_MONSTER, busy,
                            busy ? buddy_activity_doing(brain->state) : NULL, has_office, pdc_available(&s_pdc, now),
                            pdc_ready(&s_pdc, now), s_pdc.count, faces, (uint8_t)s_faces.face,
-                           brain->state == BUDDY_STATE_KITT};
+                           brain->state == BUDDY_STATE_KITT, NULL};
 }
 
 // ---- Interactions: the activities the companion hears about (evt act), started by `act` or on the touchscreen ----
@@ -401,7 +403,7 @@ static const char *mode_name(const office_switch_t *screen, const buddy_brain_t 
     if (screen->office) {
         return "office";
     }
-    return brain->state == BUDDY_STATE_MONSTER ? "monster" : "normal";
+    return brain->state == BUDDY_STATE_MONSTER ? "monster" : brain->state == BUDDY_STATE_GAME ? "game" : "normal";
 }
 
 // A message can go up now: the screen is lit, the sign is free, no zoom is under way, and no Monster sequence would
@@ -669,6 +671,151 @@ static struct {
     int demo_activity;
 } s;
 
+// ---- Tic-Tac-Toe (ttt.h): on while its menu page shows (menu_ttt.h), Buddy playing it (buddy_game.h) ---------------
+//
+// Leaving the page (Back, the clock's faces), Clock Mode (a tap on his head or mode.set) and boredom end it; his mood
+// carries on as it was (or as it was set meanwhile). The score stays until reboot. While he plays he is busy, as
+// during a show: poke, monster and act get err busy mode=game; nothing about the game is recorded (evt act).
+
+_Static_assert(BUDDY_GAME_REACT_MS == TTT_REACTION_MS, "his reaction lasts as long as the game waits");
+
+static ttt_t s_ttt;
+static menu_ttt_t s_ttt_touch;
+static bool s_playing;
+static uint8_t s_ttt_phase; // last logged
+
+static uint8_t game_attitude(void)
+{
+    switch (ttt_attitude(&s_ttt)) {
+    case TTT_SMUG:
+        return BUDDY_GAME_SMUG;
+    case TTT_KEEN:
+        return BUDDY_GAME_KEEN;
+    default:
+        return BUDDY_GAME_EVEN;
+    }
+}
+
+static void game_leave(const char *why, uint32_t now)
+{
+    if (!s_playing) {
+        return;
+    }
+    s_playing = false;
+    ttt_stop(&s_ttt);
+    menu_ttt_cancel(&s_ttt_touch);
+    buddy_brain_game_leave(&s.brain, now);
+    if (s.menu.category == MENU_TTT) {
+        menu_open(&s.menu, MENU_GAMES, now);
+    }
+    APP_LOGI(TAG, "tic-tac-toe: over (%s); you %u, Buddy %u, draws %u", why, (unsigned)s_ttt.you,
+             (unsigned)s_ttt.buddy, (unsigned)s_ttt.draws);
+}
+
+// The face he pulls now: from the phase of the round and when it began, so it only changes when the game moves on.
+static buddy_game_t game_face(uint32_t now)
+{
+    buddy_game_t f = {BUDDY_GAME_WATCH, game_attitude(), (int8_t)(s_cfg.panel_left ? -1 : 1), s_ttt.phase_at};
+    switch (s_ttt.phase) {
+    case TTT_YOUR_TURN:
+    case TTT_THINKING:
+        if (now - s_ttt.round_at < BUDDY_GAME_READY_MS) {
+            f.face = BUDDY_GAME_READY;
+            f.since = s_ttt.round_at;
+        } else {
+            f.face = s_ttt.phase == TTT_THINKING ? BUDDY_GAME_THINK : BUDDY_GAME_WATCH;
+        }
+        break;
+    case TTT_REACTION:
+    case TTT_REMATCH:
+        f.face = s_ttt.result == TTT_O_WINS ? BUDDY_GAME_WON : s_ttt.result == TTT_X_WINS ? BUDDY_GAME_LOST
+                                                                                            : BUDDY_GAME_DREW;
+        f.since = s_ttt.phase == TTT_REACTION ? s_ttt.phase_at : s_ttt.phase_at - TTT_REACTION_MS;
+        break;
+    default:
+        break;
+    }
+    return f;
+}
+
+// Once per frame, before anything else moves: starts or ends the game, moves it on, and gives Buddy his face.
+// Returns ms until the game changes on its own.
+static uint32_t game_update(uint32_t now)
+{
+    if (!s_playing && (!s.has_menu || s.menu.category != MENU_TTT)) {
+        return UINT32_MAX;
+    }
+    if (s_playing && (s.menu.category != MENU_TTT)) {
+        game_leave("left", now);
+        return UINT32_MAX;
+    }
+    if (s.screen.office || s_zoom.want_office) { // Clock Mode ends the round
+        if (s_playing) {
+            game_leave("clock", now);
+        } else {
+            menu_open(&s.menu, MENU_GAMES, now);
+        }
+        return UINT32_MAX;
+    }
+    if (!s_playing) {
+        const buddy_game_t ready = {BUDDY_GAME_READY, game_attitude(), 1, now};
+        if (!buddy_brain_game(&s.brain, &ready, now)) { // a show started first: he plays once it is over
+            menu_open(&s.menu, MENU_GAMES, now);
+            return UINT32_MAX;
+        }
+        ttt_start(&s_ttt, now);
+        s_playing = true;
+        s_ttt_phase = TTT_OFF;
+        APP_LOGI(TAG, "tic-tac-toe: on (%s first)", s_ttt.you_started ? "you" : "Buddy");
+    }
+    uint32_t next = ttt_tick(&s_ttt, now);
+    if (ttt_bored(&s_ttt, now)) {
+        game_leave("bored", now);
+        return UINT32_MAX;
+    }
+    if (s_ttt.phase != s_ttt_phase) {
+        s_ttt_phase = s_ttt.phase;
+        if (s_ttt.phase == TTT_REACTION) {
+            APP_LOGI(TAG, "tic-tac-toe: %s (you %u, Buddy %u, draws %u)",
+                     s_ttt.result == TTT_X_WINS ? "you win" : s_ttt.result == TTT_O_WINS ? "Buddy wins" : "draw",
+                     (unsigned)s_ttt.you, (unsigned)s_ttt.buddy, (unsigned)s_ttt.draws);
+        }
+    }
+    const buddy_game_t face = game_face(now);
+    buddy_brain_game(&s.brain, &face, now);
+    if (s_ttt.phase == TTT_YOUR_TURN || s_ttt.phase == TTT_THINKING) { // the ready hop gives way on time
+        const uint32_t t = now - s_ttt.round_at;
+        if (t < BUDDY_GAME_READY_MS && BUDDY_GAME_READY_MS - t < next) {
+            next = BUDDY_GAME_READY_MS - t;
+        }
+    }
+    return next;
+}
+
+// A touch while the game is on: the board and the REMATCH button are the game's (the header stays the menu's).
+// Returns true if the game took it.
+static bool game_touch(const app_event_t *ev, menu_touch_t type, uint32_t now)
+{
+    if (!s_playing) {
+        return false;
+    }
+    if (ev->type == APP_TOUCH_DOWN) {
+        ttt_touched(&s_ttt, now); // any touch keeps him from getting bored
+    }
+    const int hit = menu_ttt_touch(&s_ttt_touch, &s_ttt, type, ev->x, ev->y);
+    if (hit == MENU_TTT_HIT_STRIP) {
+        if (ttt_rematch(&s_ttt, now)) {
+            APP_LOGI(TAG, "tic-tac-toe: rematch (%s first)", s_ttt.you_started ? "you" : "Buddy");
+        }
+    } else if (hit != MENU_TTT_HIT_NONE) {
+        ttt_play(&s_ttt, hit, now); // refused on his turn: he protests (ttt_line)
+    }
+    if (ev->type == APP_TOUCH_DOWN && menu_ttt_holding(&s_ttt_touch) && !s.pending_touch_us) {
+        s.pending_touch_us = ev->at_us; // the cell sinks in
+    }
+    return menu_ttt_holding(&s_ttt_touch) || hit != MENU_TTT_HIT_NONE;
+}
+
 // A face chosen on the touchscreen or by the companion: shown at once if the clock is up (a full redraw of both
 // buffers, like the switch), and reported (evt face) if it changed.
 static void select_face(office_face_t face, const char *src)
@@ -723,6 +870,9 @@ bool app_init(const app_config_t *config)
     uint8_t *menu_mem = alloc_internal_first(MENU_VIEW_MEMORY);
     s.has_menu = menu_init(&s.menu, &menu_default, layout_panel_content(&s_layout), t_start) &&
                  menu_view_init(&s.menu_view, &s_scene, &s.menu, menu_mem, MENU_VIEW_MEMORY, 10);
+    if (s.has_menu) {
+        menu_ttt_init(&s_ttt_touch, &s.menu);
+    }
     if (!s.has_menu) {
         APP_LOGW(TAG, "no touchscreen menu (the panel is too small, or no memory)");
     }
@@ -763,6 +913,7 @@ bool app_init(const app_config_t *config)
 
     app_events_init();
     buddy_brain_init(&s.brain, t_start, app_port_random());
+    ttt_init(&s_ttt, app_port_random());
     pdc_init(&s_pdc, (uint16_t)app_port_random()); // click ids start somewhere new on every boot
     s_ia.next_own = app_port_random();              // as do the device's own interaction ids
     gfx_scene_invalidate(&s_scene, s_layout.screen); // both buffers start black: first two frames are full
@@ -844,6 +995,9 @@ void app_event(const app_event_t *ev)
     if (answer != MENU_ANSWER_NONE) {
         return;
     }
+    if (game_touch(ev, type, t)) {
+        return;
+    }
     if (s.has_menu) {
         const menu_status_t st = menu_status(&s.brain, s.has_office, t);
         const menu_result_t r = menu_touch(&s.menu, type, ev->x, ev->y, &st, t);
@@ -919,6 +1073,7 @@ uint32_t app_frame(void)
 {
     const uint32_t now = now_ms();
     run_demos(now);
+    const uint32_t game_next = game_update(now);
 
     // Buddy's zoom into Office Mode and back: it asks the scene switch for the clock or for Buddy.
     const office_zoom_step_t zoom = office_zoom_step(&s_zoom, &s.screen, now);
@@ -1033,7 +1188,13 @@ uint32_t app_frame(void)
             }
         }
         if (s.has_menu) {
-            const menu_status_t st = menu_status(&s.brain, s.has_office, now);
+            menu_status_t st = menu_status(&s.brain, s.has_office, now);
+            menu_game_t game;
+            if (s_playing) {
+                const uint32_t look_next = menu_ttt_look(&game, &s_ttt, &s_ttt_touch, now);
+                next = look_next < next ? look_next : next;
+                st.game = &game;
+            }
             uint32_t hold_wait;
             if (menu_hold(&s.menu, &st, now, &hold_wait)) {
                 APP_LOGI(TAG, "menu: clock faces (long press on his head)");
@@ -1043,12 +1204,15 @@ uint32_t app_frame(void)
             next = hold_wait < next ? hold_wait : next;
         }
     }
-    // The question shows while he asks it: not during the zoom or in Clock Mode.
+    // The question shows while he asks it, his game lines while he plays: not during the zoom or in Clock Mode.
     const uint32_t ask_left = !s.screen.office && !zoom.animate ? buddy_brain_asking(&s.brain, now) : 0;
     const char *question = s.brain.state == BUDDY_STATE_CONFIRM ? k_ask_zdmw : k_ask_peukie;
     const uint32_t ask_next =
-        menu_ask_apply(&s_ask, ask_left ? question : NULL, ask_left, buddy_activity_ms(s.brain.state));
+        s_playing && !zoom.animate
+            ? menu_ask_say(&s_ask, ttt_line(&s_ttt, now))
+            : menu_ask_apply(&s_ask, ask_left ? question : NULL, ask_left, buddy_activity_ms(s.brain.state));
     next = ask_next < next ? ask_next : next;
+    next = game_next < next ? game_next : next;
     const uint32_t pdc_wake = pdc_next(&s_pdc, now); // the lease, the cooldown, a click without answer
     next = pdc_wake < next ? pdc_wake : next;
     next = step.next_ms < next ? step.next_ms : next;

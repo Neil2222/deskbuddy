@@ -167,6 +167,7 @@ static const char *const k_plug[] = {"LL", "NN", "ll"};
 static const char *const k_coil[] = {".ccc.", "c...c", "c.c.c", "c...c", ".ccc."};
 static const char *const k_hand[] = {"B..B", "BbbB", ".bb."};
 static const char *const k_alert[] = {"KKKK", "KYYK", "KYYK", "KYYK", "KYYK", "KKKK", "KYYK", "KKKK"};
+static const char *const k_query[] = {"KKKKK", "KYYYK", "KKKYK", ".KYYK", ".KYKK", ".KKK.", ".KYK.", ".KKK."};
 
 static const char *const k_bolt[BUDDY_BOLT_SHAPES][7] = {
     {"...NN", "..NN.", ".NNW.", "NNNNN", ".WNN.", ".NN..", "NN..."},
@@ -285,7 +286,8 @@ static bool load_props(buddy_props_art_t *p)
 {
     bool ok = DECODE(p->can[BUDDY_CAN_LEVELS - 1], k_can) && DECODE(p->can_crushed, k_can_crushed) &&
               DECODE(p->can_shadow, k_can_shadow) && DECODE(p->port, k_port) && DECODE(p->plug, k_plug) &&
-              DECODE(p->coil, k_coil) && DECODE(p->hand, k_hand) && DECODE(p->alert, k_alert);
+              DECODE(p->coil, k_coil) && DECODE(p->hand, k_hand) && DECODE(p->alert, k_alert) &&
+              DECODE(p->query, k_query);
     for (int i = 0; ok && i < BUDDY_BOLT_SHAPES; i++) {
         ok = decode(&p->bolt[i], k_bolt[i], 7);
     }
@@ -392,6 +394,7 @@ static bool load_props(buddy_props_art_t *p)
     p->from[BUDDY_FROM_BROW] = (buddy_point_t){1, 10};
     p->battery_at = (buddy_point_t){-17, 9};
     p->alert_at = (buddy_point_t){22, -10};
+    p->query_at = (buddy_point_t){30, 2};
     // Bolts crackle along the sides of the head and torso: inside the columns the trembling robot redraws anyway and
     // below the antenna, so they never widen or heighten its dirty rectangle (or bridge it to the battery).
     static const buddy_point_t k_bolt_at[BUDDY_BOLT_SLOTS] = {{-3, 4}, {24, 4}, {-3, 11}, {25, 16}, {-3, 18}, {24, 22}};

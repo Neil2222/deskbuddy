@@ -7,7 +7,7 @@
 //   food & drink activities that are meals: Monster today; water, coffee, lunch and snacks later (his shows)
 //   my day       what YOU are doing now, as you tell Buddy (MENU_DO_LOG): coffee, a smoke, a meeting. The companion
 //                records it (evt did); Buddy only cheers. Never one of his shows, which record nothing
-//   games        later: interactive experiences with their own screens
+//   games        interactive experiences with their own screens: Tic-Tac-Toe (MENU_TTT, menu_ttt.h)
 //   pdc          the PDC Manager integration (ZDMW), only while the companion offers it (menu_status_t.pdc)
 // Scenarios (combinations of actions run by the companion) and needs (hunger, thirst, energy) are not menu items:
 // they will trigger the same actions and change what the items show.
@@ -41,12 +41,14 @@ typedef enum {
     MENU_MYDAY,
     MENU_PDC,
     MENU_CLOCKFACES, // which face Clock Mode shows: opened by a long press on the header's Buddy head
+    MENU_TTT,        // Tic-Tac-Toe: the game is on while this page shows (menu_ttt.h)
     MENU_CATEGORY_COUNT,
 } menu_category_t;
 
 typedef enum {
     MENU_LIST, // wide rows: icon, label, arrow (Home)
     MENU_GRID, // tiles in two columns
+    MENU_GAME, // the header, and below it a game's own screen (no items)
 } menu_layout_t;
 
 typedef struct {
@@ -91,6 +93,7 @@ typedef enum {
     MENU_ICON_WALK,     // a sneaker: stretch your legs
     MENU_ICON_GEAR,     // a brass gear: the Mechanical Skeleton face
     MENU_ICON_KITT,     // his head with KITT's scanner on the face screen
+    MENU_ICON_TTT,      // a little Tic-Tac-Toe board
     MENU_ICON_COUNT,
 } menu_icon_t;
 
@@ -127,6 +130,7 @@ typedef struct {
                          // with two or more)
     uint8_t face;        // the selected face (office_face_t)
     bool kitt;           // he is KITT (BUDDY_STATE_KITT): its item stands for what he is, not his mood's
+    const struct menu_game *game; // on a MENU_GAME page: what the game's screen shows (menu_ttt.h); NULL otherwise
 } menu_status_t;
 
 typedef enum {

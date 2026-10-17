@@ -137,7 +137,27 @@ extern int g_test_failed;
     X(app_events_replay_after_a_reconnect)           \
     X(app_events_replay_reports_what_was_lost)       \
     X(app_clock_faces_by_touch_and_command)          \
-    X(app_kitt_until_a_tap_a_mood_or_the_clock)
+    X(app_kitt_until_a_tap_a_mood_or_the_clock)      \
+    X(app_tic_tac_toe_on_the_touchscreen)            \
+    X(ttt_judge_finds_every_line_and_draws)          \
+    X(ttt_best_move_wins_blocks_and_knows_positions) \
+    X(ttt_perfect_play_draws)                        \
+    X(ttt_ai_plays_only_free_cells)                  \
+    X(ttt_buddy_is_good_but_beatable)                \
+    X(ttt_attitude_changes_his_strength)             \
+    X(ttt_buddy_usually_takes_a_win)                 \
+    X(ttt_session_turns_and_thinking)                \
+    X(ttt_session_starters_alternate_and_he_opens_late) \
+    X(ttt_session_reaction_rematch_and_score)        \
+    X(ttt_session_streaks_attitude_and_lines)        \
+    X(ttt_session_gets_bored_without_touches)        \
+    X(ttt_session_survives_clock_wraparound)         \
+    X(ttt_lines_are_known_strings)                   \
+    X(game_faces_hold_until_the_next_round)          \
+    X(game_brain_plays_over_his_mood)                \
+    X(game_touch_takes_only_the_board)               \
+    X(game_lines_fit_his_bubble)                     \
+    X(game_redraws_match_full_redraw)
 
 #define X(name) void test_##name(void);
 TEST_LIST

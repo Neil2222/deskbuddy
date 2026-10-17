@@ -44,6 +44,7 @@ typedef struct {
     gfx_rect_t stage;
     int head_top;
     bool visible;
+    bool saying; // a line without buttons (menu_ask_say), not a question
     const char *shown_question; // the text on the bubble (compared by pointer)
     gfx_sprite_t bubble, button[2], timer;
     gfx_image_t bubble_img, button_img[2], timer_img;
@@ -71,6 +72,10 @@ bool menu_ask_fits(const char *question);
 // bar), or hides it when question is NULL or left_ms is 0. Returns ms until it changes next on its own; UINT32_MAX
 // while hidden.
 uint32_t menu_ask_apply(menu_ask_t *a, const char *question, uint32_t left_ms, uint32_t total_ms);
+
+// Shows `line` in the bubble without the buttons and the bar (Buddy just says it: his game, ttt_line), or hides the
+// bubble when line is NULL. Same rules for the string as a question's. Returns UINT32_MAX (nothing changes on its own).
+uint32_t menu_ask_say(menu_ask_t *a, const char *line);
 
 // Feeds a touch (screen pixels). Returns the answer a completed tap on a button gives; MENU_ANSWER_NONE otherwise.
 menu_answer_t menu_ask_touch(menu_ask_t *a, menu_touch_t type, int x, int y);

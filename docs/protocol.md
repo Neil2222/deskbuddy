@@ -30,8 +30,8 @@ The desktop simulator (`tools/simulator.ps1`) carries the same byte stream, fram
 |---|---|---|
 | `hello` | | `ok proto=1 fw=<version> caps=<list> styles=<list> moods=<list> acts=<list> faces=<list> dev=<device id> boot=<16 hex>` (`dev`, `boot`: cap `log`, see *Recorded events*; `faces=`: cap `face`) |
 | `ping` | | `ok` |
-| `status` | | `ok mode=<normal\|office\|monster> mood=<mood> time=<set\|unset> msg=<showing\|idle> queued=<0\|1> uptime=<s> act=<none\|iid:state[:result]> face=<face>` (`office`: Clock Mode, see below; `act=`: the last interaction, see *Interactions*; `face=`: cap `face`) |
-| `poke` | | `ok`, or `err busy mode=<mode>` (Clock Mode, an activity running (Monster, water, sneeze, stare, meditate, focus, the peukie question), a zoom under way, screen not up yet) |
+| `status` | | `ok mode=<normal\|office\|monster\|game> mood=<mood> time=<set\|unset> msg=<showing\|idle> queued=<0\|1> uptime=<s> act=<none\|iid:state[:result]> face=<face>` (`office`: Clock Mode, see below; `game`: Tic-Tac-Toe on the touchscreen; `act=`: the last interaction, see *Interactions*; `face=`: cap `face`) |
+| `poke` | | `ok`, or `err busy mode=<mode>` (Clock Mode, an activity running (Monster, water, sneeze, stare, meditate, focus, the peukie question), a game (`mode=game`), a zoom under way, screen not up yet) |
 | `monster` | | `ok`, or `err busy mode=<mode>` (as `poke`) |
 | `act` | `name=<activity> [iid=<1-4294967295>]` | `ok` (it starts), `ok dup=1 state=<started\|shown\|done>` (this iid already started: a retry never starts it twice), `err busy mode=<mode>` (as `poke`), `err unsupported` (an activity this firmware does not have), `err bad_args` |
 | `mode.set` | `mode=office\|clock\|normal` | `ok` (switches like *Clock* in the touchscreen menu / a tap on the clock: Buddy zooms into the clock or out of it, about 1.5 s; `evt mode` follows when the new scene is on screen; a request during a zoom is carried out after it), or `err unavailable` |
@@ -98,7 +98,7 @@ The desktop simulator (`tools/simulator.ps1`) carries the same byte stream, fram
 | Event | When |
 |---|---|
 | `evt boot proto=1 fw=<version> dev=<device id> boot=<16 hex>` | the firmware started (the companion re-sends the time; `dev`, `boot`: cap `log`) |
-| `evt mode mode=<normal\|office\|monster>` | the mode changed, by touch or by command |
+| `evt mode mode=<normal\|office\|monster\|game>` | the mode changed, by touch or by command (`game`: a Tic-Tac-Toe game began; it ends with Back, Clock Mode or two minutes without a touch) |
 | `evt mood mood=<mood> src=<cmd\|touch\|break\|timer>` | the mood changed: by `mood.set`, on the touchscreen menu, a smoke break began or ended, or a timed mood ran out (`src`: firmware with `track`) |
 | `evt msg id=<id> state=<showing\|done>` | a message went up on the sign / finished |
 | `evt face name=<face> src=<cmd\|touch>` | the Clock Mode face changed: by `clock.face` or on the touchscreen (cap `face`) |

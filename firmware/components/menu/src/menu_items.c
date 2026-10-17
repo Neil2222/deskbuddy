@@ -13,6 +13,7 @@ static const menu_category_def_t k_categories[MENU_CATEGORY_COUNT] = {
     [MENU_MYDAY] = {"MY DAY", MENU_GRID, MENU_HOME},
     [MENU_PDC] = {"PDC", MENU_LIST, MENU_HOME},
     [MENU_CLOCKFACES] = {"CLOCK FACES", MENU_GRID, MENU_HOME}, // a long press on the header's Buddy head
+    [MENU_TTT] = {"TIC-TAC-TOE", MENU_GAME, MENU_GAMES},
 };
 
 #define MOOD(id, label, mood) {"mood." id, label, MENU_MOODS, MENU_ICON_MOOD, MENU_DO_MOOD, mood, false}
@@ -26,7 +27,9 @@ static const menu_item_t k_items[] = {
     {"food", "FOOD & DRINK", MENU_HOME, MENU_ICON_FOOD, MENU_DO_OPEN, MENU_FOOD, false},
     {"myday", "MY DAY", MENU_HOME, MENU_ICON_SCHEDULE, MENU_DO_OPEN, MENU_MYDAY, false},
     {"pdc", "PDC", MENU_HOME, MENU_ICON_ZDMW, MENU_DO_OPEN, MENU_PDC, false}, // only while the companion offers it
-    {"games", "GAMES", MENU_HOME, MENU_ICON_GAMES, MENU_DO_OPEN, MENU_GAMES, true},
+    {"games", "GAMES", MENU_HOME, MENU_ICON_GAMES, MENU_DO_OPEN, MENU_GAMES, false},
+
+    {"game.ttt", "TIC-TAC-TOE", MENU_GAMES, MENU_ICON_TTT, MENU_DO_OPEN, MENU_TTT, false},
 
     MOOD("idle", "IDLE", BUDDY_MOOD_IDLE),
     MOOD("relaxed", "RELAXED", BUDDY_MOOD_RELAXED),
