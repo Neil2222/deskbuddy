@@ -202,6 +202,35 @@ static const char *const k_cookie[] = {
     ".....KKuuuuuuKK.....",
     ".......KKKKKK.......",
 };
+static const char *const k_bubbles[] = { // a white speech bubble and an amber one answering it: a meeting
+    ".KKKKKKKKKK.........",
+    "KWWWWWWWWWWK........",
+    "KWWWWWWWWWWK........",
+    "KWKWWKWWKWWK........",
+    "KWWWWWWWWWWK........",
+    "KWWWWWWWWKKKKKKKKKK.",
+    ".KKWKKKKKaaaaaaaaaaK",
+    "..KK....KaaaaaaaaaaK",
+    "........KadaadaadaaK",
+    "........KaaaaaaaaaaK",
+    "........KaaaaaaaaaaK",
+    ".........KKKKKKKaKK.",
+    "................KK..",
+};
+static const char *const k_sneaker[] = { // a running shoe: stretch your legs
+    "........KKKKK.........",
+    ".......KWWWWWK........",
+    "......KWKKKKWK........",
+    ".....KWWKWKWWK........",
+    ".....KWWWKWKWWK.......",
+    "....KWWWWWWWWWWKKK....",
+    "...KWWWWWWWWWWWWWWKK..",
+    "..KWWWWWWWWWWWWWWWWWK.",
+    ".KRRRRRRRRRRRRRRRRRRRK",
+    "KWWWWWWWWWWWWWWWWWWWWK",
+    "KLLLLLLLLLLLLLLLLLLLLK",
+    ".KKKKKKKKKKKKKKKKKKKK.",
+};
 static const char *const k_led[] = {
     ".KKKK.",
     "KEWEEK",
@@ -221,9 +250,10 @@ static const struct {
     [MENU_ICON_ACTIVITIES] = ART(k_star), [MENU_ICON_FOOD] = ART(k_apple),   [MENU_ICON_GAMES] = ART(k_gamepad),
     [MENU_ICON_SCHEDULE] = ART(k_calendar), [MENU_ICON_OFFICE] = ART(k_moon), [MENU_ICON_WATER] = ART(k_water),
     [MENU_ICON_COFFEE] = ART(k_coffee),   [MENU_ICON_LUNCH] = ART(k_burger), [MENU_ICON_SNACKS] = ART(k_cookie),
+    [MENU_ICON_MEETING] = ART(k_bubbles), [MENU_ICON_WALK] = ART(k_sneaker),
 };
 
-static uint8_t s_pool[3072]; // decoded pixels, internal RAM
+static uint8_t s_pool[4096]; // decoded pixels, internal RAM
 static size_t s_used;
 static gfx_image_t s_icons[MENU_ICON_COUNT], s_led, s_triangle, s_chevron;
 static bool s_ready;

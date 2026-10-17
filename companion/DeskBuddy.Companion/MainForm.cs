@@ -20,6 +20,7 @@ public sealed class MainForm : Form
     private readonly BuddyArt _art = new();
     private readonly CompanionService _service; // created in the constructor: needs the form's UI context
     private readonly SimulatorLauncher _simulator;
+    private readonly SchedulePage _schedule;
     private readonly ToolTip _tips = new();
     private readonly System.Windows.Forms.Timer _reactionTimer = new() { Interval = 1800 };
     private string? _reaction; // a face shown for a moment after something happened
@@ -153,6 +154,23 @@ public sealed class MainForm : Form
         var sidebar = BuildSidebar(out var nav);
         _buddyPage = AddPage(nav, "Buddy", "His mode and his mood: they stay until changed", Theme.GlyphBuddy, BuildBuddyPage());
         AddPage(nav, "Activities", "Short shows on top of his mood; it carries on afterwards", Theme.GlyphActivities, BuildActivitiesPage());
+        _schedule = new SchedulePage(_theme, _art, _tips, AppendLog, Pdc.PdcStore.DefaultDirectory);
+        var schedulePage = AddPage(nav, "Schedule", "Buddy's week: a mood per block, an action at its start, and what you plan to do",
+                                   Theme.GlyphSchedule, _schedule);
+        _schedule.Changed += () =>
+        {
+            var schedule = _schedule.Schedule;
+            _service.ActiveSchedule = schedule; // the live scheduler follows every edit, pause and switch
+            var on = schedule.Live && !schedule.IsEmpty;
+            var color = schedule.IsPaused(DateTimeOffset.Now) ? Theme.Amber : Theme.Green;
+            if (schedulePage.Nav.ShowDot != on || schedulePage.Nav.DotColor != color)
+            {
+                schedulePage.Nav.ShowDot = on;
+                schedulePage.Nav.DotColor = color;
+                schedulePage.Nav.Invalidate();
+            }
+        };
+        _schedule.ResumeRequested += _service.ResumeSchedule;
         _messagePage = AddPage(nav, "Message", "Text that scrolls across his LED sign", Theme.GlyphMessage, BuildMessagePage());
         _pdcPage = AddPage(nav, "PDC Manager", "The ZDMW Teams button, from here or from Buddy's menu", Theme.GlyphPdc, BuildPdcPage());
         _devicePage = AddPage(nav, "Device", "Connection, the desktop simulator and the protocol log", Theme.GlyphDevice, BuildDevicePage());
@@ -188,6 +206,7 @@ public sealed class MainForm : Form
             _history.ItemHeight = LogicalToDeviceUnits(HistoryRow);
             ReflowTiles();
             LayoutPdc();
+            _schedule.LoadSchedule();
         };
         Shown += (_, _) => _service.Start();
     }
@@ -844,9 +863,12 @@ public sealed class MainForm : Form
         tile.Enabled = false;
         try
         {
-            var done = activity is { Kind: ActivityKind.Mood, Mood: { } mood }
-                ? await _service.SetMoodAsync(activity.Label, mood)
-                : await _service.RunAsync(activity.Label, activity.Command);
+            var done = activity switch
+            {
+                { Kind: ActivityKind.Mood, Mood: { } mood } => await _service.SetMoodAsync(activity.Label, mood),
+                { Act: { } act } => await _service.RunActAsync(activity.Label, act),
+                _ => await _service.RunAsync(activity.Label, activity.Command),
+            };
             if (done && activity.Reaction is { } reaction)
             {
                 React(reaction);

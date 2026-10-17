@@ -219,6 +219,12 @@ static bool menu_screens(void)
     st.doing = NULL;
     stage_mood(BUDDY_MOOD_RELAXED, 2000);
 
+    // MY DAY: what you are doing (it reports to the companion; he only cheers).
+    menu_open(&s_menu, MENU_MYDAY, t += 1000);
+    if (!menu_shot("myday", &st, t += 1000)) {
+        return false;
+    }
+
     // PDC Manager, offered by the companion: a row on Home, its page with the counter, dimmed while a click is under
     // way or cooling down, and without a known counter.
     st.pdc = st.pdc_ready = true;

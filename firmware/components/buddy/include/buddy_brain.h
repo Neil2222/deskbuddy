@@ -39,6 +39,15 @@ typedef enum {
     BUDDY_EVENT_FOCUS = 10,
 } buddy_event_t;
 
+// How the last "PEUKIE ROKEN?" ended. NO and TIMEOUT look the same on screen (he is sad either way), but they are
+// different facts: the companion reports them separately (evt act result=no / result=timeout).
+typedef enum {
+    BUDDY_ANSWER_NONE,    // still asking, or the question was cut off (Clock Mode, a restart)
+    BUDDY_ANSWER_YES,
+    BUDDY_ANSWER_NO,
+    BUDDY_ANSWER_TIMEOUT, // a minute without an answer
+} buddy_answer_t;
+
 typedef struct {
     buddy_state_t state;
     uint32_t state_start;
@@ -50,6 +59,7 @@ typedef struct {
     bool mood_timed;
     buddy_mood_t mood_back; // ...and the mood that follows it (idle, or what he was in before a smoke break)
     uint32_t cycle_start, cycle_len, cycle_n, cycle_seed; // where the mood's loop is
+    buddy_answer_t answer; // how the last peukie question ended
 } buddy_brain_t;
 
 void buddy_brain_init(buddy_brain_t *b, uint32_t now_ms, uint32_t seed);

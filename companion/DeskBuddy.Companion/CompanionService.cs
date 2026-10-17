@@ -1,4 +1,5 @@
 using DeskBuddy.Companion.Device;
+using DeskBuddy.Companion.History;
 using DeskBuddy.Companion.Pdc;
 using DeskBuddy.Companion.Protocol;
 using Microsoft.Win32;
@@ -13,10 +14,11 @@ public enum LogKind { Info, Warning, Sent, Received, Device }
 /// steps aside while an ESP-IDF tool (tools/idf.ps1 flash or monitor) needs the port.
 /// All members are used on the UI thread; link callbacks are posted to it.
 /// </summary>
-public sealed class CompanionService : IDisposable
+public sealed partial class CompanionService : IDisposable
 {
     private const string PortHoldMutex = @"Local\DeskBuddy.PortHold"; // held by tools/idf.ps1
     private static readonly TimeSpan ReplyTimeout = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan ReplayTimeout = TimeSpan.FromSeconds(8); // log.since: up to 64 events, two per frame
     private static readonly TimeSpan PingInterval = TimeSpan.FromSeconds(15);
     private static readonly TimeSpan SyncInterval = TimeSpan.FromHours(1);
     private static readonly TimeSpan RetryDelay = TimeSpan.FromSeconds(5);
@@ -32,6 +34,10 @@ public sealed class CompanionService : IDisposable
     private int _missedPings;
     private readonly PdcLease _pdcLease = new();
     private readonly string? _pdcWarning;
+    private readonly string _dataDirectory = PdcStore.DefaultDirectory;
+    private HistoryRecorder? _boardHistory;
+    private HistoryRecorder? _simulatorHistory;
+    private HistoryRecorder? _history; // the current connection's (board or simulator)
 
     public bool AutoConnect { get; private set; } = true;
     /// <summary>Port chosen by the user (a COM port or <see cref="DeviceLink.SimulatorName"/>); null: the first DeskBuddy (CH343) port, else the simulator if it is running.</summary>
@@ -114,11 +120,31 @@ public sealed class CompanionService : IDisposable
     }
 
     /// <summary>Sends an action command. True when DeskBuddy did it.</summary>
-    public async Task<bool> RunAsync(string label, string body)
+    public async Task<bool> RunAsync(string label, string body) => (await SendActionAsync(label, body)).Done;
+
+    /// <summary>
+    /// Starts one of Buddy's activities (<c>act</c>). With firmware that records events (caps track and log) the
+    /// request gets an iid and goes into the history journal first, so what the device reports is linked to it.
+    /// </summary>
+    public async Task<bool> RunActAsync(string label, string act)
+    {
+        if (_history is not { } history || !Caps.Contains("track") || !Caps.Contains("log"))
+        {
+            return await RunAsync(label, $"act name={act}");
+        }
+        var iid = history.NextIid();
+        history.Requested(iid, act, "companion");
+        var (done, result, _) = await SendActionAsync(label, $"act name={act} iid={iid}");
+        history.RequestAnswered(iid, result);
+        return done;
+    }
+
+    // Result: ok, dup, busy, unsupported, err:<code>, no_reply, lost, not_connected; Reply: the device's answer, if any.
+    private async Task<(bool Done, string Result, Frame? Reply)> SendActionAsync(string label, string body)
     {
         if (_link is not { } link || !IsConnected)
         {
-            return false;
+            return (false, "not_connected", null);
         }
         try
         {
@@ -126,22 +152,20 @@ public sealed class CompanionService : IDisposable
             if (reply.IsOk)
             {
                 Write(LogKind.Info, $"{label}: done");
-                return true;
+                return (true, reply.Arg("dup") == "1" ? "dup" : "ok", reply);
             }
-            else
-            {
-                Write(LogKind.Warning, $"{label}: refused ({reply.Name}{Describe(reply)})");
-            }
+            Write(LogKind.Warning, $"{label}: refused ({reply.Name}{Describe(reply)})");
+            return (false, reply.Name is "busy" or "unsupported" ? reply.Name : $"err:{reply.Name}", reply);
         }
         catch (TimeoutException)
         {
             Write(LogKind.Warning, $"{label}: no answer from DeskBuddy");
+            return (false, "no_reply", null);
         }
         catch (Exception e) when (e is IOException or OperationCanceledException)
         {
-            // Lost: reported by the link
+            return (false, "lost", null); // reported by the link
         }
-        return false;
     }
 
     /// <summary>
@@ -218,6 +242,7 @@ public sealed class CompanionService : IDisposable
     {
         var now = DateTime.UtcNow;
         _ = Pdc.TickAsync(); // no network at all while the integration is off
+        ScheduleTick(); // also while not connected: a due action waits, or is recorded as skipped
         // The hold concerns serial ports only; a simulator connection (TCP) carries on while a tool flashes.
         var simulator = _link?.IsSimulator ?? SelectedPort == DeviceLink.SimulatorName;
         var held = Mutex.TryOpenExisting(PortHoldMutex, out var hold) && !simulator;
@@ -258,6 +283,7 @@ public sealed class CompanionService : IDisposable
         {
             _ = PingAsync();
         }
+        _history?.Tick();
         SendPdcLease();
     }
 
@@ -332,12 +358,17 @@ public sealed class CompanionService : IDisposable
             Acts = DeviceMood.ParseList(hello.Arg("acts")); // the same comma-separated list
             Mood = DeviceMood.Idle; // until status says otherwise
             IsConnected = true;
+            if (Caps.Contains("log") && hello.Arg("dev") is { } dev && hello.Arg("boot") is { } boot)
+            {
+                _history?.Connected(dev, boot, Firmware); // then it asks for what happened meanwhile (log.since)
+            }
             _missedPings = 0;
             _nextPing = DateTime.UtcNow + PingInterval;
             SetConnection($"Connected on {port}");
             Write(LogKind.Info, $"Connected to DeskBuddy on {port} (firmware {Firmware}, protocol {hello.Arg("proto")})");
             await SyncClockAsync("connected");
             await RefreshStatusAsync();
+            ScheduleConnected();
             Pdc.ResetDeviceIds(); // the board may have restarted while disconnected
             _pdcLease.Reset();
             SendPdcLease();
@@ -351,9 +382,11 @@ public sealed class CompanionService : IDisposable
     private void Attach(DeviceLink link)
     {
         _link = link;
+        var history = _history = _lastHistory = HistoryFor(link.IsSimulator);
         link.LogLine += line => Post(() => Write(LogKind.Device, line));
         link.Traffic += (line, sent) => Post(() => Write(sent ? LogKind.Sent : LogKind.Received, line));
         link.BadFrame += text => Post(() => Write(LogKind.Warning, text));
+        link.EventReceived += history.Received; // on the reader: in the device's order, before any later reply
         link.EventReceived += frame => Post(() => OnDeviceEvent(link, frame));
         link.Lost += reason => Post(() =>
         {
@@ -381,6 +414,7 @@ public sealed class CompanionService : IDisposable
             break;
         case "mood":
             Mood = DeviceMood.From(frame, Mood);
+            ScheduleMoodEvent(frame);
             Changed?.Invoke();
             break;
         case "msg":
@@ -462,6 +496,43 @@ public sealed class CompanionService : IDisposable
     {
         await SyncClockAsync("device restarted");
         await RefreshStatusAsync();
+        ScheduleBooted();
+    }
+
+    // The board's and the simulator's histories, each in its own files; created on first use.
+    private HistoryRecorder HistoryFor(bool simulator)
+    {
+        ref var slot = ref simulator ? ref _simulatorHistory : ref _boardHistory;
+        if (slot is null)
+        {
+            var recorder = new HistoryRecorder(_dataDirectory, simulator ? HistorySource.Simulator : HistorySource.Board);
+            recorder.Log += text => Post(() => Write(LogKind.Info, text));
+            recorder.FetchNeeded += request => Post(() => _ = FetchHistoryAsync(recorder, request));
+            slot = recorder;
+        }
+        return slot;
+    }
+
+    // log.since for the history: the replayed events arrive (and are queued) before this reply.
+    private async Task FetchHistoryAsync(HistoryRecorder recorder, FetchRequest request)
+    {
+        if (_history != recorder || _link is not { } link || !IsConnected)
+        {
+            recorder.ReplayFailed(request, "not connected");
+            return;
+        }
+        try
+        {
+            recorder.ReplayAnswered(request, await link.RequestAsync(request.Command, ReplayTimeout));
+        }
+        catch (TimeoutException)
+        {
+            recorder.ReplayFailed(request, "no answer");
+        }
+        catch (Exception e) when (e is IOException or OperationCanceledException)
+        {
+            recorder.ReplayFailed(request, "connection lost");
+        }
     }
 
     private async Task SyncClockAsync(string reason)
@@ -553,6 +624,8 @@ public sealed class CompanionService : IDisposable
         Mode = "unknown";
         Mood = DeviceMood.Idle;
         link?.Dispose();
+        _history?.Disconnected();
+        _history = null;
         _pdcLease.Reset();
         if (link is not null)
         {
@@ -579,6 +652,8 @@ public sealed class CompanionService : IDisposable
 
     private void OnTimeChanged(object? sender, EventArgs e) => Post(() =>
     {
+        TimeZoneInfo.ClearCachedData(); // the zone may have changed: TimeZoneInfo.Local and DateTimeOffset.Now follow it
+        ScheduleZoneChanged();
         if (IsConnected)
         {
             _ = SyncClockAsync("Windows time or time zone changed");
@@ -610,6 +685,8 @@ public sealed class CompanionService : IDisposable
             _ = SendPdcAsync(link, PdcWire.Set(false, null)); // best effort: written before the port closes
         }
         _link?.Dispose();
+        _boardHistory?.Dispose(); // the last lines reach the disk
+        _simulatorHistory?.Dispose();
         Pdc.Dispose();
     }
 }

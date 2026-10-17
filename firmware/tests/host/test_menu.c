@@ -104,6 +104,47 @@ void test_menu_definitions_fit_and_connect(void)
     }
 }
 
+// MY DAY: what you are doing, reported (MENU_DO_LOG) under the companion's activity type ids; each has a line for
+// the sign; it works while Buddy is busy (telling him is not one of his shows), and nothing else logs.
+void test_menu_my_day_reports_what_you_do(void)
+{
+    static const char *const types[] = {"work", "meeting", "coffee", "water", "smoke", "stretch", "lunch"};
+    const menu_def_t *d = &menu_default;
+    const menu_status_t busy = {.mood = BUDDY_MOOD_IDLE, .office = true, .busy = true};
+    int found = 0;
+    for (int i = 0; i < d->count; i++) {
+        const menu_item_t *it = &d->items[i];
+        const bool myday = it->category == MENU_MYDAY;
+        CHECK_EQ(myday, it->action == MENU_DO_LOG); // only MY DAY logs, and all of it does
+        CHECK_EQ(myday, menu_item_note(it) != NULL);
+        if (!myday) {
+            continue;
+        }
+        CHECK(strncmp(it->id, "myday.", 6) == 0);
+        bool known = false;
+        for (size_t t = 0; t < sizeof(types) / sizeof(types[0]); t++) {
+            known |= strcmp(it->id + 6, types[t]) == 0;
+        }
+        CHECK(known);
+        CHECK(!it->soon && menu_item_avail(it, &busy) == MENU_ITEM_READY);
+        const int w = text_width(menu_item_note(it));
+        CHECK(w > 0 && strlen(menu_item_note(it)) <= 60);
+        found++;
+    }
+    CHECK_EQ(found, (int)(sizeof(types) / sizeof(types[0])));
+    CHECK(found <= MENU_SLOTS); // one page
+
+    static menu_t m;
+    CHECK(menu_init(&m, &menu_default, panel_area(), 0));
+    const int home_slot = slot_of(&m, &k_idle, "myday");
+    CHECK(home_slot >= 0);
+    CHECK_EQ(tap(&m, home_slot, &k_idle, 1000).action, MENU_DO_OPEN);
+    CHECK_EQ(m.category, MENU_MYDAY);
+    const menu_result_t r = tap(&m, slot_of(&m, &busy, "myday.coffee"), &busy, 5000);
+    CHECK_EQ(r.action, MENU_DO_LOG);
+    CHECK(r.item && strcmp(r.item->id, "myday.coffee") == 0);
+}
+
 void test_menu_navigates_and_goes_back(void)
 {
     static menu_t m;

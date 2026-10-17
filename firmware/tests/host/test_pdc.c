@@ -164,8 +164,8 @@ void test_pdc_menu_only_while_offered(void)
     CHECK_EQ(menu_item_avail(row, &st), MENU_ITEM_READY);
     CHECK_EQ(menu_item_avail(zdmw, &st), MENU_ITEM_READY);
     CHECK_EQ(menu_page_items(&m, &st, items, &pages), 5);
-    CHECK_EQ(pages, 2);           // Schedule (still SOON) moves to page 2...
-    CHECK(items[3] == row);       // ...PDC is on the first page, after Food & Drink
+    CHECK_EQ(pages, 2);           // Games (still SOON) moves to page 2...
+    CHECK(items[3] == find("myday") && items[4] == row); // ...PDC is on the first page, after MY DAY
     st.pdc_ready = false;         // a click under way or cooling down
     CHECK_EQ(menu_item_avail(zdmw, &st), MENU_ITEM_BUSY);
     st.pdc_ready = true;

@@ -79,11 +79,13 @@ extern int g_test_failed;
     X(link_parses_messages)                          \
     X(link_rejects_bad_messages)                     \
     X(link_parses_moods)                             \
+    X(link_parses_log_since)                         \
     X(marquee_text_policy)                           \
     X(marquee_stays_long_enough_then_hides)          \
     X(marquee_shows_the_text_scrolling_left)         \
     X(marquee_redraws_only_the_sign)                 \
     X(menu_definitions_fit_and_connect)              \
+    X(menu_my_day_reports_what_you_do)               \
     X(menu_navigates_and_goes_back)                  \
     X(menu_selects_every_mood)                       \
     X(menu_activities_and_availability)              \
@@ -112,7 +114,15 @@ extern int g_test_failed;
     X(pdc_menu_only_while_offered)                   \
     X(pdc_confirmation_and_reaction)                 \
     X(focus_tells_the_comic_in_order)                \
-    X(focus_thoughts_redraw_on_the_stage)
+    X(focus_thoughts_redraw_on_the_stage)            \
+    X(app_hello_offers_tracking_and_the_question)    \
+    X(app_question_by_command_reports_yes_no_and_timeout) \
+    X(app_an_interrupted_question_is_never_an_answer) \
+    X(app_shows_and_touches_report_their_own_ids)    \
+    X(app_my_day_and_mood_sources)                   \
+    X(app_events_carry_identity_and_time)            \
+    X(app_events_replay_after_a_reconnect)           \
+    X(app_events_replay_reports_what_was_lost)
 
 #define X(name) void test_##name(void);
 TEST_LIST

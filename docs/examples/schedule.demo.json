@@ -1,0 +1,318 @@
+{
+  "version": 1,
+  "enabled": true,
+  "days": {
+    "mon": [
+      {
+        "id": "f7c83c53-797b-49a5-a756-7d8a418388f0",
+        "name": "Work",
+        "start": "08:30",
+        "end": "12:00",
+        "mood": "working",
+        "plans": "work",
+        "reminder": false,
+        "enabled": true
+      },
+      {
+        "id": "35a7f2de-4926-4c40-a01d-c02e5bef1cfd",
+        "name": "Smoke break",
+        "start": "10:00",
+        "end": "10:15",
+        "mood": "peukie",
+        "plans": "smoke",
+        "reminder": false,
+        "enabled": true
+      },
+      {
+        "id": "a6d09ddb-eb80-468e-8638-1b8ef3b85a6e",
+        "name": "Lunch",
+        "start": "12:00",
+        "end": "12:45",
+        "mood": null,
+        "plans": "lunch",
+        "reminder": false,
+        "enabled": true
+      },
+      {
+        "id": "de5d1462-0ad1-4e3c-b008-d5e13d4da910",
+        "name": "Work",
+        "start": "12:45",
+        "end": "17:00",
+        "mood": "working",
+        "plans": "work",
+        "reminder": false,
+        "enabled": true
+      },
+      {
+        "id": "da1d7427-d5d5-4172-9985-8497f6ccd4fa",
+        "name": "Coffee",
+        "start": "15:00",
+        "end": "15:10",
+        "mood": null,
+        "plans": "coffee",
+        "reminder": false,
+        "enabled": true
+      },
+      {
+        "id": "cce9a728-61f9-4a59-bc27-13a0f06173d2",
+        "name": "Wind down",
+        "start": "17:00",
+        "end": "18:00",
+        "mood": "relaxed",
+        "plans": null,
+        "reminder": false,
+        "enabled": false
+      },
+      {
+        "id": "621ec062-abf9-4488-87bf-be2dfab44dbb",
+        "name": "Evening",
+        "start": "20:30",
+        "end": "23:00",
+        "mood": "sleepy",
+        "plans": null,
+        "reminder": false,
+        "enabled": true
+      }
+    ],
+    "tue": [
+      {
+        "id": "9f9d2327-eea4-4303-91f5-d460eeba0962",
+        "name": "Work",
+        "start": "08:30",
+        "end": "12:00",
+        "mood": "working",
+        "plans": "work",
+        "reminder": false,
+        "enabled": true
+      },
+      {
+        "id": "c639ebca-05a6-48d7-826f-92774572c0e4",
+        "name": "Smoke break",
+        "start": "10:00",
+        "end": "10:12",
+        "mood": "peukie",
+        "plans": "smoke",
+        "reminder": false,
+        "enabled": true
+      },
+      {
+        "id": "29a87247-8f4c-484f-80e4-7fd87e06c9cd",
+        "name": "Lunch",
+        "start": "12:00",
+        "end": "12:45",
+        "mood": null,
+        "plans": "lunch",
+        "reminder": false,
+        "enabled": true
+      },
+      {
+        "id": "2e811ae3-3b2b-4a7d-beaf-943d5521a74c",
+        "name": "Work",
+        "start": "12:45",
+        "end": "17:00",
+        "mood": "working",
+        "plans": "work",
+        "reminder": false,
+        "enabled": true
+      },
+      {
+        "id": "4df835f5-60b1-4fd0-a83f-7fae4936d649",
+        "name": "Coffee",
+        "start": "15:00",
+        "end": "15:10",
+        "mood": null,
+        "plans": "coffee",
+        "reminder": false,
+        "enabled": true
+      },
+      {
+        "id": "2e5907b4-89c6-4acb-b45b-35ef778eb8c4",
+        "name": "Wind down",
+        "start": "17:00",
+        "end": "18:00",
+        "mood": "relaxed",
+        "plans": null,
+        "reminder": false,
+        "enabled": false
+      },
+      {
+        "id": "6481fc94-f553-46a2-9b4b-00b02fdf1b5b",
+        "name": "Evening",
+        "start": "20:30",
+        "end": "23:00",
+        "mood": "sleepy",
+        "plans": null,
+        "reminder": false,
+        "enabled": true
+      }
+    ],
+    "wed": [
+      {
+        "id": "aeac0036-2178-46ef-9621-62afe1707ca9",
+        "name": "Work",
+        "start": "08:30",
+        "end": "12:00",
+        "mood": "working",
+        "plans": "work",
+        "reminder": false,
+        "enabled": true
+      },
+      {
+        "id": "87d93ef8-9ebd-40ae-99fe-f90f37ed24b3",
+        "name": "Smoke break",
+        "start": "10:00",
+        "end": "10:12",
+        "mood": "peukie",
+        "plans": "smoke",
+        "reminder": false,
+        "enabled": true
+      },
+      {
+        "id": "19ed706f-c9c0-4c2b-baa4-2d4b4718ef44",
+        "name": "Lunch",
+        "start": "12:00",
+        "end": "12:45",
+        "mood": null,
+        "plans": "lunch",
+        "reminder": false,
+        "enabled": true
+      },
+      {
+        "id": "906a82fa-637c-4cac-93ab-8df316999e29",
+        "name": "Work",
+        "start": "12:45",
+        "end": "17:00",
+        "mood": "working",
+        "plans": "work",
+        "reminder": false,
+        "enabled": true
+      },
+      {
+        "id": "cd0cd9aa-6517-4acc-adc7-7c0cbac0e5ff",
+        "name": "Coffee",
+        "start": "15:00",
+        "end": "15:10",
+        "mood": null,
+        "plans": "coffee",
+        "reminder": false,
+        "enabled": true
+      },
+      {
+        "id": "b11daf10-45e0-4de0-9640-39f602d7df26",
+        "name": "Wind down",
+        "start": "17:00",
+        "end": "18:00",
+        "mood": "relaxed",
+        "plans": null,
+        "reminder": false,
+        "enabled": false
+      },
+      {
+        "id": "a6b2bd1c-a6fb-4529-8b58-4c40c1946cfd",
+        "name": "Evening",
+        "start": "20:30",
+        "end": "23:00",
+        "mood": "sleepy",
+        "plans": null,
+        "reminder": false,
+        "enabled": true
+      }
+    ],
+    "thu": [
+      {
+        "id": "7fb8d7e7-6c01-47df-a63e-43492d1d1f24",
+        "name": "Work",
+        "start": "08:30",
+        "end": "12:00",
+        "mood": "working",
+        "plans": "work",
+        "reminder": false,
+        "enabled": true
+      },
+      {
+        "id": "c9206f41-7f3d-49cc-b395-b0ce5ec1175a",
+        "name": "Smoke break",
+        "start": "10:00",
+        "end": "10:12",
+        "mood": "peukie",
+        "plans": "smoke",
+        "reminder": false,
+        "enabled": true
+      },
+      {
+        "id": "85f46686-f1cf-4d00-be4b-2a6db7768991",
+        "name": "Lunch",
+        "start": "12:00",
+        "end": "12:45",
+        "mood": null,
+        "plans": "lunch",
+        "reminder": false,
+        "enabled": true
+      },
+      {
+        "id": "4c8010e3-5e2c-4c21-95ea-17f7cbd4cb90",
+        "name": "Work",
+        "start": "12:45",
+        "end": "17:00",
+        "mood": "working",
+        "plans": "work",
+        "reminder": false,
+        "enabled": true
+      },
+      {
+        "id": "c9190b5d-f368-4ee9-899d-2ebc797078d9",
+        "name": "Coffee",
+        "start": "15:00",
+        "end": "15:10",
+        "mood": null,
+        "plans": "coffee",
+        "reminder": false,
+        "enabled": true
+      },
+      {
+        "id": "d026d706-e86c-497d-af64-52d04353dce9",
+        "name": "Wind down",
+        "start": "17:00",
+        "end": "18:00",
+        "mood": "relaxed",
+        "plans": null,
+        "reminder": false,
+        "enabled": false
+      },
+      {
+        "id": "1095de14-8e80-4ad3-a500-8f31add04d15",
+        "name": "Evening",
+        "start": "20:30",
+        "end": "23:00",
+        "mood": "sleepy",
+        "plans": null,
+        "reminder": false,
+        "enabled": true
+      }
+    ],
+    "fri": [
+      {
+        "id": "2945dea3-37a2-4e86-98a5-75407ace88f6",
+        "name": "Work",
+        "start": "08:30",
+        "end": "12:00",
+        "mood": "working",
+        "plans": "work",
+        "reminder": false,
+        "enabled": true
+      },
+      {
+        "id": "e61c4510-c5bf-43ed-94d0-b913047770cd",
+        "name": "Weekend!",
+        "start": "16:00",
+        "end": "18:00",
+        "mood": "happy",
+        "plans": null,
+        "reminder": false,
+        "enabled": true
+      }
+    ],
+    "sat": [],
+    "sun": []
+  }
+}

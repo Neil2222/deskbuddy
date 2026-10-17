@@ -64,6 +64,25 @@ public sealed class Theme : IDisposable
     public const string GlyphDevice = "\uE88E";     // USB
     public const string GlyphPlay = "\uE768";
     public const string GlyphStop = "\uE71A";
+    public const string GlyphSchedule = "\uE787";   // Calendar
+    public const string GlyphAdd = "\uE710";
+    public const string GlyphCopy = "\uE8C8";
+
+    /// <summary>
+    /// A colour per mood for the schedule, from Buddy's own palette where it has one (eyes, chest light, antenna,
+    /// body); amber stays the planned-activity colour.
+    /// </summary>
+    public static Color MoodColor(string? mood) => mood switch
+    {
+        "idle" => Body,
+        "relaxed" => Green,
+        "peukie" => Color.FromArgb(255, 132, 92),
+        "angry" => Red,
+        "sleepy" => Color.FromArgb(150, 132, 236),
+        "working" => Cyan,
+        "happy" => Color.FromArgb(255, 214, 92),
+        _ => Muted,
+    };
 
     private static string? Installed(string family)
     {

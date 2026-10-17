@@ -17,8 +17,10 @@
 extern "C" {
 #endif
 
-// The commands this firmware offers (hello caps=) and the message styles it draws (hello styles=).
-#define APP_LINK_CAPS "poke,monster,mode,time,status,msg,mood,act,pdc"
+// The commands this firmware offers (hello caps=) and the message styles it draws (hello styles=). track: act iid=,
+// evt act, status act=, evt mood src=; did: evt did (MY DAY); log: seq=/t=/up= on evt act and evt did, dev= and boot=
+// in hello and evt boot, log.since.
+#define APP_LINK_CAPS "poke,monster,mode,time,status,msg,mood,act,pdc,track,did,log"
 #define APP_LINK_STYLES "marquee"
 
 // Passes a command event to the application thread. false: it could not be queued (the command gets "err busy").
