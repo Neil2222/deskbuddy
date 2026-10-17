@@ -143,18 +143,17 @@ public sealed class ScheduleStatusTests : IDisposable
             // Page → sidebar.
             page.Pause(WeekSchedule.UntilResumed);
             Assert.Equal("Paused until resumed", quick.Status.Text);
-            page.SetLive(false);
+            page.SetLive(false); // Off clears the pause: it never comes back later
             Assert.Equal("Schedule Off", quick.Status.Text);
-            page.SetLive(true); // the switch keeps the pause (P6): still paused, and shown so
-            Assert.Equal("Paused until resumed", quick.Status.Text);
-            Assert.Equal(["Resume", "Turn Off", "Open Schedule"], quick.Commands.Select(ScheduleStatus.Label));
-            quick.Run(new(ScheduleCommandKind.Resume));
+            Assert.Equal((false, (DateTimeOffset?)null), (store.Load().Schedule.Live, store.Load().Schedule.PausedUntil));
+            page.SetLive(true);
             Assert.Equal("Schedule Live", quick.Status.Text);
 
             quick.Run(new(ScheduleCommandKind.Away, 5));
             Assert.Equal(ScheduleStatus.LocalMidnight(Now, Amsterdam, 5), store.Load().Schedule.PausedUntil);
             quick.Run(new(ScheduleCommandKind.TurnOff));
-            Assert.False(store.Load().Schedule.Live);
+            Assert.Equal((false, (DateTimeOffset?)null), (store.Load().Schedule.Live, store.Load().Schedule.PausedUntil));
+            Assert.Equal(1, resumed); // turning Off leaves a manual mood alone (only Resume ends it)
             quick.Run(new(ScheduleCommandKind.OpenSchedule));
             Assert.Equal(1, opened);
             Assert.Equal(Week[DayOfWeek.Friday].ToArray(), store.Load().Schedule[DayOfWeek.Friday].ToArray()); // only the switch and the pause changed
@@ -175,6 +174,29 @@ public sealed class ScheduleStatusTests : IDisposable
             Assert.Equal((ScheduleState.Live, "Schedule Live"), (quick.Status.State, quick.Status.Text));
             Assert.Equal(Now.AddHours(1), page.Schedule.PausedUntil); // nothing is written when a pause runs out
         });
+    }
+
+    [Fact]
+    public void Turning_live_on_over_a_stale_pause_is_effectively_live()
+    {
+        // A schedule switched off while paused by an older version: the pause is still in the file.
+        var store = new ScheduleStore(_dir);
+        store.Save(Week.WithPause(WeekSchedule.UntilResumed));
+        var resumed = 0;
+        WithPage(new MovingClock(Now), (page, quick) =>
+        {
+            Assert.Equal("Schedule Off", quick.Status.Text);
+            quick.Run(new(ScheduleCommandKind.TurnLiveOn));
+            Assert.Equal((ScheduleState.Live, "Schedule Live"), (quick.Status.State, quick.Status.Text));
+            Assert.Equal((true, (DateTimeOffset?)null), (store.Load().Schedule.Live, store.Load().Schedule.PausedUntil));
+
+            // The header's switch is the same method: Live while paused, switched by the page, also ends the pause.
+            page.Pause(Now.AddHours(1));
+            page.SetLive(true);
+            Assert.Equal("Schedule Live", quick.Status.Text);
+            Assert.Null(store.Load().Schedule.PausedUntil);
+            Assert.Equal(0, resumed);
+        }, resumed: () => resumed++);
     }
 
     [Fact]

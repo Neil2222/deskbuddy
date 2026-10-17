@@ -91,6 +91,7 @@ public sealed class ScheduleQuickControls : IDisposable
     {
         var menu = BuildMenu();
         menu.Show(Pill, new Point(0, -menu.GetPreferredSize(Size.Empty).Height)); // above: the pill sits at the bottom
+        Menus.SelectFirst(menu); // the state's name is not an item: the keyboard starts on the first action
     }
 
     /// <summary>The quick controls for the state now: its name (and detail as the tooltip), then what applies.</summary>

@@ -19,8 +19,23 @@ public sealed class EntryList : ListBox
         BackColor = Theme.Input;
         ForeColor = Theme.Text;
         IntegralHeight = false;
-        ItemHeight = 42;
+        ItemHeight = Row;
         NativeLook.DarkScrollBars(this);
+    }
+
+    private const int Row = 42; // logical pixels: two lines
+
+    // A fixed-height owner-drawn list keeps its row height in device pixels: set it for the DPI it is shown at.
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        ItemHeight = LogicalToDeviceUnits(Row);
+    }
+
+    protected override void OnDpiChangedAfterParent(EventArgs e)
+    {
+        base.OnDpiChangedAfterParent(e);
+        ItemHeight = LogicalToDeviceUnits(Row);
     }
 
     public void Show(IEnumerable<EntryLine> lines)
@@ -48,13 +63,13 @@ public sealed class EntryList : ListBox
         var x = e.Bounds.X + LogicalToDeviceUnits(8);
         var timeWidth = LogicalToDeviceUnits(52);
         var flags = TextFormatFlags.EndEllipsis | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix | TextFormatFlags.VerticalCenter;
-        TextRenderer.DrawText(e.Graphics, line.Time, _theme.Strong, new Rectangle(x, e.Bounds.Y, timeWidth, e.Bounds.Height / 2 + LogicalToDeviceUnits(4)),
+        TextRenderer.DrawText(e.Graphics, line.Time, _theme.At(DeviceDpi).Strong, new Rectangle(x, e.Bounds.Y, timeWidth, e.Bounds.Height / 2 + LogicalToDeviceUnits(4)),
                               line.Time == "?" ? Theme.Faint : Theme.Text, flags);
         var textX = x + timeWidth;
         var w = e.Bounds.Right - textX - LogicalToDeviceUnits(8);
-        TextRenderer.DrawText(e.Graphics, line.Title, _theme.Text10, new Rectangle(textX, e.Bounds.Y + LogicalToDeviceUnits(3), w, LogicalToDeviceUnits(20)),
+        TextRenderer.DrawText(e.Graphics, line.Title, _theme.At(DeviceDpi).Text10, new Rectangle(textX, e.Bounds.Y + LogicalToDeviceUnits(3), w, LogicalToDeviceUnits(20)),
                               line.Hidden ? Theme.Amber : Theme.Text, flags);
-        TextRenderer.DrawText(e.Graphics, line.Detail, _theme.Small, new Rectangle(textX, e.Bounds.Y + LogicalToDeviceUnits(22), w, LogicalToDeviceUnits(18)),
+        TextRenderer.DrawText(e.Graphics, line.Detail, _theme.At(DeviceDpi).Small, new Rectangle(textX, e.Bounds.Y + LogicalToDeviceUnits(22), w, LogicalToDeviceUnits(18)),
                               Theme.Muted, flags);
         using var pen = new Pen(Theme.CardBorder);
         e.Graphics.DrawLine(pen, e.Bounds.X, e.Bounds.Bottom - 1, e.Bounds.Right, e.Bounds.Bottom - 1);
@@ -86,6 +101,7 @@ public abstract class DarkDialog : Form
         StartPosition = FormStartPosition.CenterParent;
         ClientSize = size;
         Padding = new Padding(20, 16, 20, 14);
+        Buttons.TabIndex = 100; // after the dialog's own fields (added later, but before it in the tab order)
         Controls.Add(Buttons);
     }
 
@@ -112,6 +128,7 @@ public sealed class ConfirmDialog : DarkDialog
         okButton.Click += (_, _) => DialogResult = DialogResult.OK;
         cancel.Click += (_, _) => DialogResult = DialogResult.Cancel;
         AcceptButton = okButton;
+        Load += (_, _) => ActiveControl = okButton;
         CancelButton = cancel;
         var label = Text10(text, 0, UI.Theme.Text);
         label.Dock = DockStyle.Fill;
@@ -178,7 +195,9 @@ public sealed class HidePeriodDialog : DarkDialog
         _summary = Text10("", 62, UI.Theme.Text); // two lines: a long summary wraps
         _summary.Font = theme.Strong;
         _summary.Padding = new Padding(0, 12, 0, 0);
-        _list = new EntryList(theme) { Dock = DockStyle.Fill, SelectionMode = SelectionMode.None };
+        _list = new EntryList(theme) { Dock = DockStyle.Fill, SelectionMode = SelectionMode.None, TabStop = false }; // a preview: nothing to pick
+        row.TabIndex = 0; // the times, then the note, then the buttons
+        note.TabIndex = 1;
 
         Controls.Add(_list);
         Controls.Add(_summary);
@@ -195,6 +214,7 @@ public sealed class HidePeriodDialog : DarkDialog
         _from.TextChanged += (_, _) => UpdatePreview();
         _to.TextChanged += (_, _) => UpdatePreview();
         UpdatePreview();
+        Load += (_, _) => ActiveControl = _from; // the keyboard starts on the times (once the dialog has its window)
     }
 
     public DateTimeOffset FromUtc { get; private set; }
@@ -269,6 +289,7 @@ public sealed class HiddenEntriesDialog : DarkDialog
         _list.SelectedIndexChanged += (_, _) => UpdateButton();
         _restoreButton.Click += async (_, _) => await RestoreSelected();
         Fill();
+        Load += (_, _) => ActiveControl = _list; // Up / Down choose a hide, Tab reaches Restore
     }
 
     public IReadOnlyList<EntryLine> Lines => _list.Items.Cast<EntryLine>().ToList();
@@ -276,7 +297,12 @@ public sealed class HiddenEntriesDialog : DarkDialog
     public void Fill()
     {
         var state = _state();
+        var keep = _list.SelectedIndex;
         _list.Show(state.Hides.Hides.Select(h => Line(h, state)).OrderBy(l => ((Annotation)l.Tag!).AtUtc));
+        if (_list.Items.Count > 0)
+        {
+            _list.SelectedIndex = Math.Clamp(keep, 0, _list.Items.Count - 1);
+        }
         _status.Text = _list.Items.Count == 0 ? "Nothing is hidden." : $"{_list.Items.Count} {(_list.Items.Count == 1 ? "hide" : "hides")} in force.";
         UpdateButton();
     }

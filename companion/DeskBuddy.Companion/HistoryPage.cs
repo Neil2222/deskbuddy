@@ -19,7 +19,7 @@ namespace DeskBuddy.Companion;
 /// </summary>
 public sealed class HistoryPage : Panel
 {
-    private const int InspectorMin = 250, InspectorMax = 340; // logical pixels; about a third of the page between them
+    private const int InspectorMin = 200, InspectorMax = 340; // logical pixels; about a third of the page between them
 
     private readonly Theme _theme;
     private readonly ToolTip _tips;
@@ -162,6 +162,12 @@ public sealed class HistoryPage : Panel
         {
             _calendarDrop.Close();
             ShowDate(day);
+            _dateButton.Focus();
+        };
+        _calendar.Cancelled += () =>
+        {
+            _calendarDrop.Close();
+            _dateButton.Focus();
         };
         _sourcePicker.Picked += (_, _) => ShowSource(_sourcePicker.SelectedIndex == 1 ? HistorySource.Simulator : HistorySource.Board);
         _testData.Click += (_, _) =>
@@ -169,6 +175,7 @@ public sealed class HistoryPage : Panel
             _hiddenListItem.Text = $"Hidden entries ({State.Hides.Hides.Count})…";
             _showHiddenItem.Checked = _showHidden;
             _testMenu.Show(_testData, new Point(0, _testData.Height));
+            Menus.SelectFirst(_testMenu);
         };
         _showHiddenItem.Click += (_, _) => ShowHidden = _showHiddenItem.Checked;
         _hidePeriodItem.Click += (_, _) => OpenHidePeriod();
@@ -185,6 +192,7 @@ public sealed class HistoryPage : Panel
             _entryMenu.Items.Add(new ToolStripMenuItem(item.Hidden ? RestoreText(item) : "Hide as test", null,
                                                        async (_, _) => await (item.Hidden ? RestoreAsync(row.Key) : HideAsync(row.Key))) { ForeColor = Theme.Text });
             _entryMenu.Show(_journal, at);
+            Menus.SelectFirst(_entryMenu);
         };
         _action.Click += async (_, _) =>
         {
@@ -594,12 +602,13 @@ public sealed class HistoryPage : Panel
 
     private void OpenCalendar()
     {
-        _calendar.Show(_date, Today, HistoryView.Days(State.Items, Zone));
+        _calendar.Show(_date, Today, HistoryView.Days(State.Items, Zone), _dateButton.DeviceDpi);
         if (_calendarDrop.Items[0] is ToolStripControlHost host)
         {
             host.Size = _calendar.Size;
         }
         _calendarDrop.Show(_dateButton, new Point(0, _dateButton.Height + 2));
+        _calendar.Focus(); // the keyboard works in it at once: arrows, Page Up / Down, Home, Enter, Escape
     }
 
     private void FitJournal()

@@ -154,12 +154,16 @@ public sealed class SchedulePage : Panel
 
     public WeekSchedule Schedule => _schedule;
 
-    /// <summary>Switches the schedule Live or Off (saved at once), as the header's switch does.</summary>
+    /// <summary>
+    /// Switches the schedule Live or Off (saved at once), as the header's switch does. Either way a stored pause is
+    /// cleared: Live on means effectively Live, and a pause from before Off never comes back later. A manual mood
+    /// choice is left alone (unlike <see cref="Resume"/>).
+    /// </summary>
     public void SetLive(bool live)
     {
-        if (_schedule.Live != live)
+        if (_schedule.Live != live || _schedule.PausedUntil is not null)
         {
-            Save(_schedule.WithLive(live));
+            Save(_schedule.WithLive(live).WithPause(null));
         }
     }
 

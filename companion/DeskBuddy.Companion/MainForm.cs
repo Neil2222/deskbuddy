@@ -15,6 +15,7 @@ public sealed class MainForm : Form
     private const int MaxLogLines = 3000;
     private const int MaxHistory = 10;
     private const int HistoryRow = 24; // recent messages: row height
+    private const int MinWidth = 800, MinHeight = 560; // the window at 100 % (logical pixels)
 
     private readonly Theme _theme = new();
     private readonly BuddyArt _art = new();
@@ -125,7 +126,7 @@ public sealed class MainForm : Form
         ForeColor = Theme.Text;
         Font = _theme.Text10;
         ClientSize = new Size(990, 650); // seven mood tiles in one row beside the sidebar
-        MinimumSize = new Size(800, 560);
+        MinimumSize = new Size(MinWidth, MinHeight);
 
         _status = new FlatButton(_theme, ButtonLook.Pill) { Dock = DockStyle.Bottom, Height = 34 };
         _ports = new Picker(_theme) { Width = 260, Height = 32, Margin = new Padding(0, 0, 10, 0), AccessibleName = "Port" };
@@ -218,6 +219,7 @@ public sealed class MainForm : Form
             _history.ItemHeight = LogicalToDeviceUnits(HistoryRow);
             ReflowTiles();
             LayoutPdc();
+            FitToScreen();
             _schedule.LoadSchedule();
         };
         Shown += (_, _) => _service.Start();
@@ -999,7 +1001,33 @@ public sealed class MainForm : Form
         {
             _history.ItemHeight = LogicalToDeviceUnits(HistoryRow);
             ReflowTiles();
+            LayoutPdc();
+            FitToScreen();
         });
+    }
+
+    /// <summary>
+    /// Keeps the window on its screen's work area: the minimum size (800 × 560 at 100 %) and the size never larger
+    /// than the screen allows at its scale (a small laptop screen at 150 %), and the title bar within reach.
+    /// </summary>
+    private void FitToScreen()
+    {
+        if (WindowState != FormWindowState.Normal)
+        {
+            return;
+        }
+        var area = Screen.FromControl(this).WorkingArea;
+        var min = new Size(Math.Min(LogicalToDeviceUnits(MinWidth), area.Width), Math.Min(LogicalToDeviceUnits(MinHeight), area.Height));
+        if (MinimumSize != min)
+        {
+            MinimumSize = min;
+        }
+        var size = new Size(Math.Min(Width, area.Width), Math.Min(Height, area.Height));
+        var location = new Point(Math.Clamp(Left, area.Left, area.Right - size.Width), Math.Clamp(Top, area.Top, area.Bottom - size.Height));
+        if (size != Size || location != Location)
+        {
+            Bounds = new Rectangle(location, size);
+        }
     }
 
     protected override void OnFormClosed(FormClosedEventArgs e)
