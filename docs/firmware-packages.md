@@ -92,7 +92,7 @@ A zip with exactly these files, and no folders:
   "minCompanion": "1.1.0",
   "idf": "v5.5.5",
   "images": [
-    { "name": "bootloader", "offset": "0x0", "file": "bootloader.bin", "size": 22272, "sha256": "…" },
+    { "name": "bootloader", "offset": "0x0", "file": "bootloader.bin", "size": 22208, "sha256": "…" },
     { "name": "partition-table", "offset": "0x8000", "file": "partition-table.bin", "size": 3072, "sha256": "…" },
     { "name": "app", "offset": "0x10000", "file": "deskbuddy.bin", "size": 554688, "sha256": "…" }
   ],
