@@ -173,7 +173,24 @@ Looping animations (`components/buddy/src/buddy_mood.c`). They use the same path
 
 Slow swaps stayed at 0 throughout. The one large redraw (284 k px, 30.7 ms to render) came when a message arrived during Sleepy: the sign appearing, Buddy jumping and three Zs vanishing in one frame, plus the previous frame's rectangles, probably overflowed the 16-entry dirty list, which then merges into larger boxes [INFERENCE]. It costs one late frame, not a glitch, and is not chased further. Host test `mood_redraws_match_full_redraw`: 2,338 frames over every mood with rapid switching, taps and a Monster sequence, all equal to a full redraw, largest redraw 107,520 px (17 % of the screen).
 
-### Clock faces: Mechanical Skeleton (2026-10-17; host and simulator only, not yet on the device)
+### Clock faces: Mechanical Skeleton (2026-10-17; failed on the device)
+
+**Device test of `b4ddf91` (2026-10-17): failed the display-stability test; the board is back on `29f5c80`.** The user saw the old left-edge glitch lines again, only on the clock face (the Skeleton showed for most of the test; whether Classic showed them too is not known), and none after restoring `29f5c80`. Start-up also regressed: drawing the faces took **8,395 ms** (35 ms on the PC, about 240 times slower), the task watchdog fired once (`IDLE1` starved by the render task; a warning, no reset), and the screen stayed dark about 9 s longer. What the logs showed (they do not explain the glitch):
+
+| | Measured on the board |
+|---|---|
+| Boot | `clock faces ready in 8395 ms`; `started in 147 ms; free internal 199,631 B, PSRAM 5,575,424 B` (`29f5c80`: 203,151 B / 5,577,520 B); after `app_init`: free internal 101,455 B, PSRAM 4,895,732 B; while dark: 1 resync, fill max 475 µs (`29f5c80`: 0, 544 µs) |
+| Render task stack | 3,004 of 6,144 B never used after start-up (3,140 B used, including the face rendering) |
+| Classic: zoom in / out | 28 / 26 frames, 0 resyncs, fill max 427 / 429 µs; the clock 2 frames/s, 11.4 k px (as before) |
+| Skeleton: zoom in | 26 frames, render max 118 ms (the face's first full frame), 0 resyncs, fill max 428 µs |
+| Skeleton: ticking (60 s) | 1.0 frames/s, render avg 18–33 / max 39.5 ms, redraw avg 79–145 k / max 170 k px, 0 resyncs, fill max 109–235 µs |
+| Skeleton: the hour's whir (time set to 11:59:50 over the serial link) | 14 frames in the 5 s window, render avg 64 / max 101 ms, redraw max 469 k px, 0 resyncs, fill max 180 µs |
+| Live face change (Skeleton ↔ Classic) | `clock face drawn`, 0 resyncs, fill max 426–427 µs |
+
+The measured fills stay well inside the 449 µs budget, so whatever draws the lines is not the fill's duration as measured (from the start of the fill interrupt to its end). New compared with every earlier screen: the Skeleton's sprite pixels are read from PSRAM on every redraw (the full-screen frame image and the wheels, tens of KB per tick); everything else that redraws often keeps its pixels in internal RAM (menu, thought, Buddy's art, palettes). Under investigation before the Skeleton is flashed again.
+
+The rest of this section is from the host and the simulator, before the device test.
+
 A second Clock Mode face (`components/office/src/office_skeleton.c`): procedural pixel art at scale 2, rendered once at start into PSRAM. Each wheel has 4 images (quarter-tooth steps; meshing wheels share the tooth movement, so 4 steps bring every wheel back to the same picture). Moving parts change sprite images only; the background is the clock's near-black with the wheels' shadows, computed per row.
 
 | | Value |
