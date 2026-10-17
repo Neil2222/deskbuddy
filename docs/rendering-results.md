@@ -173,6 +173,34 @@ Looping animations (`components/buddy/src/buddy_mood.c`). They use the same path
 
 Slow swaps stayed at 0 throughout. The one large redraw (284 k px, 30.7 ms to render) came when a message arrived during Sleepy: the sign appearing, Buddy jumping and three Zs vanishing in one frame, plus the previous frame's rectangles, probably overflowed the 16-entry dirty list, which then merges into larger boxes [INFERENCE]. It costs one late frame, not a glitch, and is not chased further. Host test `mood_redraws_match_full_redraw`: 2,338 frames over every mood with rapid switching, taps and a Monster sequence, all equal to a full redraw, largest redraw 107,520 px (17 % of the screen).
 
+### Tic-Tac-Toe (2026-10-17; passed two board tests)
+
+**Board test of `5b453b4` (2026-10-17, 15:58–16:17): passed.** Flashed over COM6 (`Hash of data verified`; `App version: 5b453b4`) after a fresh full-flash backup of the board running `66aa983` (`Documents\DeskBuddy-backups\fw-66aa983-before-tictactoe-20261017-155256`, `verify_flash` digest matched, SHA-256 `627aef5e…b0c11`). The user played on the touchscreen and saw no glitches, tearing, flicker or stale pixels: 5 complete rounds (2 won by the user, 1 by Buddy, 2 draws) with "HEY, MY TURN!" and taps on taken cells ignored, his thinking pause, win / loss / draw reactions and the faces he keeps afterwards, rematches with the starter alternating; Back restoring his mood (happy); Clock from the game; holding the clock for CLOCK FACES; the 2-minute timeout (*BORED...*, closed exactly 120.0 s after opening; `act`, `poke`, `monster` meanwhile `err busy mode=game`, a `mood.set` during the game shown afterwards); KITT and the menu pages as before. No watchdog warning, crash or error in the log.
+
+**Board test of `02c11c8` (2026-10-17, 16:51–16:56): passed.** The same, plus Clock Mode pausing the round: Clock while he was thinking (twice: the same board after the zoom-out, then his O), during his win celebration (twice) and during his loss reaction (the rest of the reaction after the return, then his post-game face and REMATCH); the round resumed 0.2–0.6 s after the zoom-out had ended; `mode` went normal → office → normal → game each time (never busy as a game while paused); Back and reopening started fresh rounds with the score kept (four times); KITT and the clock shortcut from Home as before. The user saw the zooms as smooth, with no glitches, tearing or stale pixels. **The board runs `02c11c8`.**
+
+| | `5b453b4` | `02c11c8` |
+|---|---|---|
+| Boot | faces ready in 68.4 ms; after `app_init` free internal 77,099 B (KITT `72a02d9`: 77,259 B), PSRAM 4,921,484 B; render task stack 2,892 of 6,144 B never used (2,876 B later in the test) | faces ready in 68.5 ms; free internal 77,091 B, PSRAM 4,921,308 B; stack 2,884 B never used (unchanged through the test) |
+| Performance windows | 195 (about 20 min), 0 resyncs, 0 missed strip copies | 52 plus 10 zooms each way, 0 resyncs, 0 missed strip copies |
+| Idle | 3.4–5.0 frames/s, render max 8.7 ms, fill max 132 µs | as before |
+| Playing (moves, reactions, rematches) | up to 12 frames/s, render max 36.6 ms, redraw max 266 k px (stage and panel), fill max 280 µs; STRIPS margin min 169 µs | render max 36.4 ms, fill max 273 µs; STRIPS margin min 176 µs |
+| Idle on your turn | 3.7–4.4 frames/s, fill max 235 µs | as before |
+| Clock zoom in / out (from the game and from Home) | 25–27 / 23–25 frames, render max 61 ms, 0 resyncs, fill max 429–430 µs, STRIPS margin min 19–20 µs | 25–29 / 24–29 frames, render max 61.6 ms, 0 resyncs, fill max 425–430 µs, STRIPS margin min 19–24 µs (as for every earlier zoom) |
+| Touch | 15–48 ms touch → scanout for taps that change the screen | as before |
+| While dark at boot | 2 missed strip copies, 0 resyncs (backlight still off, as with earlier builds) | 3 missed, 0 resyncs |
+
+Two readings in the `5b453b4` session were 224–278 ms "touch → scanout": taps on taken cells and on the rematch screen that change nothing are timed until the next unrelated frame (as any tap that changes nothing in the panel); not a delay. Free internal RAM read 76,739 B once during play (360 B below the boot reading; the heap is only logged when the stack goes deeper, so there is no later reading); the game allocates nothing.
+
+**Observation (not a confirmed firmware defect): a board restart around the serial port.** After the `02c11c8` test, between closing the test's serial connection (pyserial on COM6) and the published Companion opening the port, the board restarted once: the Companion recorded a new boot (`514c0c6b…`, `fw=02c11c8`). Opening COM6 with pyserial's defaults also reset the board at the start of both sessions (DTR/RTS toggle the CH343's auto-reset), and closing it most likely did the same. The test session's two KITT interactions were still only in the board's RAM and so never reached the Companion's History. No crash, panic or watchdog message preceded it in the log. If it is ever seen without a serial tool involved, it needs a closer look.
+
+| | Measured off the board |
+|---|---|
+| Every frame vs a full redraw | equal over three rounds into and out of the game (host test `game_redraws_match_full_redraw`; the simulator with `--verify`: 273 frames through pause, resume and expiry, 0 mismatched) |
+| A move | redraws its row and the footer, plus the previous move's row in the older buffer: at most 92,928 px of the panel's 211,200 |
+| On your turn, untouched | about 4 frames/s (his breathing, blinks, glances, the header's blink) |
+| Firmware | image 535,648 B (KITT `72a02d9`: 526,027 B); static DIRAM 150,763 B at `5b453b4`; no new sprites (the board and strip use the menu's tile sprites and tile memory), no PSRAM |
+
 ### KITT (2026-10-17; passed the first board test)
 
 **Board test of `72a02d9` (2026-10-17, 13:00–13:16): passed.** Flashed over COM6 (`Hash of data verified`, `verify_flash` digests matched; `App version: 72a02d9`) after a fresh full-flash backup of the stable board (`Documents\DeskBuddy-backups\fw-fa4455d-before-kitt-20261017-125606`, verified against the board). The user watched every step: the turn in started on the touchscreen looked clean; the sweep is **smooth**, its brightness **right as it is**, and there were **no left-edge lines, tearing, flicker or stale pixels**; a tap on him turned him back cleanly into the mood he had (relaxed); a mood tile during KITT (happy) turned him back into that mood; CLOCK during KITT zoomed in and out as before, and he came back as himself. No watchdog warning, crash or allocation failure. `72a02d9` stays on the board for evaluation.
