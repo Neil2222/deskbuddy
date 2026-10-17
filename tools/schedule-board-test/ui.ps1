@@ -1,5 +1,5 @@
 # The Companion through UI Automation, for the P6 board test (docs/schedule-board-test.md).
-param([string] $Invoke, [int] $Nth = 1, [string] $Texts, [switch] $Start, [switch] $Close, [switch] $Backup)
+param([string] $Invoke, [int] $Nth = 1, [string] $Texts, [switch] $Start, [switch] $Close, [switch] $Backup, [switch] $Hwnd)
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
 if ($Backup) {
     $src = Join-Path $env:APPDATA 'DeskBuddy'
@@ -26,9 +26,12 @@ Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
 $p = Get-Process DeskBuddy.Companion -ErrorAction SilentlyContinue | Select-Object -First 1
 if (-not $p) { 'no window'; exit 1 }
 $byPid = New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::ProcessIdProperty, $p.Id)
+# The main window: the process also has a hidden window titled "DeskBuddy"; take the visible one, largest first.
 $root = [Windows.Automation.AutomationElement]::RootElement.FindAll([Windows.Automation.TreeScope]::Children, $byPid) |
-    Where-Object { $_.Current.Name -eq 'DeskBuddy' } | Select-Object -First 1
+    Where-Object { $_.Current.Name -eq 'DeskBuddy' -and -not $_.Current.IsOffscreen } |
+    Sort-Object { $_.Current.BoundingRectangle.Width * $_.Current.BoundingRectangle.Height } -Descending | Select-Object -First 1
 if (-not $root) { 'no main window'; exit 1 }
+if ($Hwnd) { $root.Current.NativeWindowHandle; exit 0 }
 $all = $root.FindAll([Windows.Automation.TreeScope]::Descendants, [Windows.Automation.Condition]::TrueCondition)
 if ($Invoke) {
     $seen = 0

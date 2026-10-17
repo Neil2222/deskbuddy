@@ -8,7 +8,13 @@ def ps(script, *args):
     r = subprocess.run(['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', os.path.join(HERE, script), *args],
                        capture_output=True, text=True, encoding='utf-8', errors='replace')
     return (r.stdout + r.stderr).strip()
-def ui(*a): return ps('ui.ps1', *a)
+def ui(*a):
+    out = ps('ui.ps1', *a)
+    if out.startswith(('missing', 'no main window', 'no window')):
+        # Never carry on blindly (later steps send keys): stop, so the user can restore (docs/schedule-board-test.md, After).
+        log(f'ABORTED: {out}. Nothing more is done; restore schedule.json from the backup.')
+        sys.exit(1)
+    return out
 def shot(name): return ps('shot.ps1', os.path.join(OUT, f'board-{name}.png'))
 def log(msg): print(f'{datetime.datetime.now():%H:%M:%S} {msg}', flush=True)
 
