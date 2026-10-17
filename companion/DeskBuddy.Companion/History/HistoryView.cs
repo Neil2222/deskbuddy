@@ -45,10 +45,34 @@ public sealed record HistoryDay(
 /// <summary>Today's plan as the schedule holds it now: shown only for today, labelled as a plan, never as history.</summary>
 public sealed record PlanItem(string Name, DateTime StartLocal, DateTime EndLocal, string? Mood, string? Plans, string? Action);
 
-/// <summary>One source's history as the History page shows it, made in one piece on the recorder's worker.</summary>
-public sealed record HistoryState(HistorySnapshot Snapshot, IReadOnlyList<HistoryItem> Items, bool Loaded)
+/// <summary>
+/// One source's history as the History page shows it, made in one piece on the recorder's worker: the snapshot, the
+/// entries with the annotations applied, and those annotations (to tell what hides an entry and to restore it).
+/// </summary>
+public sealed record HistoryState(HistorySnapshot Snapshot, IReadOnlyList<HistoryItem> Items, bool Loaded,
+                                  HistoryAnnotations? Annotations = null)
 {
     public static readonly HistoryState Empty = new(HistorySnapshot.Empty, [], false);
+
+    public HistoryAnnotations Hides => Annotations ?? HistoryAnnotations.None;
+}
+
+/// <summary>
+/// The History page's way to one source's history: what it shows, and the annotations it may write. Writes complete
+/// only once the line is on disk; a failed write throws, and <see cref="State"/> shows what the file really holds.
+/// </summary>
+public interface IHistoryAccess
+{
+    HistoryState State { get; }
+
+    /// <summary>Hides one entry (by its id) as test data.</summary>
+    Task<Annotation> HideItem(string id, string? note);
+
+    /// <summary>Hides everything in [from, to) as test data (uptime-only entries by when they were received).</summary>
+    Task<Annotation> HidePeriod(DateTimeOffset fromUtc, DateTimeOffset toUtc, string? note);
+
+    /// <summary>Withdraws hides by their annotation ids, one after the other (stops at the first that fails).</summary>
+    Task Unhide(IReadOnlyList<string> hideIds);
 }
 
 /// <summary>
@@ -160,6 +184,29 @@ public static class HistoryView
     /// </summary>
     public static IReadOnlyList<HistoryItem> Affected(IReadOnlyList<HistoryItem> items, DateTimeOffset fromUtc, DateTimeOffset toUtc) =>
         items.Where(i => (i.AtUtc ?? i.ReceivedUtc) is { } t && fromUtc <= t && t < toUtc && !i.Hidden)
+             .OrderBy(i => i.AtUtc ?? i.ReceivedUtc).ToList();
+
+    /// <summary>
+    /// The hides that keep this entry hidden: its own (by its id, its interaction's or its occurrence's) and every
+    /// period covering its time. Restoring the entry means withdrawing all of them.
+    /// </summary>
+    public static IReadOnlyList<Annotation> HiddenBy(HistoryItem item, HistoryAnnotations annotations)
+    {
+        var hides = new List<Annotation>();
+        foreach (var id in new[] { item.Id, item.Interaction?.Id, item.Occurrence?.Id }.OfType<string>().Distinct())
+        {
+            hides.AddRange(annotations.HidesOf(id));
+        }
+        if ((item.AtUtc ?? item.ReceivedUtc) is { } t)
+        {
+            hides.AddRange(annotations.Periods.Where(p => p.FromUtc <= t && t < p.ToUtc));
+        }
+        return hides.Distinct().ToList();
+    }
+
+    /// <summary>Every entry a period hide covers, in time order (what restoring it may bring back).</summary>
+    public static IReadOnlyList<HistoryItem> Covered(IReadOnlyList<HistoryItem> items, Annotation period) =>
+        items.Where(i => (i.AtUtc ?? i.ReceivedUtc) is { } t && period.FromUtc <= t && t < period.ToUtc)
              .OrderBy(i => i.AtUtc ?? i.ReceivedUtc).ToList();
 
     /// <summary>The local dates that have visible entries (for the date picker).</summary>

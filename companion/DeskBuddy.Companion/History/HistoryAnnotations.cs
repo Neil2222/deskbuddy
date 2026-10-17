@@ -23,12 +23,13 @@ public sealed class HistoryAnnotations
 {
     public static readonly HistoryAnnotations None = new([]);
 
-    private readonly HashSet<string> _items;
+    private readonly Dictionary<string, List<Annotation>> _items;
 
     private HistoryAnnotations(IReadOnlyList<Annotation> hides)
     {
         Hides = hides;
-        _items = hides.Where(h => h.Item is not null).Select(h => h.Item!).ToHashSet(StringComparer.Ordinal);
+        _items = hides.Where(h => h.Item is not null).GroupBy(h => h.Item!, StringComparer.Ordinal)
+                      .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.Ordinal);
         Periods = hides.Where(h => h.IsPeriod).ToList();
     }
 
@@ -37,7 +38,10 @@ public sealed class HistoryAnnotations
 
     public IReadOnlyList<Annotation> Periods { get; }
 
-    public bool HidesItem(string id) => _items.Contains(id);
+    public bool HidesItem(string id) => _items.ContainsKey(id);
+
+    /// <summary>The hides in force that name this id (usually one).</summary>
+    public IReadOnlyList<Annotation> HidesOf(string id) => _items.TryGetValue(id, out var list) ? list : [];
 
     /// <summary>The period hide that covers <paramref name="atUtc"/>, if any (start included, end excluded).</summary>
     public Annotation? PeriodCovering(DateTimeOffset atUtc) => Periods.FirstOrDefault(p => p.FromUtc <= atUtc && atUtc < p.ToUtc);
@@ -116,9 +120,25 @@ public sealed class AnnotationStore
     public Annotation Unhide(string hideId, DateTimeOffset at) =>
         Append(new Annotation(Guid.CreateVersion7(at).ToString(), "unhide", null, null, null, hideId, "undo", null, at));
 
+    // Written and flushed first; only then part of the hides in force. When the write fails, what the file really holds
+    // is read back (a line may or may not have reached it), so nothing is claimed that is not on disk.
     private Annotation Append(Annotation a)
     {
-        _file.Append([ToJson(a)]);
+        try
+        {
+            _file.Append([ToJson(a)]);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            try
+            {
+                Load();
+            }
+            catch (Exception again) when (again is IOException or UnauthorizedAccessException)
+            {
+            }
+            throw;
+        }
         _all.Add(a);
         Current = HistoryAnnotations.Fold(_all);
         return a;

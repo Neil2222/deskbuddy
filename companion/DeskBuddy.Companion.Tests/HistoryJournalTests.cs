@@ -166,7 +166,7 @@ public sealed class HistoryJournalTests : IDisposable
         _l.RequestAnswered(5, "no_reply", At(9, 20));
         var tones = Day().Timeline.ToDictionary(i => i.Interaction!.Iid, HistoryJournal.Tone);
         Assert.Equal(JournalTone.Positive, tones[1]);
-        Assert.Equal(JournalTone.Negative, tones[2]);
+        Assert.Equal(JournalTone.Answer, tones[2]);
         Assert.Equal(JournalTone.Warning, tones[3]);
         Assert.Equal(JournalTone.Muted, tones[4]);
         Assert.Equal(JournalTone.Muted, tones[5]);

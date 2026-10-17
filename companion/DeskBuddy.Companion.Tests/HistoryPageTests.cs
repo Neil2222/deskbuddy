@@ -1,4 +1,3 @@
-using System.Runtime.ExceptionServices;
 using System.Text;
 using DeskBuddy.Companion.History;
 using DeskBuddy.Companion.Protocol;
@@ -24,12 +23,6 @@ public sealed class HistoryPageTests : IDisposable
         {
             Directory.Delete(_dir, recursive: true);
         }
-    }
-
-    private sealed class Clock(DateTimeOffset now) : TimeProvider
-    {
-        public override DateTimeOffset GetUtcNow() => now.ToUniversalTime();
-        public override TimeZoneInfo LocalTimeZone => Amsterdam;
     }
 
     private static DateTimeOffset At(int h, int m) => new(2026, 10, 16, h - 2, m, 0, TimeSpan.Zero); // CEST
@@ -58,43 +51,10 @@ public sealed class HistoryPageTests : IDisposable
     private static WeekSchedule Schedule() => WeekSchedule.Empty.WithDay(DayOfWeek.Friday,
         [new ScheduleBlock { Name = "Afternoon work", Start = 12 * 60, End = 17 * 60, Mood = "working" }]);
 
-    // Runs the body on an STA thread with a shown window holding the page (WinForms needs both).
-    private static void InWindow(Func<HistorySource, HistoryState> state, Action<HistoryPage, Action> body)
-    {
-        ExceptionDispatchInfo? failure = null;
-        var thread = new Thread(() =>
-        {
-            try
-            {
-                using var theme = new Theme();
-                using var art = new BuddyArt();
-                using var tips = new ToolTip();
-                using var form = new Form { ClientSize = new Size(1000, 700), StartPosition = FormStartPosition.Manual, Location = new Point(-3000, 0), ShowInTaskbar = false };
-                var page = new HistoryPage(theme, art, tips, state, () => true, Schedule, new Clock(At(16, 40))) { Dock = DockStyle.Fill };
-                form.Controls.Add(page);
-                form.Show();
-                Application.DoEvents();
-                body(page, () =>
-                {
-                    // Lets the page's coalescing timer run (it shows a burst of events once).
-                    var until = DateTime.UtcNow.AddSeconds(2);
-                    while (DateTime.UtcNow < until)
-                    {
-                        Application.DoEvents();
-                        Thread.Sleep(10);
-                    }
-                });
-            }
-            catch (Exception e)
-            {
-                failure = ExceptionDispatchInfo.Capture(e);
-            }
-        });
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.Start();
-        thread.Join();
-        failure?.Throw();
-    }
+    // The page over fixed states (what the recorder would publish); body gets the page and a "let the timers run".
+    private static void InWindow(Func<HistorySource, HistoryState> state, Action<HistoryPage, Action> body) =>
+        TestWindow.Run(s => new FixedHistory(() => state(s)), new StillClock(At(16, 40)), Schedule(),
+                       (page, pump) => body(page, () => pump.For(TimeSpan.FromSeconds(2))));
 
     private static KeepScrollPanel Scroller(Control root) =>
         root as KeepScrollPanel ?? root.Controls.Cast<Control>().Select(c => Find(c)).FirstOrDefault(c => c is not null) ?? throw new InvalidOperationException();

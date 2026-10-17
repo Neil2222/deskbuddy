@@ -9,7 +9,7 @@ namespace DeskBuddy.Companion.History;
 /// (log lines on disk, then checkpoints) and, when it needs one, <see cref="FetchNeeded"/> asks for a
 /// <c>log.since</c>. Events, logs and changes are raised on the worker.
 /// </summary>
-public sealed class HistoryRecorder : IDisposable
+public sealed class HistoryRecorder : IHistoryAccess, IDisposable
 {
     private readonly HistoryLedger _ledger;
     private readonly AnnotationStore _annotations;
@@ -102,6 +102,55 @@ public sealed class HistoryRecorder : IDisposable
     public void ScheduleStateChanged(bool live, DateTimeOffset? pausedUntil) => Post(now => _ledger.ScheduleStateChanged(live, pausedUntil, now));
     public void RequestAnswered(uint iid, string result) => Post(now => _ledger.RequestAnswered(iid, result, now));
 
+    public Task<Annotation> HideItem(string id, string? note) => Annotate(now => _annotations.HideItem(id, "test", note, now));
+
+    public Task<Annotation> HidePeriod(DateTimeOffset fromUtc, DateTimeOffset toUtc, string? note) =>
+        Annotate(now => _annotations.HidePeriod(fromUtc, toUtc, "test", note, now));
+
+    public Task Unhide(IReadOnlyList<string> hideIds) => Annotate(now =>
+    {
+        foreach (var id in hideIds)
+        {
+            _annotations.Unhide(id, now);
+        }
+        return true;
+    });
+
+    // An annotation written on the worker (the store is not shared). The state is published first, then the task
+    // completes: once the line is on disk, or failed, with the state showing what the file holds (see AnnotationStore).
+    private Task<T> Annotate<T>(Func<DateTimeOffset, T> write)
+    {
+        var done = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var queued = _queue.Writer.TryWrite((() =>
+        {
+            if (!_usable)
+            {
+                done.TrySetException(new InvalidOperationException("the history could not be read, so nothing can be hidden"));
+                return;
+            }
+            T result;
+            try
+            {
+                result = write(_time.GetUtcNow());
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException)
+            {
+                Publish();
+                Changed?.Invoke();
+                done.TrySetException(e);
+                return;
+            }
+            Publish();
+            Changed?.Invoke();
+            done.TrySetResult(result);
+        }, null));
+        if (!queued)
+        {
+            done.TrySetException(new ObjectDisposedException(nameof(HistoryRecorder)));
+        }
+        return done.Task;
+    }
+
     /// <summary>Re-checks whether a postponed <c>log.since</c> is due (call every second or so).</summary>
     public void Tick() => Post(() => { });
 
@@ -169,7 +218,7 @@ public sealed class HistoryRecorder : IDisposable
     }
 
     private void Publish() => Volatile.Write(ref _state, new HistoryState(
-        _ledger.Snapshot, HistoryView.Items(_ledger.Snapshot, _ledger.Entries, _annotations.Current), Loaded: true));
+        _ledger.Snapshot, HistoryView.Items(_ledger.Snapshot, _ledger.Entries, _annotations.Current), Loaded: true, _annotations.Current));
 
     public void Dispose()
     {

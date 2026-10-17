@@ -9,7 +9,7 @@ internal static class Tones
     public static Color Of(JournalTone tone) => tone switch
     {
         JournalTone.Positive => Theme.Green,
-        JournalTone.Negative => Theme.Red,
+        JournalTone.Answer => Theme.Body, // a no: a valid answer in Buddy's body blue, never the error red
         JournalTone.Warning => Theme.Amber,
         JournalTone.Neutral => Theme.Cyan,
         _ => Theme.Muted,
@@ -75,6 +75,8 @@ public sealed class JournalView : Control
     public event Action<JournalRow?>? SelectionChanged;
     /// <summary>A group of shows or the technical list was clicked: open or close it (by its key).</summary>
     public event Action<string>? Toggled;
+    /// <summary>The context menu was asked for on an entry (right click, the menu key or Shift+F10), at that point.</summary>
+    public event Action<JournalRow, Point>? ContextRequested;
 
     public int PreferredHeight => _tops[^1] + LogicalToDeviceUnits(Pad);
 
@@ -163,7 +165,12 @@ public sealed class JournalView : Control
     {
         Focus();
         var i = RowAt(e.Y);
-        if (e.Button == MouseButtons.Left && i >= 0)
+        if (e.Button == MouseButtons.Right && i >= 0 && _rows[i].Kind == JournalRowKind.Entry)
+        {
+            Select(_rows[i].Key);
+            ContextRequested?.Invoke(_rows[i], e.Location);
+        }
+        else if (e.Button == MouseButtons.Left && i >= 0)
         {
             var row = _rows[i];
             if (row.Selectable)
@@ -182,7 +189,13 @@ public sealed class JournalView : Control
 
     protected override void OnKeyDown(KeyEventArgs e)
     {
-        if (e.KeyCode is Keys.Up or Keys.Down)
+        if ((e.KeyCode == Keys.Apps || e.KeyCode == Keys.F10 && e.Shift) && SelectedRow is { Kind: JournalRowKind.Entry } current)
+        {
+            var r = RowRect(_rows.ToList().IndexOf(current));
+            ContextRequested?.Invoke(current, new Point(r.X + LogicalToDeviceUnits(TimeWidth + Rail + 40), r.Y + r.Height / 2));
+            e.Handled = true;
+        }
+        else if (e.KeyCode is Keys.Up or Keys.Down)
         {
             var selectable = Enumerable.Range(0, _rows.Count).Where(i => _rows[i].Selectable).ToList();
             if (selectable.Count > 0)
@@ -415,12 +428,13 @@ public sealed class JournalView : Control
 
         var textX = iconBox.Right + X(12);
         var pillRight = card.Right - X(12);
-        var hasPill = item.Kind is HistoryItemKind.Question or HistoryItemKind.Show;
+        var hasPill = item.Hidden || item.Kind is HistoryItemKind.Question or HistoryItemKind.Show;
         var lineCenter = card.Y + X(nested ? 20 : 22);
-        var pill = hasPill
-            ? Tones.Pill(g, _theme.Small, item.Status, muted ? Theme.Muted : tone, pillRight, lineCenter, X(6),
-                         dashed: item.Interaction?.Outcome is InteractionOutcome.Unconfirmed or InteractionOutcome.Unknown or InteractionOutcome.NotStarted)
-            : new Rectangle(pillRight, 0, 0, 0);
+        // Hidden entries (shown with "Show hidden") say so instead of their outcome; the outcome stays in the line below.
+        var pill = !hasPill ? new Rectangle(pillRight, 0, 0, 0)
+            : item.Hidden ? Tones.Pill(g, _theme.Small, "Hidden · test", Theme.Amber, pillRight, lineCenter, X(6), dashed: true)
+            : Tones.Pill(g, _theme.Small, item.Status, muted ? Theme.Muted : tone, pillRight, lineCenter, X(6),
+                         dashed: item.Interaction?.Outcome is InteractionOutcome.Unconfirmed or InteractionOutcome.Unknown or InteractionOutcome.NotStarted);
         var flags = TextFormatFlags.EndEllipsis | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix | TextFormatFlags.VerticalCenter;
         if (nested)
         {

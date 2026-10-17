@@ -499,8 +499,8 @@ public sealed partial class CompanionService : IDisposable
         ScheduleBooted();
     }
 
-    /// <summary>A source's history as the History page shows it; reading it starts on first use.</summary>
-    public HistoryState HistoryOf(HistorySource source) => HistoryFor(source == HistorySource.Simulator).State;
+    /// <summary>A source's history for the History page (shown and annotated); reading it starts on first use.</summary>
+    public IHistoryAccess HistoryOf(HistorySource source) => HistoryFor(source == HistorySource.Simulator);
 
     /// <summary>The simulator has a history of its own (it has been connected, now or in an earlier run).</summary>
     public bool HasSimulatorHistory =>

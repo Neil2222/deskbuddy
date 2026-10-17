@@ -24,8 +24,11 @@ public enum JournalRowKind
     Technical,
 }
 
-/// <summary>How an entry reads at a glance (the page maps it to a colour).</summary>
-public enum JournalTone { Positive, Negative, Warning, Neutral, Muted }
+/// <summary>
+/// How an entry reads at a glance (the page maps it to a colour). <see cref="Answer"/>: a valid answer other than yes
+/// (a no): neutral, never an error colour.
+/// </summary>
+public enum JournalTone { Positive, Answer, Warning, Neutral, Muted }
 
 /// <summary>
 /// One row of the journal. <see cref="Key"/> is stable across refreshes (an entry's id, a group's first show), so the
@@ -190,7 +193,7 @@ public static class HistoryJournal
         _ => item.Interaction?.Outcome switch
         {
             InteractionOutcome.Yes => JournalTone.Positive,
-            InteractionOutcome.No => JournalTone.Negative,
+            InteractionOutcome.No => JournalTone.Answer, // a valid answer, not an error
             InteractionOutcome.Timeout or InteractionOutcome.Unknown => JournalTone.Warning,
             InteractionOutcome.Done => JournalTone.Neutral,
             _ => JournalTone.Muted,
@@ -247,13 +250,14 @@ public static class HistoryJournal
         : date.ToString(date.Year == today.Year ? "ddd d MMM" : "ddd d MMM yyyy", En);
 
     /// <summary>The selected row in words, for the inspector.</summary>
-    public static InspectorInfo Describe(JournalRow row, TimeZoneInfo zone) => row.Kind switch
+    public static InspectorInfo Describe(JournalRow row, TimeZoneInfo zone, HistoryAnnotations? annotations = null) => row.Kind switch
     {
         JournalRowKind.Plan => DescribePlan(row.Plan!),
-        _ => Describe(row.Item!, zone),
+        _ => Describe(row.Item!, zone, annotations),
     };
 
-    public static InspectorInfo Describe(HistoryItem item, TimeZoneInfo zone)
+    /// <summary>An entry in words; with the annotations, a hidden entry says what hides it (an item hide or a period).</summary>
+    public static InspectorInfo Describe(HistoryItem item, TimeZoneInfo zone, HistoryAnnotations? annotations = null)
     {
         var fields = new List<(string, string)>();
         var notes = new List<string>();
@@ -357,7 +361,21 @@ public static class HistoryJournal
         }
         if (item.Hidden)
         {
-            notes.Add("Hidden from the History: not counted in the day's numbers.");
+            var by = annotations is null ? [] : HistoryView.HiddenBy(item, annotations);
+            if (by.Count == 0)
+            {
+                notes.Add("Hidden as test data: not counted in the day's numbers.");
+            }
+            foreach (var a in by)
+            {
+                var what = a.IsPeriod ? $"with the period {Period(a, zone)}" : $"on {Day(a.AtUtc)}";
+                notes.Add($"Hidden as test data {what}{(a.Note is { Length: > 0 } n ? $" ({n})" : "")}: not counted in the day's numbers. " +
+                          "Nothing was deleted; restoring brings it back.");
+            }
+        }
+        else if (item.LinkedHidden)
+        {
+            notes.Add("Its smoking break is hidden as test data: not counted.");
         }
         tech.Add(("Device", item.Dev));
         if (item.Boot is { } boot)
@@ -373,6 +391,103 @@ public static class HistoryJournal
             tech.Add(("Received", HistoryCodec.Iso(r)));
         }
         return new InspectorInfo(item.Title, kind, item.Status, Tone(item), Icon(item), fields, notes, tech);
+    }
+
+    /// <summary>
+    /// A period on one local day, from <paramref name="fromMinute"/> to <paramref name="toMinute"/> (24:00 = the end of
+    /// the day), in UTC; or why it cannot be hidden: it must end after it starts, must have passed (no future entries
+    /// are hidden in advance), and its times must exist (not in the hour skipped by the spring clock change).
+    /// </summary>
+    public static (DateTimeOffset FromUtc, DateTimeOffset ToUtc, string? Error) LocalPeriod(
+        DateOnly date, int fromMinute, int toMinute, TimeZoneInfo zone, DateTimeOffset nowUtc)
+    {
+        if (toMinute <= fromMinute)
+        {
+            return (default, default, "The end must be after the start.");
+        }
+        var start = date.ToDateTime(TimeOnly.MinValue);
+        DateTime from = start.AddMinutes(fromMinute), to = start.AddMinutes(toMinute);
+        if (zone.IsInvalidTime(from) || zone.IsInvalidTime(to))
+        {
+            return (default, default, "That time does not exist on this day (the clocks went forward).");
+        }
+        var fromUtc = new DateTimeOffset(TimeZoneInfo.ConvertTimeToUtc(from, zone));
+        var toUtc = new DateTimeOffset(TimeZoneInfo.ConvertTimeToUtc(to, zone));
+        if (toUtc > nowUtc)
+        {
+            return (fromUtc, toUtc, $"The period must have passed: it can end at {Local(nowUtc, zone).ToString("HH:mm", En)} at the latest.");
+        }
+        return (fromUtc, toUtc, null);
+    }
+
+    /// <summary>A period hide's span in local time: "Sat 17 Oct 01:52–02:38" (the end's date too when it differs).</summary>
+    public static string Period(Annotation period, TimeZoneInfo zone)
+    {
+        var from = Local(period.FromUtc!.Value, zone);
+        var to = Local(period.ToUtc!.Value, zone);
+        return $"{from.ToString("ddd d MMM HH:mm", En)}–{to.ToString(to.Date == from.Date ? "HH:mm" : to.TimeOfDay == TimeSpan.Zero && to.Date == from.Date.AddDays(1) ? "24:00" : "ddd d MMM HH:mm", En)}";
+    }
+
+    /// <summary>
+    /// What a set of entries is, in one sentence, for the period preview and the restore list: "5 entries: 2 questions
+    /// (1 with its smoking break), 2 activities, 1 skipped action · 1 with an unknown time".
+    /// </summary>
+    public static string Summary(IReadOnlyList<HistoryItem> items)
+    {
+        if (items.Count == 0)
+        {
+            return "No entries";
+        }
+        string N(int n, string one, string many) => $"{n} {(n == 1 ? one : many)}";
+        var parts = new List<string>();
+        var questions = items.Where(i => i.Kind == HistoryItemKind.Question).ToList();
+        if (questions.Count > 0)
+        {
+            var linked = questions.Count(q => q.Linked is not null);
+            parts.Add(N(questions.Count, "question", "questions") + (linked > 0 ? $" ({linked} with {(linked == 1 ? "its" : "their")} smoking break)" : ""));
+        }
+        void Add(HistoryItemKind kind, string one, string many)
+        {
+            var n = items.Count(i => i.Kind == kind);
+            if (n > 0)
+            {
+                parts.Add(N(n, one, many));
+            }
+        }
+        Add(HistoryItemKind.Activity, "activity", "activities");
+        Add(HistoryItemKind.Show, "show", "shows");
+        Add(HistoryItemKind.Skipped, "skipped action", "skipped actions");
+        Add(HistoryItemKind.Notice, "loss notice", "loss notices");
+        var unknown = items.Count(i => i.AtUtc is null);
+        return $"{N(items.Count, "entry", "entries")}: {string.Join(", ", parts)}" + (unknown > 0 ? $" · {unknown} with an unknown time" : "");
+    }
+
+    /// <summary>
+    /// One entry of a preview: its time (or "?"), what it is, and a detail line naming what goes with it: the linked
+    /// smoking break, or for an uptime-only entry that its time is unknown and when it arrived.
+    /// </summary>
+    public static (string Time, string Title, string Detail) PreviewLine(HistoryItem item, TimeZoneInfo zone)
+    {
+        var detail = new List<string> { item.Kind switch
+        {
+            HistoryItemKind.Activity => "MY DAY",
+            HistoryItemKind.Notice => "Loss notice",
+            HistoryItemKind.Skipped => item.Status,
+            HistoryItemKind.Show => $"Buddy's show · {item.Status}",
+            _ => $"Question · {item.Status}",
+        } };
+        if (item.Linked is not null && !item.LinkedHidden)
+        {
+            detail.Add("with its smoking break (linked)");
+        }
+        if (item.AtUtc is null)
+        {
+            detail.Add(item.ReceivedUtc is { } r
+                ? $"time unknown, arrived {Local(r, zone).ToString("ddd HH:mm", En)}"
+                : "time unknown");
+        }
+        var date = item.AtUtc is { } t ? Local(t, zone).ToString("HH:mm", En) : "?";
+        return (date, item.Title, string.Join(" · ", detail));
     }
 
     private static InspectorInfo DescribePlan(PlanItem p)
@@ -433,7 +548,8 @@ public static class HistoryJournal
     }
 
     private static string ShowsText(IReadOnlyList<HistoryItem> run) =>
-        run.Count == 1 ? $"Buddy played {run[0].Title}" : $"Buddy played {run.Count} shows";
+        (run.Count == 1 ? $"Buddy played {run[0].Title}" : $"Buddy played {run.Count} shows") +
+        (run.All(s => s.Hidden) ? " · hidden as test" : run.Any(s => s.Hidden) ? " · some hidden as test" : "");
 
     private static DateTime Local(DateTimeOffset utc, TimeZoneInfo zone) => TimeZoneInfo.ConvertTime(utc, zone).DateTime;
 
