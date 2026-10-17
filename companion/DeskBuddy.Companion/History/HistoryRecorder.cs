@@ -12,6 +12,8 @@ namespace DeskBuddy.Companion.History;
 public sealed class HistoryRecorder : IDisposable
 {
     private readonly HistoryLedger _ledger;
+    private readonly AnnotationStore _annotations;
+    private HistoryState _state = HistoryState.Empty;
     private readonly Channel<(Action? Run, TaskCompletionSource? Done)> _queue =
         Channel.CreateUnbounded<(Action?, TaskCompletionSource?)>(new UnboundedChannelOptions { SingleReader = true });
     private readonly Task _worker;
@@ -23,7 +25,9 @@ public sealed class HistoryRecorder : IDisposable
     {
         _time = time ?? TimeProvider.System;
         Source = source;
-        _ledger = new HistoryLedger(directory, source, Installation.Id(directory));
+        var installation = Installation.Id(directory);
+        _ledger = new HistoryLedger(directory, source, installation);
+        _annotations = new AnnotationStore(directory, source, installation);
         _ledger.Log += text => Log?.Invoke(text);
         _lastIid = Random.Shared.Next(1, 1 << 30); // somewhere new each run, in case the journal cannot be read
         _worker = Task.Run(RunAsync);
@@ -32,12 +36,15 @@ public sealed class HistoryRecorder : IDisposable
             try
             {
                 _ledger.Load();
+                _annotations.Load();
                 _usable = true;
                 if (_ledger.MaxRequestIid is > 0 and < int.MaxValue)
                 {
                     Interlocked.Exchange(ref _lastIid, (int)_ledger.MaxRequestIid); // continue above the last one used
                 }
                 IsLoaded = true;
+                Publish();
+                Changed?.Invoke();
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException)
             {
@@ -49,6 +56,12 @@ public sealed class HistoryRecorder : IDisposable
     public HistorySource Source { get; }
     public HistorySnapshot Snapshot => _ledger.Snapshot;
 
+    /// <summary>
+    /// What the History page shows: the snapshot and its entries with the annotations applied, made on the worker after
+    /// loading and after every change, never changed afterwards (read it from any thread).
+    /// </summary>
+    public HistoryState State => Volatile.Read(ref _state);
+
     /// <summary>The files have been read: <see cref="Snapshot"/> holds what was there (the scheduler waits for it).</summary>
     public bool IsLoaded { get => Volatile.Read(ref _loaded); private set => Volatile.Write(ref _loaded, value); }
     private bool _loaded;
@@ -56,6 +69,7 @@ public sealed class HistoryRecorder : IDisposable
     /// <summary>A <c>log.since</c> should be sent; answer with <see cref="ReplayAnswered"/> or <see cref="ReplayFailed"/>.</summary>
     public event Action<FetchRequest>? FetchNeeded;
     public event Action<string>? Log;
+    /// <summary>The history changed (raised on the worker, after <see cref="State"/> is updated).</summary>
     public event Action? Changed;
 
     /// <summary>A fresh id for an <c>act</c> the Companion sends.</summary>
@@ -134,6 +148,7 @@ public sealed class HistoryRecorder : IDisposable
                 {
                     if (_ledger.Commit())
                     {
+                        Publish();
                         Changed?.Invoke();
                     }
                 }
@@ -152,6 +167,9 @@ public sealed class HistoryRecorder : IDisposable
             }
         }
     }
+
+    private void Publish() => Volatile.Write(ref _state, new HistoryState(
+        _ledger.Snapshot, HistoryView.Items(_ledger.Snapshot, _ledger.Entries, _annotations.Current), Loaded: true));
 
     public void Dispose()
     {

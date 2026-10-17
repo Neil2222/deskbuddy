@@ -7,8 +7,8 @@ namespace DeskBuddy.Companion;
 
 /// <summary>
 /// The DeskBuddy Control Center: a sidebar (Buddy's face, the pages, the connection status) and one page at a time:
-/// Buddy (mode and mood), Activities, Message (the LED sign), PDC Manager (Ze Doen Maar Wat) and Device (connection,
-/// the desktop simulator, diagnostics).
+/// Buddy (mode and mood), Activities, Schedule, History (his day journal), Message (the LED sign), PDC Manager (Ze Doen
+/// Maar Wat) and Device (connection, the desktop simulator, diagnostics).
 /// </summary>
 public sealed class MainForm : Form
 {
@@ -21,6 +21,7 @@ public sealed class MainForm : Form
     private readonly CompanionService _service; // created in the constructor: needs the form's UI context
     private readonly SimulatorLauncher _simulator;
     private readonly SchedulePage _schedule;
+    private readonly HistoryPage _historyPage;
     private readonly ToolTip _tips = new();
     private readonly System.Windows.Forms.Timer _reactionTimer = new() { Interval = 1800 };
     private string? _reaction; // a face shown for a moment after something happened
@@ -169,8 +170,12 @@ public sealed class MainForm : Form
                 schedulePage.Nav.DotColor = color;
                 schedulePage.Nav.Invalidate();
             }
+            _historyPage?.ScheduleChanged(); // today's plan on the History page
         };
         _schedule.ResumeRequested += _service.ResumeSchedule;
+        _historyPage = new HistoryPage(_theme, _art, _tips, _service.HistoryOf, () => _service.HasSimulatorHistory, () => _schedule.Schedule);
+        AddPage(nav, "History", "Buddy's day journal: what you did, what he asked and how it went", Theme.GlyphHistory, _historyPage);
+        _service.HistoryChanged += _historyPage.HistoryChanged;
         _messagePage = AddPage(nav, "Message", "Text that scrolls across his LED sign", Theme.GlyphMessage, BuildMessagePage());
         _pdcPage = AddPage(nav, "PDC Manager", "The ZDMW Teams button, from here or from Buddy's menu", Theme.GlyphPdc, BuildPdcPage());
         _devicePage = AddPage(nav, "Device", "Connection, the desktop simulator and the protocol log", Theme.GlyphDevice, BuildDevicePage());

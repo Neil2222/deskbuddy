@@ -149,6 +149,34 @@ A pure projection of one source's snapshot, log and annotations; the records abo
 - **Journal additions (P7):** `block_name` on scheduled requests and skips; `schedule_state` lines (`live`,
   `paused_until`) when the switch or the pause changes (not repeated after a restart).
 
+### The History page (P7.2: `HistoryPage.cs`, `History/HistoryJournal.cs`, `UI/HistoryControls.cs`)
+
+Buddy's day journal, between Schedule and Message in the sidebar. It reads only the recorder's `HistoryState`
+(snapshot + projected entries, rebuilt on the recorder's worker after loading and after every change, never changed
+afterwards); `HistoryJournal` turns a `HistoryDay` into rows, the four numbers and the inspector's text (pure, tested).
+
+- **Header:** previous / next day, *Today*, the date (a month picker: days with entries have a cyan dot; no future
+  days); a *DeskBuddy* / *Simulator* picker only when the simulator has a history (each source its own, never mixed).
+- **Numbers:** activities (by type), smoke breaks (after a yes / via MY DAY), questions asked (only confirmed
+  `shown`; their answers; *+n not started* / *+n unconfirmed* listed apart), skipped actions (the reason).
+- **Journal:** entries one under another in time order with a thin rail, never a proportional 24-hour scale. Cards by
+  kind: activities (green, MY DAY art), questions and shows (their outcome as a pill: Yes green, No red, Timed out and
+  No outcome amber, Unconfirmed / Not started / Not shown grey and dashed), skipped actions (dashed, faded), loss
+  notices (amber, dashed). A YES smoke break is a line inside its question. Buddy's shows in a row fold into one line
+  (*Buddy played 2 shows*) that opens in place. *Time unknown* lists uptime-only entries without a time (the
+  inspector names their arrival as an arrival). *Technical* (restarts, schedule switched / paused) is folded.
+- **Today's plan:** today only, from the schedule as it is now, one dashed line (*n blocks · now … · next … at
+  HH:mm*, the block in force being the one that started last) that opens to the blocks, each labelled *Planned*.
+- **Details:** the selected entry's art, kind, outcome, times, origin (*Scheduled: "block" at HH:mm*, older records
+  without a block name *Scheduled at HH:mm*), the linked smoke break and a sentence on what the outcome means;
+  ids, boot, seq, request result and receipt time folded under *Technical details*.
+- **Live:** a recorder change is shown after 150 ms (a replay burst once); the selection (by entry id), the open
+  groups, the inspector's state and the scroll position are kept; the inspector follows its entry (a question that
+  gets its answer). Midnight moves a page showing today to the new today.
+- **Empty days:** Buddy's sleepy face (*Nothing was recorded on this day*), today his relaxed one with a hint.
+- **Cost** (a year of synthetic history, 8.6k events / 6.1k entries): load 110 ms, projection 12 ms per change on the
+  worker, a day's rows 1.2–1.4 ms on the UI thread, the month picker's days 3.5 ms.
+
 ## 4. Live scheduling (P6: `CompanionService.Schedule.cs`, `ActionScheduler`, `MoodDirector`)
 
 **Off until switched on.** The Schedule header's switch (*Off* / *Live*, stored as `live` in `schedule.json`
@@ -298,5 +326,5 @@ could repeat after a crash, and its result would be lost. So the journals come b
 | **P4.1** Recorded events (done, on `feature/schedule`) | Identity `(dev, boot, seq)` (MAC / machine hash, 64-bit boot id from a true entropy source), event time `t=` or `up=`, the last 64 events in PSRAM, `log.since` replay (2 lines per frame, reply after the last, `lost=` on overflow), cap `log`; no flash writes; `evt did n=` replaced by `seq=` | 97 host tests; simulator; on the board (`29f5c80`): 20/20 automated checks over the UART (identity, new boot per restart, `up=`/`t=`, reconnect replay, identical repeat, overflow `lost=4`, 64 events in 1.31 s at 27.9 fps with 0 resyncs) and the user's JA / NEE / MY DAY replayed identically |
 | **P5** History (done, on `feature/schedule`) | `device-events.jsonl` (canonical, keyed), checkpoints, `companion-events.jsonl` (requests with iid), `installation.json`, all with `.sim` twins; replay after hello and on holes, gaps and boot ends; interactions and activities derived (`HistoryDeriver`); worker thread (`HistoryRecorder`); Activities tiles send `act … iid=`; restart during the handshake; `boot_end seen_live` | 21 unit tests (live, replay, duplicates, out of order, holes, overflow, unexplained loss, wire loss, boot end seen live / while away, restarts during the handshake, bounded retries, crash before checkpoint, checkpoint ahead of the log, torn line, uptime-only time, outcomes, origins, MY DAY, one JA smoke break, shows and moods no activity, simulator isolation); end to end with the simulator: 12 events, nothing missing or doubled; on the board (`29f5c80`, Companion `bdc8eb6`): the 13 buffered P4.1 events recovered with their original seq, iids, times and outcomes; reconnect and two Companion restarts added nothing; a new MY DAY tap and a touch question that timed out stored live and kept after a restart (18 events, 18 keys); YES → one linked smoke, NO / TIMEOUT / shows → none |
 | **P6** Live scheduling (done, on `feature/schedule`) | Live switch (off by default, schedule v2), MoodDirector wired (manual = `src=touch` or a foreign `src=cmd`; settle on `src=timer` / end of a break; connect, boot), `ActionScheduler` (occurrence ids, grace, busy retries, offline / companion_off / asleep / paused / unsupported skips, in-flight guard, DST), the `request` journaled and flushed before `act`, occurrence state rebuilt from the journal on restart, `action` in the editor, Pause presets and Resume | 18 new tests (scheduler: off, once, busy every 10 s then `busy:office`, 3 vs 1 min grace, connect within grace, companion_off / offline / asleep, restart, pause and resume, switched on mid-day, not sent after all, answer after the deadline, DST fall-back and spring-forward, past midnight, allowlist; history: scheduled correlation and one smoke break, decided after a restart, busy-then-skipped, answer after the link went; store v2) on top of the MoodDirector tests; end to end in the simulator with the real clock (blocks a few minutes ahead): companion_off, scheduled `working`, JA → yes + one smoke, NEE → no, a manual Happy kept over a moodless boundary, Clock Mode → `busy:office` without interrupting, disconnected → `offline`, Companion restart → nothing repeated |
-| **P7** History + polish | P7.1 data layer (done, on `feature/history-ui`): `HistoryView`, annotations, `block_name`, `schedule_state`. Then: History page, test-data hiding UI, sidebar schedule pill, DPI pass | P7.1: 16 unit tests (local days and DST, outcome words, linked smoke, shows, uptime-only, busy-then-skipped, hiding and unhiding, period preview, canonical logs unchanged, simulator separation, schedule states, block names, gaps, today's plan) |
+| **P7** History + polish | P7.1 data layer (done, approved): `HistoryView`, annotations, `block_name`, `schedule_state`. P7.2 History page (done, on `feature/history-ui`, awaiting review). Then: test-data hiding UI, sidebar schedule pill, DPI pass | P7.1: 16 unit tests (local days and DST, outcome words, linked smoke, shows, uptime-only, busy-then-skipped, hiding and unhiding, period preview, canonical logs unchanged, simulator separation, schedule states, block names, gaps, today's plan). P7.2: 10 journal tests (plan line now / next, shows folding with stable keys, time unknown and technical, empty days, the question numbers, tones, the inspector's words for unconfirmed / yes / timeout / uptime-only, date labels) and 3 window tests (live update keeps selection, scroll and follows the entry; plan only today, no future days; simulator apart); screenshots with representative data and with the real board history |
 | Future | PatternAnalyzer, SuggestionEngine, edit provenance | Separate approval |

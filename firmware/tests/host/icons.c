@@ -10,6 +10,8 @@
 //                                  "surprised" (a tap), and every activity's (face-<act name>, buddy_act_face()).
 //   buddy.png, buddy@8x.png        the whole robot, standing
 //   can.png, glass.png, moon.png   the Monster can, the glass of water and the Clock Mode moon, as on the device
+//   myday-<icon>.png               the touchscreen menu's MY DAY icons (coffee, lunch, water, meeting, walk) and its
+//                                  calendar, drawn by menu_art_icon() in the menu's palette
 //   icon-<size>.png, buddy.ico     the application icon in 16..256 px. From 24 px up: the whole head at the largest
 //                                  integer scale that fits. 16 and 20 px are too small for the 24-px-wide head, so
 //                                  they are exact crops of it (face screen with eyes and mouth; at 20 px with the
@@ -21,6 +23,8 @@
 #include "buddy_activity.h"
 #include "buddy_art.h"
 #include "buddy_mood.h"
+#include "menu.h"
+#include "menu_art.h"
 #include "office_clock.h"
 #include "png.h"
 
@@ -291,6 +295,41 @@ int main(int argc, char **argv)
     canvas_t moon = make(moon_img->w, moon_img->h);
     blit(&moon, moon_img, moon_pal, 0, 0);
     save(dir, "moon", &moon);
+
+    // The menu's own icons, as MY DAY shows them (drawn into an indexed canvas, then in the menu's palette).
+    if (!menu_art_init()) {
+        fprintf(stderr, "menu art failed to load\n");
+        return 1;
+    }
+    static const struct {
+        const char *name;
+        menu_icon_t icon;
+    } k_myday[] = {
+        {"coffee", MENU_ICON_COFFEE}, {"lunch", MENU_ICON_LUNCH},   {"water", MENU_ICON_WATER},
+        {"meeting", MENU_ICON_MEETING}, {"walk", MENU_ICON_WALK}, {"calendar", MENU_ICON_SCHEDULE},
+    };
+    for (size_t i = 0; i < sizeof(k_myday) / sizeof(k_myday[0]); i++) {
+        int w = 0, h = 0;
+        menu_art_icon_size(k_myday[i].icon, 0, &w, &h);
+        uint8_t *idx = calloc((size_t)w * h, 1);
+        if (!idx || w <= 0 || h <= 0) {
+            fprintf(stderr, "menu icon %s missing\n", k_myday[i].name);
+            return 1;
+        }
+        menu_canvas_t mc = {idx, w, h};
+        menu_art_clear(&mc);
+        menu_art_icon(&mc, k_myday[i].icon, 0, w / 2, h / 2);
+        const gfx_image_t img = {(uint16_t)w, (uint16_t)h, idx};
+        canvas_t out = make(w, h);
+        blit(&out, &img, menu_art_palette(MENU_PAL_NORMAL), 0, 0);
+        canvas_t trimmed = trim(&out);
+        char name[64];
+        snprintf(name, sizeof(name), "myday-%s", k_myday[i].name);
+        save(dir, name, &trimmed);
+        free(trimmed.px);
+        free(out.px);
+        free(idx);
+    }
 
     // Application icon. Head rows/columns below are in the head image; the head starts at head_at in the canvas.
     canvas_t face = trim(&neutral);

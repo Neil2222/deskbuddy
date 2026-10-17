@@ -45,6 +45,12 @@ public sealed record HistoryDay(
 /// <summary>Today's plan as the schedule holds it now: shown only for today, labelled as a plan, never as history.</summary>
 public sealed record PlanItem(string Name, DateTime StartLocal, DateTime EndLocal, string? Mood, string? Plans, string? Action);
 
+/// <summary>One source's history as the History page shows it, made in one piece on the recorder's worker.</summary>
+public sealed record HistoryState(HistorySnapshot Snapshot, IReadOnlyList<HistoryItem> Items, bool Loaded)
+{
+    public static readonly HistoryState Empty = new(HistorySnapshot.Empty, [], false);
+}
+
 /// <summary>
 /// What the History page shows, as pure functions of one source's snapshot, its canonical log and the annotations.
 /// Nothing is derived beyond P5 / P6: moods, plans and Buddy's shows never become activities; a timeout is not a "no";

@@ -499,6 +499,16 @@ public sealed partial class CompanionService : IDisposable
         ScheduleBooted();
     }
 
+    /// <summary>A source's history as the History page shows it; reading it starts on first use.</summary>
+    public HistoryState HistoryOf(HistorySource source) => HistoryFor(source == HistorySource.Simulator).State;
+
+    /// <summary>The simulator has a history of its own (it has been connected, now or in an earlier run).</summary>
+    public bool HasSimulatorHistory =>
+        _simulatorHistory is not null || File.Exists(Path.Combine(_dataDirectory, "device-events.sim.jsonl"));
+
+    /// <summary>A source's history changed (raised on the UI thread).</summary>
+    public event Action<HistorySource>? HistoryChanged;
+
     // The board's and the simulator's histories, each in its own files; created on first use.
     private HistoryRecorder HistoryFor(bool simulator)
     {
@@ -508,6 +518,7 @@ public sealed partial class CompanionService : IDisposable
             var recorder = new HistoryRecorder(_dataDirectory, simulator ? HistorySource.Simulator : HistorySource.Board);
             recorder.Log += text => Post(() => Write(LogKind.Info, text));
             recorder.FetchNeeded += request => Post(() => _ = FetchHistoryAsync(recorder, request));
+            recorder.Changed += () => Post(() => HistoryChanged?.Invoke(recorder.Source));
             slot = recorder;
         }
         return slot;

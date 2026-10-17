@@ -67,6 +67,10 @@ public sealed class Theme : IDisposable
     public const string GlyphSchedule = "\uE787";   // Calendar
     public const string GlyphAdd = "\uE710";
     public const string GlyphCopy = "\uE8C8";
+    public const string GlyphHistory = "\uE81C";
+    public const string GlyphChevronLeft = "\uE76B";
+    public const string GlyphChevronRight = "\uE76C";
+    public const string GlyphWarning = "\uE7BA";
 
     /// <summary>
     /// A colour per mood for the schedule, from Buddy's own palette where it has one (eyes, chest light, antenna,
