@@ -673,9 +673,11 @@ static struct {
 
 // ---- Tic-Tac-Toe (ttt.h): on while its menu page shows (menu_ttt.h), Buddy playing it (buddy_game.h) ---------------
 //
-// Leaving the page (Back, the clock's faces), Clock Mode (a tap on his head or mode.set) and boredom end it; his mood
-// carries on as it was (or as it was set meanwhile). The score stays until reboot. While he plays he is busy, as
-// during a show: poke, monster and act get err busy mode=game; nothing about the game is recorded (evt act).
+// Leaving the page (Back, the clock's faces) and boredom end it; his mood carries on as it was (or as it was set
+// meanwhile). Clock Mode (a tap on his head or mode.set) pauses the round: Buddy is himself again (not busy, so the
+// companion's shows and questions work), the page stays, and back from the clock the same round carries on (if no show
+// is playing then; else after it), unless it waited TTT_PAUSE_MS. The score stays until reboot. While he plays he is
+// busy, as during a show: poke, monster and act get err busy mode=game; nothing about the game is recorded (evt act).
 
 _Static_assert(BUDDY_GAME_REACT_MS == TTT_REACTION_MS, "his reaction lasts as long as the game waits");
 
@@ -712,6 +714,41 @@ static void game_leave(const char *why, uint32_t now)
              (unsigned)s_ttt.buddy, (unsigned)s_ttt.draws);
 }
 
+// Clock Mode: the round waits on its page (ttt_pause), Buddy goes back to his mood.
+static void game_pause(uint32_t now)
+{
+    s_playing = false;
+    ttt_pause(&s_ttt, now);
+    menu_ttt_cancel(&s_ttt_touch);
+    buddy_brain_game_leave(&s.brain, now);
+    APP_LOGI(TAG, "tic-tac-toe: paused (clock)");
+}
+
+// A paused round: dropped once it has waited too long or its page was left; carried on once Buddy is back on his
+// stage, the zoom is over and no show plays. Returns false while it still waits (*wait_ms: until it is dropped).
+static bool game_resume(uint32_t now, uint32_t *wait_ms)
+{
+    *wait_ms = ttt_tick(&s_ttt, now); // drops it after TTT_PAUSE_MS
+    const bool page = s.has_menu && s.menu.category == MENU_TTT;
+    if (s_ttt.phase == TTT_OFF || !page) {
+        ttt_stop(&s_ttt);
+        if (page) {
+            menu_open(&s.menu, MENU_GAMES, now);
+        }
+        APP_LOGI(TAG, "tic-tac-toe: paused round dropped (%s); you %u, Buddy %u, draws %u",
+                 page ? "waited too long" : "left", (unsigned)s_ttt.you, (unsigned)s_ttt.buddy, (unsigned)s_ttt.draws);
+        *wait_ms = UINT32_MAX;
+        return false;
+    }
+    if (s.screen.office || !scene_settled(&s.screen) || buddy_brain_busy(&s.brain, now)) {
+        return false;
+    }
+    ttt_resume(&s_ttt, now);
+    s_playing = true;
+    APP_LOGI(TAG, "tic-tac-toe: resumed");
+    return true;
+}
+
 // The face he pulls now: from the phase of the round and when it began, so it only changes when the game moves on.
 static buddy_game_t game_face(uint32_t now)
 {
@@ -742,6 +779,12 @@ static buddy_game_t game_face(uint32_t now)
 // Returns ms until the game changes on its own.
 static uint32_t game_update(uint32_t now)
 {
+    if (s_ttt.paused) {
+        uint32_t wait;
+        if (!game_resume(now, &wait)) {
+            return wait;
+        }
+    }
     if (!s_playing && (!s.has_menu || s.menu.category != MENU_TTT)) {
         return UINT32_MAX;
     }
@@ -749,9 +792,9 @@ static uint32_t game_update(uint32_t now)
         game_leave("left", now);
         return UINT32_MAX;
     }
-    if (s.screen.office || s_zoom.want_office) { // Clock Mode ends the round
+    if (s.screen.office || s_zoom.want_office) { // Clock Mode pauses the round
         if (s_playing) {
-            game_leave("clock", now);
+            game_pause(now);
         } else {
             menu_open(&s.menu, MENU_GAMES, now);
         }
@@ -1193,6 +1236,9 @@ uint32_t app_frame(void)
             if (s_playing) {
                 const uint32_t look_next = menu_ttt_look(&game, &s_ttt, &s_ttt_touch, now);
                 next = look_next < next ? look_next : next;
+                st.game = &game;
+            } else if (s_ttt.paused) { // back from the clock, not resumed yet: the board as it was left
+                menu_ttt_look(&game, &s_ttt, NULL, s_ttt.paused_at);
                 st.game = &game;
             }
             uint32_t hold_wait;

@@ -758,7 +758,8 @@ void test_app_tic_tac_toe_on_the_touchscreen(void)
     CHECK(sent("<DB1 207 ok #"));
     run(2000);
 
-    // Clock Mode from the game (a tap on his head): the round ends; back from the clock, the GAMES page.
+    // Clock Mode from the game (a tap on his head): the round pauses (he is himself in the clock) and carries on
+    // after it (test_app_tic_tac_toe_pauses_in_clock_mode has the details); Back then leaves for the GAMES page.
     tap_slot(MENU_GRID, 0);
     run(700);
     clear_out();
@@ -766,14 +767,16 @@ void test_app_tic_tac_toe_on_the_touchscreen(void)
     head_point(&hx, &hy);
     touch(hx, hy);
     run(4000);
-    CHECK(sent("evt mode mode=normal")); // the game ended first...
+    CHECK(sent("evt mode mode=normal")); // the game paused first...
     CHECK(sent("evt mode mode=office")); // ...then the clock
     touch(W / 2, H / 2);
     run(3000);
     command(208, "status");
-    CHECK(sent(" mode=normal mood=relaxed "));
+    CHECK(sent(" mode=game mood=relaxed "));
+    tap_back();
+    run(600);
     clear_out();
-    tap_slot(MENU_GRID, 0); // still on GAMES: its tile starts a new game
+    tap_slot(MENU_GRID, 0); // on GAMES: its tile starts a new game
     run(700);
     CHECK(sent("evt mode mode=game"));
 
@@ -793,6 +796,101 @@ void test_app_tic_tac_toe_on_the_touchscreen(void)
     run(2000);
     CHECK(sent("evt mode mode=normal"));
     command(209, "mood.set name=idle");
+    tap_back(); // Home, for whatever runs next
+    run(600);
+}
+
+// Plays one X on the first free cell and lets him answer.
+static void play_one(uint8_t board[TTT_CELLS])
+{
+    int c = 0;
+    while (board[c] != TTT_EMPTY) {
+        c++;
+    }
+    tap_cell(c);
+    run(TTT_THINK_MAX_MS + 300);
+    read_board(board);
+}
+
+// Clock Mode pauses the round: meanwhile he is himself (mode=office, not game; his mood shows), back from the clock
+// the same board carries on where it was, and the time in the clock counts for nothing (no boredom). Back quits the
+// round; a round left in the clock for ten minutes is dropped and the game page gives way to GAMES.
+void test_app_tic_tac_toe_pauses_in_clock_mode(void)
+{
+    CHECK(start());
+    command(220, "mood.set name=happy");
+    run(100);
+    open_game();
+    run(TTT_OPENING_MS + TTT_THINK_MAX_MS + 300); // if he starts, he has moved
+    uint8_t board[TTT_CELLS];
+    read_board(board);
+    play_one(board);
+    const int xs = marks(board, TTT_X), os = marks(board, TTT_O);
+    CHECK(xs >= 1 && (os == xs || os == xs + 1)); // your turn again (whoever started)
+
+    // Into the clock from the game: paused, not playing.
+    clear_out();
+    int hx, hy;
+    head_point(&hx, &hy);
+    touch(hx, hy);
+    run(4000);
+    CHECK(sent("evt mode mode=office"));
+    command(221, "status");
+    CHECK(sent(" mode=office mood=happy "));
+    command(222, "act name=sneeze iid=222");
+    CHECK(sent("<DB1 222 err busy mode=office #")); // Clock Mode's own rule, not the game's
+    run(60000);
+
+    // Back: the same round, the same board, his turn handling intact; a minute in the clock is not idle time.
+    clear_out();
+    touch(W / 2, H / 2);
+    run(3000);
+    CHECK(sent("evt mode mode=game"));
+    uint8_t again[TTT_CELLS];
+    read_board(again);
+    CHECK(memcmp(board, again, sizeof(board)) == 0);
+    run(TTT_IDLE_MS - 50000); // 70 s more without a touch: counted from before the clock, still not bored
+    command(223, "status");
+    CHECK(sent(" mode=game mood=happy "));
+    if (ttt_judge(again, NULL) == TTT_OPEN) {
+        play_one(again);
+        CHECK_EQ(marks(again, TTT_X), xs + 1); // you play on...
+        CHECK(ttt_judge(again, NULL) != TTT_OPEN || marks(again, TTT_O) == os + 1); // ...and he answers
+    }
+
+    // Back quits the round: the game opens on a fresh board.
+    clear_out();
+    tap_back();
+    run(600);
+    CHECK(sent("evt mode mode=normal"));
+    tap_slot(MENU_GRID, 0);
+    run(300);
+    read_board(board);
+    CHECK_EQ(marks(board, TTT_X), 0);
+    CHECK(marks(board, TTT_O) <= 1);
+
+    // Ten minutes in the clock: the paused round is dropped; back, the GAMES page, and its tile starts afresh.
+    run(TTT_OPENING_MS + TTT_THINK_MAX_MS + 300);
+    read_board(board);
+    play_one(board);
+    touch(hx, hy);
+    run(4000);
+    run(TTT_PAUSE_MS);
+    clear_out();
+    touch(W / 2, H / 2);
+    run(3000);
+    CHECK(sent("evt mode mode=normal"));
+    CHECK(!sent("evt mode mode=game"));
+    command(224, "status");
+    CHECK(sent(" mode=normal mood=happy "));
+    tap_slot(MENU_GRID, 0); // GAMES: Tic-Tac-Toe
+    run(300);
+    CHECK(sent("evt mode mode=game"));
+    read_board(board);
+    CHECK_EQ(marks(board, TTT_X), 0);
+    command(225, "mood.set name=idle");
+    tap_back();
+    run(600);
     tap_back(); // Home, for whatever runs next
     run(600);
 }

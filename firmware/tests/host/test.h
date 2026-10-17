@@ -139,6 +139,7 @@ extern int g_test_failed;
     X(app_clock_faces_by_touch_and_command)          \
     X(app_kitt_until_a_tap_a_mood_or_the_clock)      \
     X(app_tic_tac_toe_on_the_touchscreen)            \
+    X(app_tic_tac_toe_pauses_in_clock_mode)          \
     X(ttt_judge_finds_every_line_and_draws)          \
     X(ttt_best_move_wins_blocks_and_knows_positions) \
     X(ttt_perfect_play_draws)                        \
@@ -153,6 +154,8 @@ extern int g_test_failed;
     X(ttt_session_gets_bored_without_touches)        \
     X(ttt_session_survives_clock_wraparound)         \
     X(ttt_lines_are_known_strings)                   \
+    X(ttt_pause_freezes_and_resumes_exactly)         \
+    X(ttt_pause_expires_and_keeps_the_score)         \
     X(game_faces_hold_until_the_next_round)          \
     X(game_brain_plays_over_his_mood)                \
     X(game_touch_takes_only_the_board)               \

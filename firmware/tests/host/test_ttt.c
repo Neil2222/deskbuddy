@@ -475,3 +475,129 @@ void test_ttt_lines_are_known_strings(void)
         }
     }
 }
+
+// Clock Mode pauses a round: while paused nothing moves (his move, the reaction, boredom, lines, taps); resumed, every
+// timer has exactly as long to go as it had, also across the counter's wrap-around.
+void test_ttt_pause_freezes_and_resumes_exactly(void)
+{
+    static const uint32_t k_starts[] = {1000, 0xFFFFF000u}; // the second wraps during the pause
+    for (unsigned k = 0; k < sizeof(k_starts) / sizeof(k_starts[0]); k++) {
+        ttt_t g;
+        ttt_init(&g, 21);
+        uint32_t now = k_starts[k];
+        ttt_start(&g, now); // you start
+        CHECK(ttt_play(&g, 4, now));
+        CHECK_EQ(g.phase, TTT_THINKING);
+        now += 200;
+        const uint32_t left = g.move_at - now; // his thinking still to go
+        ttt_touched(&g, now - 100000);         // nearly bored already
+        ttt_pause(&g, now);
+        CHECK(g.paused);
+        const uint32_t paused_at = now;
+        ttt_pause(&g, now + 5); // paused already: nothing changes
+        CHECK_EQ(g.paused_at, paused_at);
+
+        // Five minutes in the clock: no move, no boredom, no line, no taps; it only waits to be dropped.
+        for (uint32_t t = 0; t < 5 * 60000u; t += 1000) {
+            CHECK(ttt_tick(&g, now + t) <= TTT_PAUSE_MS);
+            CHECK(!ttt_bored(&g, now + t));
+            CHECK(ttt_line(&g, now + t) == NULL);
+        }
+        now += 5 * 60000u;
+        CHECK(!ttt_play(&g, 0, now));
+        CHECK(!g.hey); // a tap on a paused board is no protest either
+        CHECK_EQ(g.moves, 1);
+        CHECK_EQ(g.phase, TTT_THINKING);
+
+        CHECK(ttt_resume(&g, now));
+        CHECK(!g.paused);
+        CHECK(!ttt_resume(&g, now)); // once
+        CHECK_EQ(g.move_at - now, left);
+        CHECK(ttt_line(&g, now) != NULL);  // "HMM..." again
+        ttt_tick(&g, now + left - 1);
+        CHECK_EQ(g.moves, 1);               // not a moment early...
+        ttt_tick(&g, now + left);
+        CHECK_EQ(g.moves, 2);               // ...and on time
+        now += left;
+        // The idle timer had 20 s to go when paused: still 20 s, not over at once.
+        CHECK(!ttt_bored(&g, now + 19000 - left - 200));
+        CHECK(ttt_bored(&g, now + 20000 - left));
+
+        // Paused in his reaction: it runs out after the time it still had, then the rematch question.
+        ttt_t r;
+        ttt_init(&r, 3);
+        uint32_t t = k_starts[k];
+        ttt_start(&r, t);
+        for (int guard = 0; guard < 40 && r.phase != TTT_REACTION; guard++) {
+            if (r.phase == TTT_YOUR_TURN) {
+                ttt_play(&r, ttt_best_move(r.board, TTT_X), t);
+            } else {
+                t = r.move_at;
+                ttt_tick(&r, t);
+            }
+        }
+        CHECK_EQ(r.phase, TTT_REACTION);
+        const uint32_t over_at = r.phase_at;
+        ttt_pause(&r, over_at + 1000);
+        ttt_tick(&r, over_at + 1000 + 9 * 60000u);
+        CHECK_EQ(r.phase, TTT_REACTION); // frozen, not over
+        const uint32_t back = over_at + 1000 + 9 * 60000u;
+        CHECK(ttt_resume(&r, back));
+        ttt_tick(&r, back + TTT_REACTION_MS - 1000 - 1);
+        CHECK_EQ(r.phase, TTT_REACTION);
+        CHECK(!ttt_rematch(&r, back + 1));
+        ttt_tick(&r, back + TTT_REACTION_MS - 1000);
+        CHECK_EQ(r.phase, TTT_REMATCH);
+        // A pause on the rematch question: the button does nothing until resumed.
+        ttt_pause(&r, back + 5000);
+        CHECK(!ttt_rematch(&r, back + 6000));
+        CHECK(ttt_resume(&r, back + 7000));
+        CHECK(ttt_rematch(&r, back + 7000));
+        CHECK_EQ(r.moves, 0); // a fresh board
+    }
+}
+
+// A round paused for TTT_PAUSE_MS is dropped, not counted: the score and the streak stay, the next round is fresh and
+// the starters keep alternating. Stop and start (Back, then the game again) never resume anything.
+void test_ttt_pause_expires_and_keeps_the_score(void)
+{
+    ttt_t g;
+    ttt_init(&g, 8);
+    uint32_t now = 1000;
+    ttt_start(&g, now);
+    play_to_the_end(&g, &now); // one round decided...
+    const uint16_t you = g.you, buddy = g.buddy, draws = g.draws;
+    const int8_t streak = g.streak;
+    CHECK_EQ(you + buddy + draws, 1);
+    now += TTT_REACTION_MS;
+    ttt_tick(&g, now);
+    CHECK(ttt_rematch(&g, now)); // ...the next one under way
+    const bool second_by_you = g.you_started;
+    if (g.phase == TTT_THINKING) {
+        ttt_tick(&g, g.move_at);
+        now = g.move_at;
+    }
+    CHECK(ttt_play(&g, ttt_best_move(g.board, TTT_X), now));
+    ttt_pause(&g, now);
+    ttt_tick(&g, now + TTT_PAUSE_MS - 1);
+    CHECK(g.paused); // still kept
+    CHECK_EQ(ttt_tick(&g, now + TTT_PAUSE_MS), UINT32_MAX);
+    CHECK(!g.paused);
+    CHECK_EQ(g.phase, TTT_OFF); // dropped...
+    CHECK(!ttt_resume(&g, now + TTT_PAUSE_MS + 1));
+    CHECK_EQ(g.you, you);       // ...not counted
+    CHECK_EQ(g.buddy, buddy);
+    CHECK_EQ(g.draws, draws);
+    CHECK_EQ(g.streak, streak);
+    ttt_start(&g, now + TTT_PAUSE_MS + 10);
+    CHECK_EQ(g.moves, 0);
+    CHECK_EQ(g.you_started, !second_by_you);
+
+    // Back (stop) while paused: the round is gone, nothing to resume.
+    ttt_pause(&g, now + TTT_PAUSE_MS + 20);
+    ttt_stop(&g);
+    CHECK(!g.paused);
+    CHECK(!ttt_resume(&g, now + TTT_PAUSE_MS + 30));
+    ttt_pause(&g, now); // no round on: nothing to pause
+    CHECK(!g.paused);
+}

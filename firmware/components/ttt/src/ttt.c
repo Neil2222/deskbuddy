@@ -286,6 +286,7 @@ void ttt_start(ttt_t *g, uint32_t now)
     g->moves = 0;
     g->last = -1;
     g->hey = false;
+    g->paused = false;
     g->you_started = g->you_next;
     g->you_next = !g->you_next;
     g->round_at = g->phase_at = g->touched_at = now;
@@ -300,6 +301,32 @@ void ttt_start(ttt_t *g, uint32_t now)
 void ttt_stop(ttt_t *g)
 {
     g->phase = TTT_OFF;
+    g->paused = false;
+}
+
+void ttt_pause(ttt_t *g, uint32_t now)
+{
+    if (g->phase != TTT_OFF && !g->paused) {
+        g->paused = true;
+        g->paused_at = now;
+    }
+}
+
+bool ttt_resume(ttt_t *g, uint32_t now)
+{
+    if (!g->paused) {
+        return false;
+    }
+    // The paused time did not happen for the round: every moment in it moves on by as much.
+    const uint32_t d = now - g->paused_at;
+    g->round_at += d;
+    g->phase_at += d;
+    g->move_at += d;
+    g->last_at += d;
+    g->touched_at += d;
+    g->hey_at += d;
+    g->paused = false;
+    return true;
 }
 
 // The round is over: score it and start his reaction.
@@ -342,6 +369,9 @@ static bool judge_round(ttt_t *g, uint32_t now)
 
 bool ttt_play(ttt_t *g, int cell, uint32_t now)
 {
+    if (g->paused) {
+        return false;
+    }
     if (g->phase == TTT_THINKING) {
         g->hey = true;
         g->hey_at = now;
@@ -365,7 +395,7 @@ bool ttt_play(ttt_t *g, int cell, uint32_t now)
 
 bool ttt_rematch(ttt_t *g, uint32_t now)
 {
-    if (g->phase != TTT_REMATCH) {
+    if (g->phase != TTT_REMATCH || g->paused) {
         return false;
     }
     ttt_start(g, now);
@@ -379,7 +409,7 @@ void ttt_touched(ttt_t *g, uint32_t now)
 
 bool ttt_bored(const ttt_t *g, uint32_t now)
 {
-    return g->phase != TTT_OFF && now - g->touched_at >= TTT_IDLE_MS;
+    return g->phase != TTT_OFF && !g->paused && now - g->touched_at >= TTT_IDLE_MS;
 }
 
 // The smaller of *next and the time left until `t + span` (if that is still ahead of `now`).
@@ -395,6 +425,13 @@ uint32_t ttt_tick(ttt_t *g, uint32_t now)
 {
     if (g->phase == TTT_OFF) {
         return UINT32_MAX;
+    }
+    if (g->paused) { // frozen; dropped if it waits too long
+        if (now - g->paused_at >= TTT_PAUSE_MS) {
+            ttt_stop(g);
+            return UINT32_MAX;
+        }
+        return TTT_PAUSE_MS - (now - g->paused_at);
     }
     if (g->phase == TTT_THINKING && reached(now, g->move_at)) {
         const int c = ttt_ai_move(g->board, ttt_attitude(g), &g->rng);
@@ -437,7 +474,7 @@ uint32_t ttt_tick(ttt_t *g, uint32_t now)
 
 const char *ttt_line(const ttt_t *g, uint32_t now)
 {
-    if (g->phase == TTT_OFF) {
+    if (g->phase == TTT_OFF || g->paused) {
         return NULL;
     }
     if (g->phase == TTT_THINKING) {

@@ -6,7 +6,8 @@
 // A round: who starts alternates (you start the first one after boot). On your turn a tap on an empty cell places
 // your X; then Buddy thinks for a moment (TTT_THINK_MIN_MS..TTT_THINK_MAX_MS) and places his O. When a line of
 // three is made or the board is full, he reacts (TTT_REACTION_MS), then waits for a rematch with his post-game face.
-// A rematch starts a fresh board; the score and his streak are kept until reboot (ttt_init).
+// A rematch starts a fresh board; the score and his streak are kept until reboot (ttt_init). A round can be paused
+// (ttt_pause: Clock Mode) and carries on as if no time had passed (ttt_resume); after TTT_PAUSE_MS it is dropped.
 //
 // Buddy is good but beatable: he usually takes a win he sees, usually blocks yours and usually plays the best move
 // (a full minimax search), but now and then he plays a random move instead. How often depends on his attitude:
@@ -30,6 +31,7 @@ extern "C" {
 #define TTT_REACTION_MS 2500   // celebrating / disappointed / puzzled, then the rematch question
 #define TTT_IDLE_MS 120000     // no touch this long: he gets bored and the game ends (ttt_bored)
 #define TTT_BORED_MS 4000      // ...saying "BORED..." for this last part of it
+#define TTT_PAUSE_MS 600000    // a paused round (Clock Mode) is kept this long, then dropped (ttt_tick)
 
 typedef enum {
     TTT_EMPTY,
@@ -75,6 +77,8 @@ typedef struct {
     uint32_t touched_at;      // the last touch in the game (ttt_touched; ttt_start counts as one)
     uint32_t hey_at;          // a tap while he was thinking...
     bool hey;                 // ...if any this turn
+    bool paused;              // the round is frozen since paused_at (ttt_pause): nothing moves, nothing counts
+    uint32_t paused_at;
     // The session, kept until reboot.
     uint16_t you, buddy, draws; // rounds won by you, by him, drawn
     int8_t streak;              // > 0: his wins in a row; < 0: his losses in a row; 0 after a draw
@@ -108,8 +112,8 @@ void ttt_start(ttt_t *g, uint32_t now);
 // Ends the game (leaving it): the round in progress is dropped, not counted. The score is kept.
 void ttt_stop(ttt_t *g);
 
-// Your X on `cell`. Returns false (nothing changes) if it is not your turn, the cell is taken or out of range. A tap
-// on a cell while he thinks also returns false, and makes him say "HEY, MY TURN!" (ttt_line).
+// Your X on `cell`. Returns false (nothing changes) if it is not your turn, the cell is taken or out of range, or the
+// round is paused. A tap on a cell while he thinks also returns false, and makes him say "HEY, MY TURN!" (ttt_line).
 bool ttt_play(ttt_t *g, int cell, uint32_t now);
 
 // Another round, from the rematch question (TTT_REMATCH only). Returns false otherwise.
@@ -118,11 +122,21 @@ bool ttt_rematch(ttt_t *g, uint32_t now);
 // A touch in the game: the idle timer starts over.
 void ttt_touched(ttt_t *g, uint32_t now);
 
+// Freezes the round in progress (Buddy's Clock Mode): no moves, no reaction running out, no boredom, no lines, until
+// ttt_resume(). Nothing happens if no round is on or it is paused already.
+void ttt_pause(ttt_t *g, uint32_t now);
+
+// Carries on exactly where ttt_pause() left it: every time in the round moves on by the pause, so his thinking, his
+// reaction, the lines and the idle timer have as long to go as they had. Returns false (nothing changes) if not paused.
+bool ttt_resume(ttt_t *g, uint32_t now);
+
 // Advances to now: he moves when his pause is over, the reaction gives way to the rematch question. Returns ms until
 // something changes on its own (his move, the end of the reaction, a different line, boredom); UINT32_MAX when off.
+// Paused: nothing moves; a round paused for TTT_PAUSE_MS is dropped as by ttt_stop (the score and streak stay).
 uint32_t ttt_tick(ttt_t *g, uint32_t now);
 
-// No touch for TTT_IDLE_MS while the game is on: the caller ends it (ttt_stop and leaves the game screen).
+// No touch for TTT_IDLE_MS while a round is played (not while paused): the caller ends the game (ttt_stop and leaves
+// the game screen).
 bool ttt_bored(const ttt_t *g, uint32_t now);
 
 // What Buddy says now (his speech bubble), or NULL. Strings live for ever (compare by pointer).

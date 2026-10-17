@@ -98,7 +98,7 @@ The desktop simulator (`tools/simulator.ps1`) carries the same byte stream, fram
 | Event | When |
 |---|---|
 | `evt boot proto=1 fw=<version> dev=<device id> boot=<16 hex>` | the firmware started (the companion re-sends the time; `dev`, `boot`: cap `log`) |
-| `evt mode mode=<normal\|office\|monster\|game>` | the mode changed, by touch or by command (`game`: a Tic-Tac-Toe game began; it ends with Back, Clock Mode or two minutes without a touch) |
+| `evt mode mode=<normal\|office\|monster\|game>` | the mode changed, by touch or by command (`game`: a Tic-Tac-Toe round is being played; Clock Mode pauses it (`office`, then `game` again when it carries on), Back or two minutes without a touch end it) |
 | `evt mood mood=<mood> src=<cmd\|touch\|break\|timer>` | the mood changed: by `mood.set`, on the touchscreen menu, a smoke break began or ended, or a timed mood ran out (`src`: firmware with `track`) |
 | `evt msg id=<id> state=<showing\|done>` | a message went up on the sign / finished |
 | `evt face name=<face> src=<cmd\|touch>` | the Clock Mode face changed: by `clock.face` or on the touchscreen (cap `face`) |
