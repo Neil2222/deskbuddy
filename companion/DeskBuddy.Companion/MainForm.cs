@@ -1,3 +1,4 @@
+using DeskBuddy.Companion.Desktop;
 using DeskBuddy.Companion.Device;
 using DeskBuddy.Companion.Pdc;
 using DeskBuddy.Companion.Protocol;
@@ -10,7 +11,7 @@ namespace DeskBuddy.Companion;
 /// Buddy (mode and mood), Activities, Schedule, History (his day journal), Message (the LED sign), PDC Manager (Ze Doen
 /// Maar Wat) and Device (connection, the desktop simulator, diagnostics).
 /// </summary>
-public sealed class MainForm : Form
+public sealed partial class MainForm : Form
 {
     private const int MaxLogLines = 3000;
     private const int MaxHistory = 10;
@@ -118,7 +119,7 @@ public sealed class MainForm : Form
         Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Both, WordWrap = false, BorderStyle = BorderStyle.None,
     };
 
-    public MainForm()
+    public MainForm(SingleInstance instance, bool minimized)
     {
         SuspendLayout();
         AutoScaleDimensions = new SizeF(96F, 96F);
@@ -228,6 +229,7 @@ public sealed class MainForm : Form
             _schedule.LoadSchedule();
         };
         Shown += (_, _) => _service.Start();
+        InitDesktop(instance, minimized);
     }
 
     private FlatButton Quiet(string text, string? glyph, int width) =>
@@ -749,7 +751,7 @@ public sealed class MainForm : Form
     {
         var page = new Panel();
         page.Controls.Add(BuildDiagnosticsCard()); // first: it fills what the cards above leave
-        Stack(page, BuildConnectionCard(), Gap(), BuildSimulatorCard(), Gap());
+        Stack(page, BuildConnectionCard(), Gap(), BuildSimulatorCard(), Gap(), BuildWindowsCard(), Gap());
         return page;
     }
 
@@ -1095,6 +1097,7 @@ public sealed class MainForm : Form
         _reactionTimer.Dispose();
         _zdmwTimer.Dispose();
         _tips.Dispose();
+        DisposeTrayIcon();
         base.OnFormClosed(e);
     }
 

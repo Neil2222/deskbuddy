@@ -78,10 +78,11 @@ public sealed class MoodDirector
     /// <summary>
     /// The device is connected (or the companion started) and reports <paramref name="deviceMood"/>. Returns the
     /// mood to send, or null. An override is reapplied (the device may have restarted). Otherwise, a device in its
-    /// default mood gets the scheduled mood; a device in another mood is taken as the user's own choice, so starting
-    /// the companion never undoes what was picked meanwhile.
+    /// default mood, or in the mood the schedule itself put it in (<paramref name="setBySchedule"/>: the companion saw
+    /// the schedule apply it in this boot and nothing change it since), gets the scheduled mood; a device in another
+    /// mood is taken as the user's own choice, so starting the companion never undoes what was picked meanwhile.
     /// </summary>
-    public string? Connected(string deviceMood)
+    public string? Connected(string deviceMood, bool setBySchedule = false)
     {
         if (Override is { } chosen)
         {
@@ -91,7 +92,7 @@ public sealed class MoodDirector
         {
             return null;
         }
-        if (deviceMood == DefaultMood)
+        if (deviceMood == DefaultMood || setBySchedule)
         {
             return scheduled;
         }

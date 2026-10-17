@@ -2,6 +2,7 @@ using DeskBuddy.Companion.Device;
 using DeskBuddy.Companion.History;
 using DeskBuddy.Companion.Pdc;
 using DeskBuddy.Companion.Protocol;
+using DeskBuddy.Companion.Schedule;
 using Microsoft.Win32;
 
 namespace DeskBuddy.Companion;
@@ -37,6 +38,8 @@ public sealed partial class CompanionService : IDisposable
     private readonly string _dataDirectory = PdcStore.DefaultDirectory;
     private readonly PdcStore _settings; // settings.json: also holds the last Clock face
     private readonly ClockFacePolicy _facePolicy;
+    private readonly ScheduleMoodTracker _moodTracker; // is Buddy's mood the schedule's own? (saved in settings.json)
+    private string? _dev, _boot; // the connected device's hello dev= / boot= (cap log); null: unknown
     private HistoryRecorder? _boardHistory;
     private HistoryRecorder? _simulatorHistory;
     private HistoryRecorder? _history; // the current connection's (board or simulator)
@@ -75,6 +78,7 @@ public sealed partial class CompanionService : IDisposable
         _ui = SynchronizationContext.Current ?? throw new InvalidOperationException("create on the UI thread");
         _settings = new PdcStore(_dataDirectory);
         _facePolicy = new ClockFacePolicy(_settings.LoadClockFace());
+        _moodTracker = new ScheduleMoodTracker(_settings.LoadScheduleMood(), _settings.SaveScheduleMood);
         _tick.Tick += (_, _) => Tick();
         Pdc = PdcIntegration.CreateDefault(out _pdcWarning);
         Pdc.Log += Write;
@@ -86,6 +90,10 @@ public sealed partial class CompanionService : IDisposable
     public void Start()
     {
         _tick.Start();
+        if (PdcStore.DataDirectoryOverride is { } dataDirectory)
+        {
+            Write(LogKind.Warning, $"Data folder: {dataDirectory} ({PdcStore.DataDirectoryVariable}), not %APPDATA%\\DeskBuddy");
+        }
         if (_pdcWarning is not null)
         {
             Write(LogKind.Warning, _pdcWarning);
@@ -368,6 +376,8 @@ public sealed partial class CompanionService : IDisposable
             Face = null; // until status says
             Mood = DeviceMood.Idle; // until status says otherwise
             IsConnected = true;
+            _dev = hello.Arg("dev");
+            _boot = hello.Arg("boot");
             if (Caps.Contains("log") && hello.Arg("dev") is { } dev && hello.Arg("boot") is { } boot)
             {
                 _history?.Connected(dev, boot, Firmware); // then it asks for what happened meanwhile (log.since)
@@ -448,6 +458,8 @@ public sealed partial class CompanionService : IDisposable
             break;
         case "boot":
             Write(LogKind.Info, "DeskBuddy restarted");
+            _dev = frame.Arg("dev") ?? _dev;
+            _boot = frame.Arg("boot");
             Pdc.ResetDeviceIds();
             _pdcLease.Reset(); // it lost the lease: resent right away
             SendPdcLease();
@@ -719,6 +731,7 @@ public sealed partial class CompanionService : IDisposable
         IsConnected = false;
         Mode = "unknown";
         Mood = DeviceMood.Idle;
+        _dev = _boot = null;
         Face = null;
         _facePolicy.Disconnected();
         link?.Dispose();

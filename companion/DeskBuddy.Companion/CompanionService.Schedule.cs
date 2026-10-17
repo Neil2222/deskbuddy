@@ -155,12 +155,13 @@ public sealed partial class CompanionService
     }
 
     // After hello and status: the schedule's view of the device's mood (an override is reapplied; a mood picked while
-    // the Companion was away is respected; missed transitions are not replayed).
+    // the Companion was away is respected; a mood the schedule itself set gives way to what it asks for now, so a
+    // transition missed while disconnected, asleep or closed is applied).
     private void ScheduleConnected()
     {
         if (_director is { } director)
         {
-            SendScheduledMood(director.Connected(Mood));
+            SendScheduledMood(director.Connected(Mood, _moodTracker.SetBySchedule(_dev, _boot, Mood)));
         }
     }
 
@@ -175,16 +176,23 @@ public sealed partial class CompanionService
     // evt mood: who changed it decides what it means for the schedule.
     private void ScheduleMoodEvent(Frame frame)
     {
-        if (_director is not { } director || frame.Arg("mood") is not { } mood)
+        if (frame.Arg("mood") is not { } mood)
         {
             return;
         }
-        switch (frame.Arg("src"))
+        var src = frame.Arg("src");
+        var ours = src == "cmd" && mood == _scheduledEcho;
+        _moodTracker.MoodChanged(ours); // tracked also while the schedule is off or paused: any other change is not its own
+        if (_director is not { } director)
+        {
+            return;
+        }
+        switch (src)
         {
         case "touch":
             director.Manual(mood);
             break;
-        case "cmd" when mood == _scheduledEcho:
+        case "cmd" when ours:
             _scheduledEcho = null; // the schedule's own
             break;
         case "cmd":
@@ -214,6 +222,10 @@ public sealed partial class CompanionService
             var reply = await link.RequestAsync(DeviceMood.Command(mood), ReplyTimeout);
             if (reply.IsOk)
             {
+                if (_link == link)
+                {
+                    _moodTracker.Applied(_dev, _boot, mood);
+                }
                 Write(LogKind.Info, $"Schedule: mood {mood}");
             }
             else
