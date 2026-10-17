@@ -1007,7 +1007,9 @@ public sealed partial class MainForm : Form
                    : Activities.FaceFor(_service.Mood);
         _face.Face = _art[face];
 
-        _detailFirmware.Text = connected ? $"firmware {_service.Firmware} · protocol {_service.Protocol}" : "–";
+        var build = _service.Build is { Length: >= 7 } b ? $" (build {b[..7]}{(b.EndsWith("-dirty", StringComparison.Ordinal) ? "-dirty" : "")})" : "";
+        var hardware = _service.Hardware is { } hw && hw != "ok" ? $" · hardware check: {hw}" : "";
+        _detailFirmware.Text = connected ? $"firmware {_service.Firmware}{build} · protocol {_service.Protocol}{hardware}" : "–";
         _detailClock.Text = _service.ClockText;
         _connect.Enabled = !connected;
         _disconnect.Enabled = connected || _service.AutoConnect;

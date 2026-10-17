@@ -17,6 +17,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "input.h"
+#include "port.h"
 #include "sdkconfig.h"
 #include "serial_link.h"
 
@@ -88,6 +89,7 @@ static void render_task(void *arg)
 void app_main(void)
 {
     const int64_t t_boot = esp_timer_get_time();
+    port_check_hardware(); // first: its flash read then cannot delay the scanout
     ESP_ERROR_CHECK(display_init(BOARD_LCD_H_RES, BOARD_LCD_V_RES)); // before board_init: the scanout reads the
                                                                       // buffers from its first frame
     const board_callbacks_t cbs = {.on_touch_irq = input_touch_irq, .on_bounce_fill = display_bounce_fill};

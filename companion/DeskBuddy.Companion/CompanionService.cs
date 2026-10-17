@@ -52,6 +52,10 @@ public sealed partial class CompanionService : IDisposable
     public string ConnectionText { get; private set; } = "Starting";
     public string? Firmware { get; private set; }
     public string? Protocol { get; private set; }
+    /// <summary>info build= / board= / hw= (cap info); null: not reported (older firmware, or not connected yet).</summary>
+    public string? Build { get; private set; }
+    public string? Board { get; private set; }
+    public string? Hardware { get; private set; }
     /// <summary>The port of the current connection; null while not connected.</summary>
     public string? PortName => IsConnected ? _link?.PortName : null;
     public string Mode { get; private set; } = "unknown";
@@ -390,6 +394,7 @@ public sealed partial class CompanionService : IDisposable
             _nextPing = DateTime.UtcNow + PingInterval;
             SetConnection($"Connected on {port}");
             Write(LogKind.Info, $"Connected to DeskBuddy on {port} (firmware {Firmware}, protocol {hello.Arg("proto")})");
+            await RefreshInfoAsync();
             await SyncClockAsync("connected");
             await ApplySavedFaceAsync(resendFace);
             await RefreshStatusAsync();
@@ -690,6 +695,34 @@ public sealed partial class CompanionService : IDisposable
                 if (Caps.Contains(ClockFace.Cap) && ClockFace.FromStatus(reply) is { } face)
                 {
                     OnFaceReported(face);
+                }
+                Changed?.Invoke();
+            }
+        }
+        catch (Exception e) when (e is TimeoutException or IOException or OperationCanceledException)
+        {
+        }
+    }
+
+    // info (cap info, firmware 1.0.0 on): the build and what the board reports about its own hardware.
+    private async Task RefreshInfoAsync()
+    {
+        Build = Board = Hardware = null;
+        if (_link is not { } link || !IsConnected || !Caps.Contains("info"))
+        {
+            return;
+        }
+        try
+        {
+            var reply = await link.RequestAsync("info", ReplyTimeout);
+            if (reply.IsOk)
+            {
+                Build = reply.Arg("build");
+                Board = reply.Arg("board");
+                Hardware = reply.Arg("hw");
+                if (Hardware is { } hw && hw != "ok")
+                {
+                    Write(LogKind.Info, $"The board's hardware check reports '{hw}': {reply.Line}");
                 }
                 Changed?.Invoke();
             }

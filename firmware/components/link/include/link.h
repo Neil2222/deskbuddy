@@ -42,6 +42,7 @@ typedef enum {
     LINK_CMD_PDC_RESULT, // id= result= [count=] [teams=]: how a ZDMW click (evt pdc.click) ended
     LINK_CMD_LOG_SINCE, // [boot=] seq=: replays the recorded events after seq (see app_events.h)
     LINK_CMD_CLOCK_FACE, // name=: Clock Mode's face (hello faces=)
+    LINK_CMD_INFO,       // -> ok fw= build= board= ... hw=: what this firmware is and what it runs on (cap info)
 } link_cmd_t;
 
 #define LINK_PDC_COUNT_MAX 2147483647

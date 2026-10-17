@@ -27,3 +27,7 @@ CONFIG_LCD_RGB_RESTART_IN_VSYNC=y
 # Console on UART0 (CH343 port) mirrored to native USB-Serial/JTAG
 CONFIG_ESP_CONSOLE_UART_DEFAULT=y
 CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG=y
+
+# The same source gives the same binaries (no build date/time, no local paths): a firmware package can be rebuilt
+# and compared (docs/firmware-packages.md)
+CONFIG_APP_REPRODUCIBLE_BUILD=y

@@ -1,7 +1,7 @@
 // The device side of the companion link (protocol: components/link, docs/protocol.md), on the board's UART and the
 // simulator's TCP socket alike.
 //
-// Received bytes are cut into lines. hello and ping are answered right away; other valid commands are handed to
+// Received bytes are cut into lines. hello, ping and info are answered right away; other valid commands are handed to
 // the application thread as APP_COMMAND events (it owns the character and the scene, and replies once it has
 // acted). Lines that are not frames are ignored.
 #pragma once
@@ -19,8 +19,8 @@ extern "C" {
 
 // The commands this firmware offers (hello caps=) and the message styles it draws (hello styles=). track: act iid=,
 // evt act, status act=, evt mood src=; did: evt did (MY DAY); log: seq=/t=/up= on evt act and evt did, dev= and boot=
-// in hello and evt boot, log.since; face: clock.face, hello faces=, status face=, evt face.
-#define APP_LINK_CAPS "poke,monster,mode,time,status,msg,mood,act,pdc,track,did,log,face"
+// in hello and evt boot, log.since; face: clock.face, hello faces=, status face=, evt face; info: the info command.
+#define APP_LINK_CAPS "poke,monster,mode,time,status,msg,mood,act,pdc,track,did,log,face,info"
 #define APP_LINK_STYLES "marquee"
 
 // Passes a command event to the application thread. false: it could not be queued (the command gets "err busy").

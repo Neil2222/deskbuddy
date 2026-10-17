@@ -45,3 +45,6 @@ sdkconfig.local
 Thumbs.db
 desktop.ini
 .DS_Store
+
+# --- Firmware packages (tools/package-firmware.ps1) ---
+dist/

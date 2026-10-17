@@ -33,6 +33,11 @@ const char *app_port_version(void);
 // 23 characters. The board: its MAC; the simulator: one per machine.
 const char *app_port_device_id(void);
 
+// What `info` reports after fw= (docs/protocol.md): space-separated key=value pairs, the same from start-up on, safe
+// from any thread. build= (the Git commit, "-dirty" if built with uncommitted changes) and board= come first; the
+// board adds the hardware it found and hw=ok or hw=mismatch (its self-check at start-up).
+const char *app_port_info(void);
+
 // Sends one complete line to the companion (a frame from link_format, newline included), in one piece: log lines
 // must never end up inside it. Safe from any thread.
 void app_port_send(const char *line, size_t len);

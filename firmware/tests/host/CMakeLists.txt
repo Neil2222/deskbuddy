@@ -79,20 +79,19 @@ add_executable(skeleton_assets skeleton_assets.c)
 target_link_libraries(skeleton_assets PRIVATE deskbuddy_core)
 target_compile_options(skeleton_assets PRIVATE ${WARNINGS})
 
-# The desktop simulator: components/app with firmware/simulator as its platform (app_port.h). The version is the
-# one ESP-IDF gives the firmware (git describe at configure time).
+# The desktop simulator: components/app with firmware/simulator as its platform (app_port.h). Its version is the
+# firmware's (deskbuddy/version.txt), its build the Git commit (build_commit.cmake), as on the board.
 if(WIN32)
-    find_package(Git QUIET)
-    set(SIM_VERSION unknown)
-    if(GIT_FOUND)
-        execute_process(COMMAND ${GIT_EXECUTABLE} describe --always --tags --dirty
-                        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-                        OUTPUT_VARIABLE SIM_VERSION OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
-    endif()
+    file(STRINGS ${CMAKE_CURRENT_SOURCE_DIR}/../../deskbuddy/version.txt SIM_VERSION LIMIT_COUNT 1)
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+                 ${CMAKE_CURRENT_SOURCE_DIR}/../../deskbuddy/version.txt)
+    include(${CMAKE_CURRENT_SOURCE_DIR}/../../build_commit.cmake)
+    deskbuddy_build_commit(SIM_BUILD_COMMIT)
     set(SIM_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../simulator)
     add_executable(deskbuddy_sim ${SIM_DIR}/sim_main.c ${SIM_DIR}/sim_port.c)
     target_include_directories(deskbuddy_sim PRIVATE ${SIM_DIR})
-    target_compile_definitions(deskbuddy_sim PRIVATE DESKBUDDY_SIM_VERSION="${SIM_VERSION}")
+    target_compile_definitions(deskbuddy_sim PRIVATE DESKBUDDY_SIM_VERSION="${SIM_VERSION}"
+                               DESKBUDDY_BUILD_COMMIT="${SIM_BUILD_COMMIT}")
     target_link_libraries(deskbuddy_sim PRIVATE deskbuddy_core ws2_32 winmm)
     target_compile_options(deskbuddy_sim PRIVATE ${WARNINGS})
 endif()

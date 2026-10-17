@@ -10,6 +10,7 @@
 extern "C" {
 #endif
 
+#define BOARD_NAME "waveshare-esp32-s3-touch-lcd-7b" // info board= and the firmware package's board
 #define BOARD_LCD_H_RES 1024
 #define BOARD_LCD_V_RES 600
 #define BOARD_LCD_NUM_FBS 2

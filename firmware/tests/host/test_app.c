@@ -47,6 +47,7 @@ void app_port_wall_get(int64_t *sec, uint32_t *usec)
 void app_port_wall_set(int64_t sec, uint32_t usec) { s_wall_us = sec * 1000000 + usec; }
 const char *app_port_version(void) { return "test"; }
 const char *app_port_device_id(void) { return "test-dev"; }
+const char *app_port_info(void) { return "build=0123456789abcdef0123456789abcdef01234567 board=test hw=ok"; }
 void app_port_random_fill(void *buf, size_t len) { memset(buf, 0xab, len); }
 void *app_port_alloc(size_t size, app_mem_t kind)
 {
@@ -220,11 +221,34 @@ void test_app_hello_offers_tracking_and_the_question(void)
     CHECK(start());
     clear_out();
     command(1, "hello");
-    CHECK(sent("caps=poke,monster,mode,time,status,msg,mood,act,pdc,track,did,log,face "));
+    CHECK(sent("caps=poke,monster,mode,time,status,msg,mood,act,pdc,track,did,log,face,info "));
     CHECK(sent("acts=water,sneeze,stare,meditate,focus,ask_peukie,kitt faces=classic,skeleton dev="));
     clear_out();
     command(2, "status");
     CHECK(sent(" act=none"));
+}
+
+// info is answered by the link at once, like ping: the firmware version, then what the platform reports.
+void test_app_info_reports_the_build_and_the_board(void)
+{
+    CHECK(start());
+    clear_out();
+    command(3, "info");
+    CHECK(sent("<DB1 3 ok fw=test build=0123456789abcdef0123456789abcdef01234567 board=test hw=ok #"));
+    CHECK_EQ(count("<DB1"), 1);
+}
+
+// hello is the longest reply, and a reply that does not fit is not sent at all (the companion could not connect).
+// With the board's 12-digit device id and a version as long as "10.20.30-rc.10" it still fits.
+void test_app_hello_fits_with_a_long_version(void)
+{
+    CHECK(start());
+    clear_out();
+    command(4, "hello");
+    CHECK_EQ(count("\n"), 1);
+    const size_t worst =
+        strlen(s_out) - strlen("test") + strlen("10.20.30-rc.10") - strlen("test-dev") + strlen("441bf68d1178");
+    CHECK(worst < LINK_REPLY_MAX);
 }
 
 // The scheduled question: started by `act` with the companion's id, shown, then exactly one outcome. NEE and no

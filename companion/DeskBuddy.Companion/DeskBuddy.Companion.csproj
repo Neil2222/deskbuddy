@@ -8,6 +8,9 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <AssemblyTitle>DeskBuddy Companion</AssemblyTitle>
+    <!-- Semantic version; the SDK appends the Git commit (+sha) to the product version. Firmware packages name the
+         oldest Companion that can install them (minCompanion, docs/firmware-packages.md). -->
+    <Version>1.1.0</Version>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <ApplicationIcon>..\..\assets\buddy\buddy.ico</ApplicationIcon>
     <!-- The UI is built in code, not in the WinForms designer: designer serialization does not apply. -->
@@ -16,6 +19,7 @@
 
   <ItemGroup>
     <PackageReference Include="System.IO.Ports" Version="10.0.0" />
+    <ProjectReference Include="..\DeskBuddy.Firmware\DeskBuddy.Firmware.csproj" />
   </ItemGroup>
 
   <!-- Buddy's own pixels, exported from the firmware sprites by tools/host-test.ps1 -Icons. Every face-*.png and

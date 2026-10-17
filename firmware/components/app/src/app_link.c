@@ -78,6 +78,13 @@ static void handle_line(const char *line, size_t len, app_link_deliver_fn delive
         app_link_send(ev.command.seq, "ok");
         return;
     }
+    if (ev.command.cmd == LINK_CMD_INFO) {
+        // Fixed since start-up (app_port_info): answered here, the application thread is not involved.
+        char body[LINK_REPLY_MAX];
+        snprintf(body, sizeof(body), "ok fw=%s %s", app_port_version(), app_port_info());
+        app_link_send(ev.command.seq, body);
+        return;
+    }
     if (!deliver(&ev, ctx)) {
         app_link_send(ev.command.seq, "err busy");
     }

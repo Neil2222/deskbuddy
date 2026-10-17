@@ -13,7 +13,8 @@ $ErrorActionPreference = 'Stop'
 
 $src = Join-Path $PSScriptRoot '..\firmware\tests\host'
 $build = Join-Path $src 'build-sim'
-# Reconfigure each time: the version (git describe) is read at configure time, as ESP-IDF does for the firmware.
+# Reconfigure each time: the version (deskbuddy/version.txt) and the build commit are read at configure time, as
+# ESP-IDF does for the firmware.
 Invoke-Msvc @(
     "cmake -S `"$src`" -B `"$build`" -G Ninja -DCMAKE_BUILD_TYPE=Release -DHOST_SANITIZE=OFF",
     "cmake --build `"$build`" --target deskbuddy_sim"

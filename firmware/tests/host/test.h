@@ -129,6 +129,8 @@ extern int g_test_failed;
     X(kitt_scanner_sweeps_with_a_tail)               \
     X(kitt_redraws_match_full_redraw)                \
     X(app_hello_offers_tracking_and_the_question)    \
+    X(app_info_reports_the_build_and_the_board)      \
+    X(app_hello_fits_with_a_long_version)            \
     X(app_question_by_command_reports_yes_no_and_timeout) \
     X(app_an_interrupted_question_is_never_an_answer) \
     X(app_shows_and_touches_report_their_own_ids)    \

@@ -21,7 +21,7 @@ static const struct {
     {"poke", LINK_CMD_POKE},         {"monster", LINK_CMD_MONSTER}, {"mode.set", LINK_CMD_MODE_SET},
     {"time.set", LINK_CMD_TIME_SET}, {"msg.show", LINK_CMD_MSG_SHOW}, {"mood.set", LINK_CMD_MOOD_SET},
     {"act", LINK_CMD_ACT},           {"pdc.set", LINK_CMD_PDC_SET}, {"pdc.result", LINK_CMD_PDC_RESULT},
-    {"log.since", LINK_CMD_LOG_SINCE}, {"clock.face", LINK_CMD_CLOCK_FACE},
+    {"log.since", LINK_CMD_LOG_SINCE}, {"clock.face", LINK_CMD_CLOCK_FACE}, {"info", LINK_CMD_INFO},
 };
 
 static const char *const PDC_RESULTS[LINK_PDC_RESULT_COUNT] = {

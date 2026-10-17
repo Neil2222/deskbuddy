@@ -19,6 +19,9 @@
 #ifndef DESKBUDDY_SIM_VERSION
 #define DESKBUDDY_SIM_VERSION "unknown"
 #endif
+#ifndef DESKBUDDY_BUILD_COMMIT
+#define DESKBUDDY_BUILD_COMMIT "unknown"
+#endif
 
 void (*sim_on_present)(void);
 void (*sim_on_link)(bool connected);
@@ -74,6 +77,12 @@ void app_port_wall_set(int64_t sec, uint32_t usec)
 const char *app_port_version(void)
 {
     return DESKBUDDY_SIM_VERSION;
+}
+
+// No hardware to check: the simulator is never a target for a firmware package (board=simulator).
+const char *app_port_info(void)
+{
+    return "build=" DESKBUDDY_BUILD_COMMIT " board=simulator hw=ok";
 }
 
 // "sim-" and 12 hex digits of a hash of the computer's name: the same every run on this machine, another on the next.

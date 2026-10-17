@@ -1,5 +1,6 @@
 // app_port.h on the board: ESP-IDF timer and clock, internal RAM and PSRAM, the display's frame buffers, the IO
-// expander's backlight, and the console UART to the companion.
+// expander's backlight, the console UART to the companion, and the build and hardware identity (info).
+#include <inttypes.h>
 #include <stdio.h>
 #include <sys/time.h>
 
@@ -9,12 +10,16 @@
 #include "display.h"
 #include "esp_app_desc.h"
 #include "esp_cache.h"
+#include "esp_chip_info.h"
 #include "esp_err.h"
+#include "esp_flash.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_mac.h"
+#include "esp_psram.h"
 #include "esp_random.h"
 #include "esp_timer.h"
+#include "port.h"
 #include "sdkconfig.h"
 
 static const char *TAG = "deskbuddy";
@@ -55,6 +60,43 @@ void app_port_wall_set(int64_t sec, uint32_t usec)
 const char *app_port_version(void)
 {
     return esp_app_get_description()->version;
+}
+
+#ifndef DESKBUDDY_BUILD_COMMIT
+#define DESKBUDDY_BUILD_COMMIT "unknown"
+#endif
+
+// What a supported board has (docs/hardware.md): an ESP32-S3 with 16 MB flash and 8 MB PSRAM. The IO expander and
+// the touch controller are not checked again here: board_init() stops the start-up if either does not answer.
+#define EXPECTED_FLASH_BYTES (16u * 1024 * 1024)
+#define EXPECTED_PSRAM_BYTES (8u * 1024 * 1024)
+
+static char s_info[224]; // with a 46-character build, the board name and a long ESP-IDF version: under 200
+
+// Only reads what ESP-IDF already knows, and the flash chip's size (one flash command): nothing is written, nothing
+// is configured, and it runs before the display starts, so the scanout never waits for it.
+void port_check_hardware(void)
+{
+    esp_chip_info_t chip;
+    esp_chip_info(&chip);
+    uint32_t flash = 0;
+    if (esp_flash_get_physical_size(esp_flash_default_chip, &flash) != ESP_OK) {
+        flash = 0;
+    }
+    const size_t psram = esp_psram_get_size();
+    const bool ok = chip.model == CHIP_ESP32S3 && flash == EXPECTED_FLASH_BYTES && psram == EXPECTED_PSRAM_BYTES;
+    snprintf(s_info, sizeof(s_info), "build=%s board=%s chip=%s rev=%u.%u flash=%" PRIu32 "MB psram=%uMB idf=%s hw=%s",
+             DESKBUDDY_BUILD_COMMIT, BOARD_NAME, chip.model == CHIP_ESP32S3 ? "esp32s3" : "other",
+             (unsigned)(chip.revision / 100), (unsigned)(chip.revision % 100), flash / (1024 * 1024),
+             (unsigned)(psram / (1024 * 1024)), esp_app_get_description()->idf_ver, ok ? "ok" : "mismatch");
+    if (!ok) {
+        ESP_LOGW(TAG, "hardware self-check: %s", s_info);
+    }
+}
+
+const char *app_port_info(void)
+{
+    return s_info;
 }
 
 const char *app_port_device_id(void)

@@ -18,6 +18,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\DeskBuddy.Companion\DeskBuddy.Companion.csproj" />
+    <ProjectReference Include="..\DeskBuddy.Firmware\DeskBuddy.Firmware.csproj" />
   </ItemGroup>
 
 </Project>
