@@ -1034,8 +1034,13 @@ uint32_t app_frame(void)
         }
         if (s.has_menu) {
             const menu_status_t st = menu_status(&s.brain, s.has_office, now);
+            uint32_t hold_wait;
+            if (menu_hold(&s.menu, &st, now, &hold_wait)) {
+                APP_LOGI(TAG, "menu: clock faces (long press on his head)");
+            }
             const uint32_t menu_next = menu_view_apply(&s.menu_view, &s.menu, &st, now);
             next = menu_next < next ? menu_next : next;
+            next = hold_wait < next ? hold_wait : next;
         }
     }
     // The question shows while he asks it: not during the zoom or in Clock Mode.

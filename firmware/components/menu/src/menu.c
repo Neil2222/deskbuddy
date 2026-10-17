@@ -15,12 +15,8 @@ menu_avail_t menu_item_avail(const menu_item_t *it, const menu_status_t *st)
     if (it->action == MENU_DO_OFFICE && !st->office) {
         return MENU_ITEM_HIDDEN;
     }
-    // Clock faces: only those that exist, and the page only when there is a choice.
+    // Clock faces: only those that exist.
     if (it->action == MENU_DO_FACE && (!st->office || !(st->faces & (1u << it->arg)))) {
-        return MENU_ITEM_HIDDEN;
-    }
-    if (it->action == MENU_DO_OPEN && it->arg == MENU_CLOCKFACES &&
-        (!st->office || (st->faces & (st->faces - 1)) == 0)) {
         return MENU_ITEM_HIDDEN;
     }
     // The PDC Manager integration exists only while the companion offers it: no dead buttons without it.
@@ -68,6 +64,17 @@ gfx_rect_t menu_back_rect(void)
 gfx_rect_t menu_footer_rect(void)
 {
     return (gfx_rect_t){MARGIN, FOOTER_Y, MENU_FOOTER_W, MENU_FOOTER_H};
+}
+
+gfx_rect_t menu_head_rect(void)
+{
+    return (gfx_rect_t){140, 0, MENU_W - 140, HEADER_H - 2}; // the head is drawn at 146..169 x 7..27
+}
+
+// The CLOCK FACES page has something to offer: Clock Mode and more than one face.
+static bool faces_to_choose(const menu_status_t *st)
+{
+    return st->office && (st->faces & (st->faces - 1)) != 0;
 }
 
 static int slots_of(menu_layout_t layout)
@@ -162,6 +169,9 @@ int menu_hit(const menu_t *m, const menu_status_t *st, int x, int y, uint32_t no
             return MENU_HIT_BACK;
         }
     }
+    if (st->office && inside(menu_head_rect(), 0, mx, my)) {
+        return MENU_HIT_HEAD;
+    }
     const menu_item_t *items[MENU_SLOTS];
     int pages;
     const int n = menu_page_items(m, st, items, &pages);
@@ -200,6 +210,31 @@ static void turn_page(menu_t *m, const menu_status_t *st, int delta, uint32_t no
     }
 }
 
+// The finger stayed on the head long enough: the CLOCK FACES page (if there is a choice), and no tap after it.
+static bool long_press(menu_t *m, const menu_status_t *st, uint32_t now)
+{
+    m->target = m->pressed = MENU_HIT_NONE;
+    if (!faces_to_choose(st)) {
+        return false;
+    }
+    menu_open(m, MENU_CLOCKFACES, now);
+    return true;
+}
+
+bool menu_hold(menu_t *m, const menu_status_t *st, uint32_t now, uint32_t *wait_ms)
+{
+    *wait_ms = UINT32_MAX;
+    if (!m->down || m->target != MENU_HIT_HEAD) {
+        return false;
+    }
+    const uint32_t held = now - m->down_at;
+    if (held < MENU_HOLD_MS) {
+        *wait_ms = MENU_HOLD_MS - held;
+        return false;
+    }
+    return long_press(m, st, now);
+}
+
 menu_result_t menu_touch(menu_t *m, menu_touch_t type, int x, int y, const menu_status_t *st, uint32_t now)
 {
     const menu_result_t none = {MENU_DO_NOTHING, 0, NULL};
@@ -211,6 +246,7 @@ menu_result_t menu_touch(menu_t *m, menu_touch_t type, int x, int y, const menu_
         m->down = true;
         m->down_x = (int16_t)x;
         m->down_y = (int16_t)y;
+        m->down_at = now;
         const int hit = menu_hit(m, st, x, y, now);
         if (hit >= 0 && hit < MENU_SLOTS) {
             const menu_item_t *items[MENU_SLOTS];
@@ -258,6 +294,12 @@ menu_result_t menu_touch(menu_t *m, menu_touch_t type, int x, int y, const menu_
     case MENU_HIT_NEXT:
         turn_page(m, st, target == MENU_HIT_NEXT ? 1 : -1, now);
         return none;
+    case MENU_HIT_HEAD: // lifted before it became a long press: the clock (held longer without a frame: the faces)
+        if (now - m->down_at >= MENU_HOLD_MS) {
+            long_press(m, st, now);
+            return none;
+        }
+        return (menu_result_t){MENU_DO_OFFICE, 0, NULL};
     default:
         break;
     }

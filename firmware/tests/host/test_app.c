@@ -324,11 +324,11 @@ void test_app_shows_and_touches_report_their_own_ids(void)
     CHECK(sent(own));
     run(BUDDY_SNEEZE_MS + 500);
 
-    // On the touchscreen: Activities, SNEEZE (after SURPRISE!, CLOCK and CLOCK FACES).
+    // On the touchscreen: Activities, SNEEZE (after SURPRISE!).
     clear_out();
     tap_slot(MENU_LIST, 1);
     run(600); // the tiles flip in
-    tap_slot(MENU_GRID, 3);
+    tap_slot(MENU_GRID, 1);
     run(50);
     snprintf(own, sizeof(own), "evt act iid=%" PRIu32 " name=sneeze state=shown src=touch", 0x80000000u | 12346u);
     CHECK(sent(own));
@@ -490,9 +490,27 @@ static int lit_pixels(void)
     return n;
 }
 
-// Clock faces: chosen by command or on the CLOCK FACES page, reported once per change (evt face, status face=);
-// the CLOCK shortcut enters the selected face, a face chosen meanwhile shows at once, a tap still leaves Clock Mode,
-// and his mood (changed meanwhile) carries on afterwards.
+// The header's Buddy head: held, the CLOCK FACES page; tapped, Clock Mode.
+static void head_point(int *x, int *y)
+{
+    const gfx_rect_t r = menu_head_rect();
+    *x = s_where.area.x + (r.x + r.w / 2) * MENU_SCALE;
+    *y = s_where.area.y + (r.y + r.h / 2) * MENU_SCALE;
+}
+
+static void hold_head(uint32_t ms)
+{
+    int x, y;
+    head_point(&x, &y);
+    app_event(&(app_event_t){.type = APP_TOUCH_DOWN, .x = (int16_t)x, .y = (int16_t)y, .at_us = s_now_us});
+    run(ms); // the frames notice the long press (app_frame polls menu_hold)
+    app_event(&(app_event_t){.type = APP_TOUCH_UP, .x = (int16_t)x, .y = (int16_t)y, .at_us = s_now_us});
+    run(40);
+}
+
+// Clock faces: chosen by command or on the CLOCK FACES page (a long press on the header's Buddy head), reported once
+// per change (evt face, status face=); a tap on the head enters the selected face, a face chosen meanwhile shows at
+// once, a tap still leaves Clock Mode, and his mood (changed meanwhile) carries on afterwards.
 void test_app_clock_faces_by_touch_and_command(void)
 {
     CHECK(start());
@@ -510,12 +528,13 @@ void test_app_clock_faces_by_touch_and_command(void)
     CHECK(sent("<DB1 73 err unsupported #"));
     CHECK(sent("<DB1 74 err bad_args #"));
 
-    // Activities, CLOCK FACES: CLASSIC, then SKELETON again.
+    // From Activities: held on his head, CLOCK FACES (no Clock Mode); CLASSIC, then SKELETON again.
     clear_out();
     tap_slot(MENU_LIST, 1);
     run(600);
-    tap_slot(MENU_GRID, 2);
+    hold_head(MENU_HOLD_MS + 100);
     run(600);
+    CHECK(!sent("evt mode"));
     tap_slot(MENU_GRID, 0);
     run(100);
     CHECK_EQ(count("evt face name=classic src=touch"), 1);
@@ -525,11 +544,13 @@ void test_app_clock_faces_by_touch_and_command(void)
     command(75, "status");
     CHECK(sent(" face=skeleton #"));
 
-    // Back to Activities: CLOCK zooms into the Skeleton.
+    // Back goes Home; a tap on his head zooms into the Skeleton.
     tap_back();
     run(600);
     clear_out();
-    tap_slot(MENU_GRID, 1);
+    int hx, hy;
+    head_point(&hx, &hy);
+    touch(hx, hy);
     run(4000);
     CHECK(sent("evt mode mode=office"));
     const int skeleton = lit_pixels(); // the movement, the timeplate
@@ -554,7 +575,6 @@ void test_app_clock_faces_by_touch_and_command(void)
     CHECK(sent(" mode=normal mood=happy "));
     CHECK(sent(" face=skeleton #"));
     command(80, "mood.set name=idle");
-    tap_back(); // Home, for whatever runs next
     run(600);
 }
 

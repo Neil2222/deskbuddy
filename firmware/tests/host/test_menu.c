@@ -71,7 +71,8 @@ static void back_center(const menu_t *m, int *x, int *y)
 void test_menu_definitions_fit_and_connect(void)
 {
     const menu_def_t *d = &menu_default;
-    bool reachable[MENU_CATEGORY_COUNT] = {[MENU_HOME] = true};
+    // Home, and CLOCK FACES through a long press on the header's Buddy head (test_menu_head_*).
+    bool reachable[MENU_CATEGORY_COUNT] = {[MENU_HOME] = true, [MENU_CLOCKFACES] = true};
     int moods[BUDDY_MOOD_COUNT] = {0};
     for (int i = 0; i < d->count; i++) {
         const menu_item_t *it = &d->items[i];
@@ -236,29 +237,30 @@ void test_menu_activities_and_availability(void)
     static menu_t m;
     CHECK(menu_init(&m, &menu_default, panel_area(), 0));
     menu_open(&m, MENU_ACTIVITIES, 0);
+    // The shows only: the clock lives on the header's Buddy head now.
+    static const char *const ids[] = {"activity.surprise", "activity.sneeze", "activity.stare",
+                                      "activity.meditate", "activity.focus",  "activity.peukie"};
+    const menu_item_t *items[MENU_SLOTS];
+    int pages;
+    CHECK_EQ(menu_page_items(&m, &k_idle, items, &pages), 6);
+    CHECK_EQ(pages, 1);
+    for (int i = 0; i < 6; i++) {
+        CHECK(strcmp(items[i]->id, ids[i]) == 0);
+        CHECK_EQ(items[i]->action, MENU_DO_EVENT);
+    }
     uint32_t t = 1000;
     menu_result_t r = tap(&m, slot_of(&m, &k_idle, "activity.surprise"), &k_idle, t);
     CHECK_EQ(r.action, MENU_DO_EVENT);
     CHECK_EQ(r.arg, BUDDY_EVENT_POKE);
-    r = tap(&m, slot_of(&m, &k_idle, "activity.clock"), &k_idle, t += 500);
-    CHECK_EQ(r.action, MENU_DO_OFFICE);
 
     // While a Monster sequence runs, Buddy ignores reactions: those buttons are dimmed and do nothing.
     menu_status_t busy = k_idle;
     busy.busy = true; // an activity plays (the Monster sequence or another)
     const int surprise = slot_of(&m, &busy, "activity.surprise");
-    const menu_item_t *items[MENU_SLOTS];
     menu_page_items(&m, &busy, items, NULL);
     CHECK_EQ(menu_item_avail(items[surprise], &busy), MENU_ITEM_BUSY);
     CHECK_EQ(tap(&m, surprise, &busy, t += 500).action, MENU_DO_NOTHING);
     CHECK_EQ(m.pressed, MENU_HIT_NONE);
-    CHECK_EQ(tap(&m, slot_of(&m, &busy, "activity.clock"), &busy, t += 500).action, MENU_DO_OFFICE);
-
-    // Without the clock there is no Clock Mode to offer: hidden, not a dead button.
-    menu_status_t no_office = k_idle;
-    no_office.office = false;
-    CHECK_EQ(slot_of(&m, &no_office, "activity.clock"), -1);
-    CHECK_EQ(menu_page_items(&m, &no_office, items, NULL), 6); // Surprise!, Sneeze, Stare, Meditate, Focus, Peukie?
 
     // Food & Drink: Monster and Water work (and are busy during any activity); the rest is planned.
     menu_open(&m, MENU_FOOD, t += 500);
@@ -276,28 +278,91 @@ void test_menu_activities_and_availability(void)
     CHECK_EQ(m.nope, coffee);
 }
 
-// CLOCK FACES: under Activities, next to the CLOCK shortcut; offered only when there is a choice; one tile per face
-// this firmware has (its id is the face's wire name), the selected one marked; a tap selects, Back goes to
-// Activities.
-void test_menu_clock_faces_page(void)
+// Screen point of the header's Buddy head (the middle of the head as drawn, inside its touch area).
+static void head_center(const menu_t *m, int *x, int *y)
+{
+    *x = m->area.x + (146 + 12) * MENU_SCALE;
+    *y = m->area.y + (7 + 10) * MENU_SCALE;
+}
+
+// A finger held at (x, y) for ms, the frames polling menu_hold() every 30 ms as the firmware does; returns whether
+// the hold opened the CLOCK FACES page, and the release's result in *up.
+static bool hold_at(menu_t *m, int x, int y, const menu_status_t *st, uint32_t now, uint32_t ms, menu_result_t *up)
+{
+    bool opened = false;
+    uint32_t wait;
+    menu_touch(m, MENU_TOUCH_DOWN, x, y, st, now);
+    for (uint32_t t = now; t < now + ms; t += 30) {
+        opened |= menu_hold(m, st, t, &wait);
+    }
+    *up = menu_touch(m, MENU_TOUCH_UP, x, y, st, now + ms);
+    return opened;
+}
+
+// The header's Buddy head: a tap enters Clock Mode, a long press opens CLOCK FACES, from Home and from every page.
+void test_menu_head_tap_enters_the_clock_from_every_page(void)
+{
+    static menu_t m;
+    CHECK(menu_init(&m, &menu_default, panel_area(), 0));
+    menu_status_t st = k_idle;
+    st.faces = (1u << OFFICE_FACE_COUNT) - 1;
+    int x, y;
+    head_center(&m, &x, &y);
+    static const menu_category_t pages[] = {MENU_HOME,  MENU_MOODS,      MENU_ACTIVITIES, MENU_FOOD,
+                                            MENU_MYDAY, MENU_CLOCKFACES};
+    uint32_t t = 1000;
+    for (unsigned i = 0; i < sizeof(pages) / sizeof(pages[0]); i++) {
+        menu_open(&m, pages[i], t);
+        CHECK_EQ(menu_hit(&m, &st, x, y, t), MENU_HIT_HEAD);
+        menu_result_t up;
+        CHECK(!hold_at(&m, x, y, &st, t += 1000, 200, &up));
+        CHECK_EQ(up.action, MENU_DO_OFFICE);
+        CHECK_EQ(m.category, pages[i]); // the page stays (the menu hides for the zoom and comes back on it)
+        t += 1000;
+    }
+    // Also while he is busy (a show, KITT), as the CLOCK tile was: Clock Mode always wins.
+    menu_status_t busy = st;
+    busy.busy = busy.kitt = true;
+    menu_result_t up;
+    hold_at(&m, x, y, &busy, t += 1000, 100, &up);
+    CHECK_EQ(up.action, MENU_DO_OFFICE);
+
+    // Without a clock the head is only his head: no target, and a tap there does nothing.
+    menu_status_t no_office = st;
+    no_office.office = false;
+    CHECK_EQ(menu_hit(&m, &no_office, x, y, t), MENU_HIT_NONE);
+    CHECK(!hold_at(&m, x, y, &no_office, t += 1000, 100, &up));
+    CHECK_EQ(up.action, MENU_DO_NOTHING);
+    CHECK(!hold_at(&m, x, y, &no_office, t += 1000, 1000, &up));
+    CHECK_EQ(up.action, MENU_DO_NOTHING);
+}
+
+void test_menu_head_long_press_opens_clock_faces(void)
 {
     static menu_t m;
     CHECK(menu_init(&m, &menu_default, panel_area(), 0));
     menu_status_t st = k_idle;
     st.faces = (1u << OFFICE_FACE_COUNT) - 1;
     st.face = OFFICE_FACE_SKELETON;
-    menu_open(&m, MENU_ACTIVITIES, 0);
-    CHECK_EQ(slot_of(&m, &st, "activity.clockfaces"), slot_of(&m, &st, "activity.clock") + 1);
-    menu_status_t one = st;
-    one.faces = 1u << OFFICE_FACE_CLASSIC; // nothing to choose
-    CHECK_EQ(slot_of(&m, &one, "activity.clockfaces"), -1);
-    menu_status_t no_office = st;
-    no_office.office = false;
-    CHECK_EQ(slot_of(&m, &no_office, "activity.clockfaces"), -1);
-
+    int x, y;
+    head_center(&m, &x, &y);
     uint32_t t = 1000;
-    menu_result_t r = tap(&m, slot_of(&m, &st, "activity.clockfaces"), &st, t);
+
+    // Held: the page opens at MENU_HOLD_MS, while the finger is still down; the release then does nothing.
+    menu_open(&m, MENU_ACTIVITIES, t);
+    uint32_t wait;
+    menu_touch(&m, MENU_TOUCH_DOWN, x, y, &st, t += 1000);
+    CHECK(!menu_hold(&m, &st, t + MENU_HOLD_MS - 1, &wait));
+    CHECK_EQ(wait, 1);
+    CHECK_EQ(m.category, MENU_ACTIVITIES);
+    CHECK(menu_hold(&m, &st, t + MENU_HOLD_MS, &wait));
     CHECK_EQ(m.category, MENU_CLOCKFACES);
+    CHECK(!menu_hold(&m, &st, t + MENU_HOLD_MS + 30, &wait)); // once
+    CHECK_EQ(wait, UINT32_MAX);
+    CHECK_EQ(menu_touch(&m, MENU_TOUCH_UP, x, y, &st, t + 2000).action, MENU_DO_NOTHING); // no tap after it
+
+    // The page: one tile per face this firmware has (its id the face's wire name), the selected one marked; a tap
+    // selects; Back goes Home (the page belongs to no category).
     const menu_item_t *items[MENU_SLOTS];
     CHECK_EQ(menu_page_items(&m, &st, items, NULL), OFFICE_FACE_COUNT);
     for (int i = 0; i < OFFICE_FACE_COUNT; i++) {
@@ -307,16 +372,82 @@ void test_menu_clock_faces_page(void)
         CHECK_EQ(items[i]->arg, face);
         CHECK_EQ(menu_item_active(items[i], &st), face == OFFICE_FACE_SKELETON);
     }
-    t += 1000;
-    r = tap(&m, slot_of(&m, &st, "face.classic"), &st, t);
+    t += 3000;
+    menu_result_t r = tap(&m, slot_of(&m, &st, "face.classic"), &st, t);
     CHECK_EQ(r.action, MENU_DO_FACE);
     CHECK_EQ(r.arg, OFFICE_FACE_CLASSIC);
+    menu_status_t one = st;
     one.faces = 1u << OFFICE_FACE_CLASSIC; // a face this device could not set up: not offered
     CHECK_EQ(slot_of(&m, &one, "face.skeleton"), -1);
+    int bx, by;
+    back_center(&m, &bx, &by);
+    tap_at(&m, bx, by, &st, t += 500);
+    CHECK_EQ(m.category, MENU_HOME);
+
+    // From Home, Moods and MY DAY too; a release after MENU_HOLD_MS without a frame in between counts as held.
+    static const menu_category_t pages[] = {MENU_HOME, MENU_MOODS, MENU_MYDAY};
+    for (unsigned i = 0; i < sizeof(pages) / sizeof(pages[0]); i++) {
+        menu_open(&m, pages[i], t += 1000);
+        menu_result_t up;
+        CHECK(hold_at(&m, x, y, &st, t += 1000, MENU_HOLD_MS + 100, &up));
+        CHECK_EQ(up.action, MENU_DO_NOTHING);
+        CHECK_EQ(m.category, MENU_CLOCKFACES);
+    }
+    menu_open(&m, MENU_FOOD, t += 1000);
+    menu_touch(&m, MENU_TOUCH_DOWN, x, y, &st, t += 1000);
+    CHECK_EQ(menu_touch(&m, MENU_TOUCH_UP, x, y, &st, t + MENU_HOLD_MS).action, MENU_DO_NOTHING);
+    CHECK_EQ(m.category, MENU_CLOCKFACES);
+
+    // Nothing to choose (one face): a long press just ends, never turning into a tap.
+    menu_open(&m, MENU_HOME, t += 1000);
+    menu_result_t up;
+    CHECK(!hold_at(&m, x, y, &one, t += 1000, MENU_HOLD_MS + 100, &up));
+    CHECK_EQ(up.action, MENU_DO_NOTHING);
+    CHECK_EQ(m.category, MENU_HOME);
+}
+
+// A finger that slides off the head, or lifts elsewhere, does nothing; the head's area keeps clear of Back and of
+// the tiles below the header.
+void test_menu_head_touch_cancels_and_keeps_clear(void)
+{
+    static menu_t m;
+    CHECK(menu_init(&m, &menu_default, panel_area(), 0));
+    menu_status_t st = k_idle;
+    st.faces = (1u << OFFICE_FACE_COUNT) - 1;
     int x, y;
-    back_center(&m, &x, &y);
-    tap_at(&m, x, y, &st, t += 500);
-    CHECK_EQ(m.category, MENU_ACTIVITIES);
+    head_center(&m, &x, &y);
+    uint32_t t = 1000, wait;
+    menu_open(&m, MENU_MOODS, t);
+    t += 1000;
+
+    // Slid away (beyond the slop): neither a tap nor, held on, a long press.
+    menu_touch(&m, MENU_TOUCH_DOWN, x, y, &st, t);
+    menu_touch(&m, MENU_TOUCH_MOVE, x - MENU_SLOP_PX - 4, y, &st, t + 50);
+    CHECK(!menu_hold(&m, &st, t + MENU_HOLD_MS + 10, &wait));
+    CHECK_EQ(menu_touch(&m, MENU_TOUCH_UP, x, y, &st, t + MENU_HOLD_MS + 20).action, MENU_DO_NOTHING);
+    CHECK_EQ(m.category, MENU_MOODS);
+    // A small wobble still counts as a tap.
+    menu_touch(&m, MENU_TOUCH_DOWN, x, y, &st, t += 1000);
+    menu_touch(&m, MENU_TOUCH_MOVE, x + MENU_SLOP_PX / 2, y + 2, &st, t + 50);
+    CHECK_EQ(menu_touch(&m, MENU_TOUCH_UP, x + MENU_SLOP_PX / 2, y + 2, &st, t + 100).action, MENU_DO_OFFICE);
+    // Down on a tile, lifted on the head (no move events in between): nothing.
+    int sx, sy;
+    slot_center(&m, 1, &sx, &sy);
+    menu_touch(&m, MENU_TOUCH_DOWN, sx, sy, &st, t += 1000);
+    CHECK_EQ(menu_touch(&m, MENU_TOUCH_UP, x, y, &st, t + 60).action, MENU_DO_NOTHING);
+    // Down on the head, lifted on a tile: nothing either.
+    menu_touch(&m, MENU_TOUCH_DOWN, x, y, &st, t += 1000);
+    CHECK_EQ(menu_touch(&m, MENU_TOUCH_UP, sx, sy, &st, t + 60).action, MENU_DO_NOTHING);
+
+    // The area: bigger than the head as drawn, inside the header, apart from Back and the tiles.
+    const gfx_rect_t head = menu_head_rect(), back = menu_back_rect();
+    CHECK(head.x <= 146 - 4 && head.x + head.w >= 146 + MENU_FACE_W && head.y <= 7 - 4 && head.h >= 21 + 4);
+    CHECK(head.x + head.w <= MENU_W && head.y + head.h <= menu_slot_rect(MENU_GRID, 1).y - 2); // above the tiles' pad
+    CHECK(head.x >= back.x + back.w + 15);                                                     // right of Back's area
+    for (int my = 0; my < head.h; my++) {
+        int bx2 = m.area.x + (back.x + back.w + 14) * MENU_SCALE, by2 = m.area.y + my * MENU_SCALE;
+        CHECK_EQ(menu_hit(&m, &st, bx2, by2, t), MENU_HIT_BACK); // Back's whole corner is still Back's
+    }
 }
 
 void test_menu_touch_needs_a_clean_tap(void)

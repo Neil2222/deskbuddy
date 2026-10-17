@@ -40,7 +40,7 @@ typedef enum {
     MENU_GAMES,
     MENU_MYDAY,
     MENU_PDC,
-    MENU_CLOCKFACES, // under Activities: which face Clock Mode shows
+    MENU_CLOCKFACES, // which face Clock Mode shows: opened by a long press on the header's Buddy head
     MENU_CATEGORY_COUNT,
 } menu_category_t;
 
@@ -60,10 +60,10 @@ typedef enum {
     MENU_DO_OPEN,    // opens category `arg`
     MENU_DO_MOOD,    // sets mood `arg` (buddy_mood_t) until it is changed
     MENU_DO_EVENT,   // delivers buddy_event_t `arg` (Surprise!, Monster)
-    MENU_DO_OFFICE,  // switches to the Office Mode clock
+    MENU_DO_OFFICE,  // switches to the Office Mode clock (a tap on the header's Buddy head)
     MENU_DO_PDC,     // asks to confirm a ZDMW click (then the companion sends it to PDC Manager)
     MENU_DO_LOG,     // you are doing what the item says (MY DAY): reported to the companion, never refused
-    MENU_DO_FACE,    // selects Clock Mode's face `arg` (office_face_t); the CLOCK item then shows that face
+    MENU_DO_FACE,    // selects Clock Mode's face `arg` (office_face_t); a tap on the header's head then shows that face
 } menu_do_t;
 
 typedef enum {
@@ -89,7 +89,6 @@ typedef enum {
     MENU_ICON_ZDMW,     // the exasperated face: "ZE DOEN MAAR WAT!" (PDC Manager)
     MENU_ICON_MEETING,  // two speech bubbles
     MENU_ICON_WALK,     // a sneaker: stretch your legs
-    MENU_ICON_CLOCKFACES, // a small dial: the CLOCK FACES page
     MENU_ICON_GEAR,     // a brass gear: the Mechanical Skeleton face
     MENU_ICON_KITT,     // his head with KITT's scanner on the face screen
     MENU_ICON_COUNT,
@@ -170,6 +169,7 @@ const char *menu_item_note(const menu_item_t *it);
 #define MENU_POP_MS 80    // a tile appears sunk in, then pops up
 #define MENU_FLASH_MS 220 // a tile lights up after it was tapped
 #define MENU_NOPE_MS 450  // the SOON tag blinks when a planned item is tapped
+#define MENU_HOLD_MS 650  // a finger held this long on the header's Buddy head is a long press, not a tap
 
 // Touch: a finger that moves further than this from where it went down no longer taps; a sideways movement of at
 // least MENU_SWIPE_PX (and clearly more sideways than up or down) turns the page. Screen pixels.
@@ -180,6 +180,9 @@ const char *menu_item_note(const menu_item_t *it);
 gfx_rect_t menu_slot_rect(menu_layout_t layout, int slot);
 gfx_rect_t menu_back_rect(void);
 gfx_rect_t menu_footer_rect(void);
+// The header's Buddy head as a touch target: wider and taller than the head itself (a fingertip), up to the header's
+// right edge and its bottom, clear of Back and the tiles.
+gfx_rect_t menu_head_rect(void);
 
 // --- Navigation and touch -----------------------------------------------------------------------------------------
 
@@ -189,6 +192,7 @@ enum {
     MENU_HIT_BACK = MENU_SLOTS,
     MENU_HIT_PREV,
     MENU_HIT_NEXT,
+    MENU_HIT_HEAD, // the header's Buddy head, while Clock Mode is available: tap for the clock, hold for its faces
 };
 
 typedef enum {
@@ -206,6 +210,7 @@ typedef struct {
     // A touch in progress.
     bool down;
     int16_t down_x, down_y;
+    uint32_t down_at;  // when the finger went down
     int8_t target;     // what the finger went down on (a slot or MENU_HIT_*); NONE once it slid away
     // Feedback for the view.
     int8_t pressed;    // drawn pressed in: the target while the finger is on it
@@ -241,8 +246,15 @@ bool menu_slot_shown(const menu_t *m, int slot, uint32_t now);
 // The target at screen point (x, y): a slot with an item, Back, a page arrow, or MENU_HIT_NONE.
 int menu_hit(const menu_t *m, const menu_status_t *st, int x, int y, uint32_t now);
 
-// Feeds a touch event. Returns the action a completed tap asks for.
+// Feeds a touch event. Returns the action a completed tap asks for. A tap on the header's Buddy head asks for
+// MENU_DO_OFFICE (item NULL); held there for MENU_HOLD_MS it opens the CLOCK FACES page instead (and its release
+// does nothing), see menu_hold().
 menu_result_t menu_touch(menu_t *m, menu_touch_t type, int x, int y, const menu_status_t *st, uint32_t now);
+
+// Call on every frame while the menu shows: a finger held on the header's Buddy head for MENU_HOLD_MS opens the CLOCK
+// FACES page right then (returns true; with only one face there is nothing to choose: the press just ends).
+// *wait_ms: ms until that would happen (UINT32_MAX: no such press under way).
+bool menu_hold(menu_t *m, const menu_status_t *st, uint32_t now, uint32_t *wait_ms);
 
 // Forgets a touch in progress (e.g. when the screen switches to Office Mode).
 void menu_cancel(menu_t *m);

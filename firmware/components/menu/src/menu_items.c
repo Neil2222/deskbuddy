@@ -12,7 +12,7 @@ static const menu_category_def_t k_categories[MENU_CATEGORY_COUNT] = {
     [MENU_GAMES] = {"GAMES", MENU_GRID, MENU_HOME},
     [MENU_MYDAY] = {"MY DAY", MENU_GRID, MENU_HOME},
     [MENU_PDC] = {"PDC", MENU_LIST, MENU_HOME},
-    [MENU_CLOCKFACES] = {"CLOCK FACES", MENU_GRID, MENU_ACTIVITIES},
+    [MENU_CLOCKFACES] = {"CLOCK FACES", MENU_GRID, MENU_HOME}, // a long press on the header's Buddy head
 };
 
 #define MOOD(id, label, mood) {"mood." id, label, MENU_MOODS, MENU_ICON_MOOD, MENU_DO_MOOD, mood, false}
@@ -39,9 +39,6 @@ static const menu_item_t k_items[] = {
     {"mood.kitt", "KITT", MENU_MOODS, MENU_ICON_KITT, MENU_DO_EVENT, BUDDY_EVENT_KITT, false},
 
     {"activity.surprise", "SURPRISE!", MENU_ACTIVITIES, MENU_ICON_SURPRISE, MENU_DO_EVENT, BUDDY_EVENT_POKE, false},
-    {"activity.clock", "CLOCK", MENU_ACTIVITIES, MENU_ICON_OFFICE, MENU_DO_OFFICE, 0, false}, // the selected face
-    {"activity.clockfaces", "CLOCK FACES", MENU_ACTIVITIES, MENU_ICON_CLOCKFACES, MENU_DO_OPEN, MENU_CLOCKFACES,
-     false},
     {"activity.sneeze", "SNEEZE", MENU_ACTIVITIES, MENU_ICON_SNEEZE, MENU_DO_EVENT, BUDDY_EVENT_SNEEZE, false},
     {"activity.stare", "STARE", MENU_ACTIVITIES, MENU_ICON_STARE, MENU_DO_EVENT, BUDDY_EVENT_STARE, false},
     {"activity.meditate", "MEDITATE", MENU_ACTIVITIES, MENU_ICON_MEDITATE, MENU_DO_EVENT, BUDDY_EVENT_MEDITATE, false},

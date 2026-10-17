@@ -94,7 +94,9 @@ extern int g_test_failed;
     X(menu_navigates_and_goes_back)                  \
     X(menu_selects_every_mood)                       \
     X(menu_activities_and_availability)              \
-    X(menu_clock_faces_page)                         \
+    X(menu_head_tap_enters_the_clock_from_every_page) \
+    X(menu_head_long_press_opens_clock_faces)        \
+    X(menu_head_touch_cancels_and_keeps_clear)       \
     X(menu_touch_needs_a_clean_tap)                  \
     X(menu_pages_and_swipes)                         \
     X(menu_view_follows_the_state)                   \

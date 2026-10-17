@@ -199,25 +199,11 @@ static uint8_t s_clock_mem[OFFICE_CLOCK_MEMORY];
 static uint8_t s_skeleton_mem[OFFICE_SKELETON_MEMORY];
 static uint8_t s_menu_mem[MENU_VIEW_MEMORY];
 
-static int menu_slot_of(const menu_t *m, const menu_status_t *st, const char *id, int *x, int *y)
-{
-    const menu_item_t *items[MENU_SLOTS];
-    const int n = menu_page_items(m, st, items, NULL);
-    for (int i = 0; i < n; i++) {
-        if (strcmp(items[i]->id, id) == 0) {
-            const gfx_rect_t r = menu_slot_rect((menu_layout_t)m->def->categories[m->category].layout, i);
-            *x = m->area.x + (r.x + r.w / 2) * MENU_SCALE;
-            *y = m->area.y + (r.y + r.h / 2) * MENU_SCALE;
-            return i;
-        }
-    }
-    return -1;
-}
-
 // The render loop as the firmware runs it (scene, Buddy and his brain, the menu, the clock, the sign, the zoom and the
-// scene switch, double-buffer repair): Clock from the menu's Activities page with Buddy relaxed, a mood change and a
-// message while the clock shows, a burst of taps to come back. Every presented buffer must equal a full redraw, and
-// the zoom (Buddy's frames, the timeline, his mood afterwards) is the same whichever face is selected.
+// scene switch, double-buffer repair): Clock from a tap on the header's Buddy head over the Activities page, with
+// Buddy relaxed, a mood change and a message while the clock shows, a burst of taps to come back. Every presented
+// buffer must equal a full redraw, and the zoom (Buddy's frames, the timeline, his mood afterwards) is the same
+// whichever face is selected.
 typedef struct {
     int frames, max_area, seam_px, clock_frames, full_in_clock;
     uint32_t asked_at, back_at; // when the switch was asked for the clock, when he was back on his stage
@@ -269,9 +255,11 @@ static void whole_loop(office_face_t face, loop_result_t *out)
                                   .busy = buddy_brain_busy(&brain, t), .office = true};
         const bool settled = !office_zoom_busy(&z) && !office_switch_busy(&sw) && sw.want_office == sw.office &&
                              z.want_office == sw.office;
-        if (!tapped && t >= 1000) { // Clock, tapped on the menu
-            int x, y;
-            CHECK(menu_slot_of(&menu, &st, "activity.clock", &x, &y) >= 0);
+        if (!tapped && t >= 1000) { // Clock: a tap on the header's Buddy head
+            const gfx_rect_t head = menu_head_rect();
+            const int x = menu.area.x + (head.x + head.w / 2) * MENU_SCALE;
+            const int y = menu.area.y + (head.y + head.h / 2) * MENU_SCALE;
+            CHECK_EQ(menu_hit(&menu, &st, x, y, t), MENU_HIT_HEAD);
             menu_touch(&menu, MENU_TOUCH_DOWN, x, y, &st, t);
             const menu_result_t r = menu_touch(&menu, MENU_TOUCH_UP, x, y, &st, t);
             CHECK_EQ(r.action, MENU_DO_OFFICE);
