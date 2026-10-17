@@ -173,7 +173,16 @@ Looping animations (`components/buddy/src/buddy_mood.c`). They use the same path
 
 Slow swaps stayed at 0 throughout. The one large redraw (284 k px, 30.7 ms to render) came when a message arrived during Sleepy: the sign appearing, Buddy jumping and three Zs vanishing in one frame, plus the previous frame's rectangles, probably overflowed the 16-entry dirty list, which then merges into larger boxes [INFERENCE]. It costs one late frame, not a glitch, and is not chased further. Host test `mood_redraws_match_full_redraw`: 2,338 frames over every mood with rapid switching, taps and a Monster sequence, all equal to a full redraw, largest redraw 107,520 px (17 % of the screen).
 
-### KITT (2026-10-17; host and simulator only, not yet on the board)
+### KITT (2026-10-17; passed the first board test)
+
+**Board test of `72a02d9` (2026-10-17, 13:00–13:16): passed.** Flashed over COM6 (`Hash of data verified`, `verify_flash` digests matched; `App version: 72a02d9`) after a fresh full-flash backup of the stable board (`Documents\DeskBuddy-backups\fw-fa4455d-before-kitt-20261017-125606`, verified against the board). The user watched every step: the turn in started on the touchscreen looked clean; the sweep is **smooth**, its brightness **right as it is**, and there were **no left-edge lines, tearing, flicker or stale pixels**; a tap on him turned him back cleanly into the mood he had (relaxed); a mood tile during KITT (happy) turned him back into that mood; CLOCK during KITT zoomed in and out as before, and he came back as himself. No watchdog warning, crash or allocation failure. `72a02d9` stays on the board for evaluation.
+
+| | Measured on the board |
+|---|---|
+| Boot | faces ready in 68.3 ms; after `app_init` free internal 77,259 B (`fa4455d`: 77,379 B), PSRAM 4,922,236 B; render task stack 2,908 of 6,144 B never used (unchanged through the test) |
+| Sweeping (5.2 min, then 7.5 min) | 32.7–33.5 frames/s (the panel's rate), render avg 1.85 / max 2.64 ms, redraw avg 10.3 k / max 13.3 k px, 0 resyncs, 0 slow swaps, fill max 236 µs; STRIPS (about 1.6 million fills): start late max 7 µs, margin min 324 µs, 0 close, 0 missed |
+| Tap to turn back | touch → scanout 45 ms; `evt act … result=done`; mood back to relaxed |
+| Clock Mode during KITT | zoom in 29 frames, out 28 frames, 0 resyncs, fill max 427–428 µs (as before); `result=interrupted`; back as himself, happy |
 
 Buddy turns into a Knight Rider scanner (`components/buddy/src/buddy_kitt.c`): an overlay sprite exactly over his face screen (128 x 64 px at his stage scale), drawn by code each frame at half his art pixels (32 x 16 overlay pixels, 4 x 4 screen pixels each) with its own 9-colour palette, into the Monster rig's two existing pixel buffers (KITT's poses never carry the props the rig draws). In: eyes close (0.3 s), the glow dims, three red traces race across at staggered speeds leaving the screen black (0.6–1.3 s), one flicker, the dark-red housing comes up and the light fades in at the left end (to 2.0 s). Scan: a sinusoidal sweep, one round trip per 1.6 s (easing at both ends), the light's tail from its last 8 positions 28 ms apart, a faint glow on the housing's rim; antenna steady red. Out (1.8 s): the sweep slows to the middle and fades, the housing goes dark, the traces race back and bring his face back, the eyes open.
 
@@ -184,8 +193,6 @@ Buddy turns into a Knight Rider scanner (`components/buddy/src/buddy_kitt.c`): a
 | Every frame vs a full redraw | equal (host test `kitt_redraws_match_full_redraw`, with his peukie hand before and after, since KITT borrows the rig's buffers) |
 | Firmware | image +4,064 B (526,027 B); code +3.9 KB; DIRAM +120 B (the sprite, two image headers, the brain's field, the palette); no heap, no PSRAM, no image assets; scene sprites 65 → 66 of 72 |
 | Long running | the scanner's clock is kept within 30 minutes past the turn (whole sweeps), so it never wraps; nothing accumulates (host test: 3 hours) |
-
-[INFERENCE] On the board: about 2–3 ms render per frame (the Classic clock's 11.4 k px redraws measure 2.3 ms), far below the full-screen frames that come close to the bounce-fill deadline. To be measured with the `STRIPS` lines.
 
 ### Clock faces: Mechanical Skeleton (2026-10-17; failed on the device, repaired, passed the second device test)
 
