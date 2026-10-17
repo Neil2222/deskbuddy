@@ -1,6 +1,9 @@
+# Adds the board test's blocks (named "Test: …") to today in the real schedule.json; the other blocks stay, Live stays
+# as it is. add_test_blocks.py HH:MM [full|quick] (S; see docs/schedule-board-test.md).
 import datetime, json, os, sys, uuid
 
 s = datetime.datetime.strptime(sys.argv[1], '%H:%M')
+profile = sys.argv[2] if len(sys.argv) > 2 else 'full'
 today = datetime.datetime.now()
 s = today.replace(hour=s.hour, minute=s.minute, second=0, microsecond=0)
 assert 3 <= s.hour * 60 + s.minute and s.hour * 60 + s.minute + 31 <= 24 * 60
@@ -25,6 +28,12 @@ tests = [
     block('sneeze in Clock Mode', 14, 15, action='sneeze'),
     block('water while away', 17, 18, action='water'),
     block('sneeze while paused', 20, 21, action='sneeze'),
+] if profile == 'full' else [
+    block('sneeze in Clock Mode', 0, 1, action='sneeze'),
+    block('question JA', 2, 3, action='ask_peukie'),
+    block('question NEE', 3, 4, action='ask_peukie'),
+    block('sneeze while paused', 4, 5, action='sneeze'),
+    block('water while away', 5, 6, action='water'),
 ]
 doc['days'][day] = [b for b in doc['days'][day] if not b.get('name', '').startswith('Test: ')] + tests
 json.dump(doc, open(path, 'w', encoding='utf-8'), indent=2)
