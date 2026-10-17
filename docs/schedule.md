@@ -233,7 +233,13 @@ below, no forced idle, a manual choice holds until the next actual transition or
 not end it, the repeated DST hour does not fire twice). What counts as manual: `evt mood src=touch`, and `src=cmd`
 that is not the schedule's own `mood.set` (a mood tile, another tool). `src=timer` and the end of a smoke break let
 the director restore what it wants. On connect the device's mood is respected (a non-default mood counts as the
-user's choice); transitions missed while away are not replayed. After a device restart the desired mood is applied.
+user's choice), except when it is still the mood the schedule itself put him in: the Companion remembers that mood
+with the device and boot it was accepted in (`ScheduleMoodTracker`, `scheduleMood`, `scheduleMoodDev`,
+`scheduleMoodBoot` in `settings.json`), and any other mood change it sees drops the mark. Then the current scheduled
+mood is applied, so a transition missed while disconnected, asleep or closed takes effect at the reconnect (the
+transition itself is not replayed: only the mood that applies now is sent). A choice made on the touchscreen while
+the Companion could not see it is still respected, unless it is that very same mood (the device does not record
+mood changes for replay). After a device restart the desired mood is applied.
 
 **Actions:** a block may start one of `ask_peukie`, `sneeze`, `stare`, `meditate`, `focus`, `water`
 (`ScheduledActions`; never Monster, PDC, Teams, messages or anything with an external effect) at its start time,

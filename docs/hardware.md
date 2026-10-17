@@ -11,7 +11,7 @@ Sources:
 | Flash | 16 MB quad SPI (manufacturer ID 0x46, device ID 0x4018) |
 | PSRAM | 8 MB octal (AP Memory, generation 3) |
 | Display | 1024×600 IPS panel on a 16-bit RGB565 parallel bus driven by LCD_CAM. There is no SPI init interface. Waveshare lists an ST7262 timing controller (their FAQ's "ST7701" is wrong). |
-| RGB timing | PCLK 30.85 MHz, falling edge. HSYNC pulse 162, back porch 152, front porch 48. VSYNC pulse 45, back porch 13, front porch 3. Measured refresh 33.50 Hz. |
+| RGB timing | PCLK 30.85 MHz, falling edge. HSYNC pulse 162, back porch 152, front porch 48. VSYNC pulse 45, back porch 13, front porch 3. Measured refresh 33.50 Hz with the bring-up firmware, 33.7 Hz with the application (see the results docs). |
 | Touch | GT911 at I2C 0x5D, firmware 1060, config version 91, 5 points |
 | IO expander | Waveshare-programmed MCU at I2C 0x24. It provides PWM and ADC, which the CH422G named in the docs does not have. |
 | Battery | CS8501 charger. Battery voltage is read through the expander ADC (register 0x06). Not used yet. |

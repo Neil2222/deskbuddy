@@ -1,4 +1,6 @@
-# Rendering engine results (2026-10-13)
+# Rendering engine results
+
+The engine milestone was measured on 2026-10-13; the sections after *Architecture* and *Frame pipeline* add the later features, each with its own date and firmware.
 
 Firmware: `firmware/deskbuddy`, built with ESP-IDF v5.5.5 and the same settings as bring-up (CPU 240 MHz, octal PSRAM at 80 MHz, code and read-only data executed from PSRAM, `-O2`).
 All numbers come from the device's own `PERF` logs (5-second windows). The bring-up benchmarks were re-run with the modified `board` component and are unchanged (33.51 Hz, 47.19 ms fill, 1589 µs blit, 16.8 FPS).
@@ -7,13 +9,16 @@ All numbers come from the device's own `PERF` logs (5-second windows). The bring
 
 | Module | Role | Hardware dependent |
 |---|---|---|
-| `components/gfx` | Rectangles, dirty-rectangle set, indexed sprites with transparency, integer scaling and horizontal flip, frame animation, scene compositor, double-buffer repair | No (host-tested) |
-| `components/buddy` | Placeholder robot: behavior state machine and events (`buddy_brain`), the Monster Energy sequence (`buddy_monster`), ASCII programmer art (`buddy_art`), pose-to-sprite mapping including the procedural arm and cable (`buddy_view`) | No (host-tested) |
+| `components/gfx` | Rectangles, dirty-rectangle set, indexed sprites with transparency, integer scaling and horizontal flip, frame animation, scene compositor (background, sprites, an optional overlay), double-buffer repair | No (host-tested) |
+| `components/buddy` | Placeholder robot: behavior state machine and events (`buddy_brain`), moods, the Monster Energy sequence (`buddy_monster`), activities, KITT and the game faces, ASCII programmer art (`buddy_art`), pose-to-sprite mapping including the procedural arm and cable (`buddy_view`) | No (host-tested) |
 | `components/layout` | Character stage (default 65 % of the width, rounded to 672 px) and the control panel (352 px); background painting | No (host-tested) |
-| `components/menu` | The touchscreen menu in the control panel: item table, navigation and touch rules (`menu`), and its view: one sprite per button at 2x, redrawn in place only when it changes, tiles flipping in one by one on a page change (`menu_view`) | No (host-tested) |
-| `components/office` | Clock Mode (first called Office Mode): antialiased stroke font rasterized into indexed images, the desk-clock face, the moon art, the scene switch (`office_switch`), and Buddy's zoom into the clock and back (`office_zoom`: a camera and a pose timeline on top of the switch) | No (host-tested) |
+| `components/menu` | The touchscreen menu in the control panel: item table, navigation and touch rules (`menu`), and its view: one sprite per button at 2x, redrawn in place only when it changes, tiles flipping in one by one on a page change (`menu_view`); the question bubbles and the Tic-Tac-Toe board | No (host-tested) |
+| `components/office` | Clock Mode (first called Office Mode): antialiased stroke font rasterized into indexed images, the faces (Classic, Mechanical Skeleton), the moon art, the scene switch (`office_switch`), and Buddy's zoom into the clock and back (`office_zoom`: a camera and a pose timeline on top of the switch) | No (host-tested) |
+| `components/marquee`, `link`, `pdc`, `ttt`, `missile` | The LED sign; the companion protocol (frames, commands); the PDC Manager click on the device; Tic-Tac-Toe; Buddy Missile Defense (logic, faces, drawing through the scene's background and overlay) | No (host-tested) |
+| `components/app` | The application shared by board and simulator: render loop (`app_frame`), Clock Mode switching, companion commands, wall-clock time with the companion's time zone, recorded events, performance log, verify mode; behind `app_port.h` | No (host-tested on a fake platform; the simulator runs it on Windows) |
 | `components/display` | Application-owned frame buffers, the scanout fill, and the buffer-swap proof | Yes |
-| `deskbuddy/main` | Touch task (GT911 → events), serial link to the Windows companion (commands → events, replies), render loop, Office Mode switching, backlight at boot, wall-clock time with the companion's time zone, layout configuration (Kconfig), performance log, verify mode | Yes |
+| `components/board` | I2C, IO expander, RGB panel, GT911 touch, backlight | Yes |
+| `deskbuddy/main` | Tasks, the touch task (GT911 → events), the UART link (`serial_link.c`), and `port.c`: the board's side of `app_port.h` (timer, wall clock, memory, frame buffers and cache writeback, backlight, scanout statistics); layout configuration (Kconfig) | Yes |
 
 Behavior, artwork, layout and rendering only meet in the render loop. Behavior produces a *pose*; the view maps it to sprites; the compositor only sees sprites and a background callback.
 
@@ -22,7 +27,7 @@ Behavior, artwork, layout and rendering only meet in the render loop. Behavior p
 2. The behavior state machine produces a pose; the view updates sprite fields.
 3. `gfx_scene_collect()` compares every sprite with what is on screen and reports old and new bounds of whatever changed.
 4. `gfx_repair_next()` adds the previous frame's changes, which the back buffer has not seen yet.
-5. `gfx_scene_render()` composes each dirty rectangle in 32 KB internal-RAM strips (background, then sprites in z order) and copies finished rows to the back buffer. Each row is written back from the data cache to PSRAM right after its copy (the surface's `flush` callback, `esp_cache_msync`; see "Drawn rows must leave the cache at once"). PSRAM is only written, never read back.
+5. `gfx_scene_render()` composes each dirty rectangle in 32 KB internal-RAM strips (background, then sprites in z order, then the optional overlay; the overlay is used only by Missile Defense) and copies finished rows to the back buffer. Each row is written back from the data cache to PSRAM right after its copy (the surface's `flush` callback, `esp_cache_msync`; see "Drawn rows must leave the cache at once"). PSRAM is only written, never read back.
 6. `display_present()` swaps the buffers (below).
 
 Nothing is drawn while nothing changes.
@@ -208,7 +213,7 @@ For comparison on the board: Tic-Tac-Toe's largest redraw was 266 k px (render 3
 
 **Game over freezes the world** (since the review): from the moment the last item is lost no missile moves, no blast grows, nothing lands or scores (`md_world_ms`); only the last item's flames burn out, the game-over screen appears and Buddy sighs. RETRY lets the frozen trails shrink back over the normal 300 ms trail fade instead of removing them in one frame (that single frame measured 477 k px before this).
 
-**Memory.** Firmware image 554,128 B (Tic-Tac-Toe: 535,648 B); static DIRAM about 156.4 KB (150,763 B): +5.6 KB internal RAM for the game state (`md_t`, about 0.5 KB), the view's two layer states (`md_view_t`, about 3.6 KB: what is drawn and what is drawn next), the desk items' art (972 B) and 304 B more for the menu's icon pool (the new tile's icon). No allocation during play; nothing in PSRAM. Free internal RAM after start: 71,507 B on the board (5,584 B below Tic-Tac-Toe's 77,091 B).
+**Memory.** Firmware image 554,128 B (Tic-Tac-Toe: 535,648 B); static DIRAM about 156.4 KB (Tic-Tac-Toe: 150,763 B): +5.6 KB internal RAM for the game state (`md_t`, about 0.5 KB), the view's two layer states (`md_view_t`, about 3.6 KB: what is drawn and what is drawn next), the desk items' art (972 B) and 304 B more for the menu's icon pool (the new tile's icon). No allocation during play; nothing in PSRAM. Free internal RAM after start: 71,507 B on the board (5,584 B below Tic-Tac-Toe's 77,091 B).
 
 **Board measurements** (above) confirmed the off-board estimates: the heaviest game frames render in about 23 ms, and the screen copies never came within 240 µs of their limit during play.
 
