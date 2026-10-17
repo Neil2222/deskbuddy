@@ -14,13 +14,20 @@ Takes about 25 minutes and needs the user at the board twice (JA, then NEE). Scr
 2. The published Companion runs and shows `Connected · COM6`; no simulator runs (its history is separate anyway).
 3. Pick S at least 3 minutes ahead (a whole minute, with S−3 and S+31 on the same day) and tell the user the times.
 
-## Status (17 Oct 2026)
+## Status (17 Oct 2026): done, except two skips on the board
 
-A first full run on the board confirmed: Live starts off; switching it on applied the scheduled mood (relaxed); a
-scheduled transition (working) reached the board; both scheduled questions appeared on the touchscreen and, unanswered,
-were recorded as `timeout` (not NEE, no smoke break); a manual Happy stayed over a boundary with the same effective mood;
-a Companion restart repeated nothing. Not yet shown: JA and NEE, Clock Mode refusing an action, an action skipped while
-away or paused (the script lost the Companion's window there; fixed since). Those remain for the quick run.
+Shown on the board (Companion `7904918`, firmware `29f5c80`), by the user's eyes and the files:
+- Live starts off; switching it on applied the scheduled mood (relaxed); a scheduled transition (working) reached the
+  board; a manual Happy stayed over a boundary with the same effective mood.
+- Scheduled questions appear on the touchscreen: JA → `yes` with exactly one linked smoke activity, NEE → `no`;
+  unanswered → `timeout` (not NEE, no activity).
+- Clock Mode is never interrupted: the scheduled sneeze got `busy` six times (every 10 s), then `skipped:busy:office`.
+- A Companion restart repeated nothing; 32 events, 32 keys; 10 activities, 10 ids; every occurrence decided once.
+
+Not shown on the board (the run was stopped when the script could not leave Clock Mode): an action skipped while
+paused or while the Companion is disconnected. Both are covered by unit tests and were shown end to end in the
+simulator (`skipped:paused`, `skipped:offline`, never run afterwards). The script's "Buddy" mode tile click did not
+work (use a touch on the clock instead); leaving Clock Mode by touch works.
 
 ## Quick run (the open part, about 7 minutes)
 
