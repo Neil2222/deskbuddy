@@ -1,9 +1,9 @@
 // Scene compositor: a background plus z-ordered sprites, redrawn only inside dirty rectangles.
 //
 // Rendering composes each dirty rectangle in horizontal strips inside a caller-provided work buffer (fast internal
-// RAM on the device): background first, then sprites in z order. Each finished row is copied once into the target
-// surface, so the target (the PSRAM frame buffer) is only ever written, never read, and transparency and overdraw
-// cost nothing there.
+// RAM on the device): background first, then sprites in z order, then the optional overlay. Each finished row is
+// copied once into the target surface, so the target (the PSRAM frame buffer) is only ever written, never read, and
+// transparency and overdraw cost nothing there.
 //
 // Change tracking: callers mutate the public sprite fields directly. gfx_scene_collect() compares each sprite with
 // what was last committed to the screen and reports the old and new bounds of everything that changed.
@@ -38,13 +38,16 @@ typedef struct {
     } shown;
 } gfx_sprite_t;
 
-// Fills w pixels of screen row y, starting at screen column x.
+// Fills w pixels of screen row y, starting at screen column x. An overlay draws over what is there (it leaves pixels
+// it does not draw as they are).
 typedef void (*gfx_background_fn)(void *ctx, gfx_color_t *dst, int x, int y, int w);
 
 typedef struct {
     int w, h;
     gfx_background_fn background;
     void *background_ctx;
+    gfx_background_fn overlay; // NULL (gfx_scene_init) or drawn over the sprites, row by row like the background
+    void *overlay_ctx;
     gfx_color_t *strip;
     int strip_px;
     gfx_sprite_t *sprite[GFX_SCENE_MAX_SPRITES]; // in draw order

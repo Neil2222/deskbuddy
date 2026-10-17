@@ -615,6 +615,7 @@ uint32_t buddy_view_apply(buddy_view_t *v, const buddy_pose_t *pose, uint32_t no
     const int shake = pose->shake < -1 ? -1 : pose->shake > 1 ? 1 : pose->shake;
     const int wobble = pose->wobble < -1 ? -1 : pose->wobble > 1 ? 1 : pose->wobble;
     const int look = pose->look < -1 ? -1 : pose->look > 1 ? 1 : pose->look;
+    const int look_y = pose->look_y < -1 ? -1 : pose->look_y > 1 ? 1 : pose->look_y;
     const int dx = shake * v->scale, dy = -lift * v->scale, head_dx = (shake + wobble) * v->scale;
     const int nod = pose->nod > 1 ? 1 : pose->nod, head_dy = dy + (nod - pop) * v->scale;
     const gfx_palette_t *tint = &a->tint[pose->tint < BUDDY_TINT_COUNT ? pose->tint : BUDDY_TINT_NORMAL];
@@ -640,8 +641,8 @@ uint32_t buddy_view_apply(buddy_view_t *v, const buddy_pose_t *pose, uint32_t no
     place(v, &v->torso, a->torso_at, dx, dy);
     place(v, &v->head, a->head_at, head_dx, head_dy);
     place(v, &v->antenna, a->antenna_at, head_dx, head_dy);
-    place(v, &v->eye[0], a->eye_at[0], head_dx + look * v->scale, head_dy);
-    place(v, &v->eye[1], a->eye_at[1], head_dx + look * v->scale, head_dy);
+    place(v, &v->eye[0], a->eye_at[0], head_dx + look * v->scale, head_dy + look_y * v->scale);
+    place(v, &v->eye[1], a->eye_at[1], head_dx + look * v->scale, head_dy + look_y * v->scale);
     place(v, &v->mouth, a->mouth_at, head_dx, head_dy);
     place(v, &v->shadow, a->shadow_at, 0, 0);
     apply_props(v, &pose->props, shake, -lift, shake + wobble, nod - lift - pop);

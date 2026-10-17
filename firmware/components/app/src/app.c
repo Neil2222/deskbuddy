@@ -19,6 +19,9 @@
 #include "gfx_scene.h"
 #include "layout.h"
 #include "marquee.h"
+#include "md.h"
+#include "md_buddy.h"
+#include "md_view.h"
 #include "menu.h"
 #include "menu_ask.h"
 #include "menu_thought.h"
@@ -134,11 +137,34 @@ static const char k_ask_zdmw[] = MENU_QUESTION_ZDMW;
 // What goes on in his head (FOCUS), drawn behind him on the stage.
 static menu_thought_t s_thought;
 
-// No scene change under way or asked for: neither Buddy's zoom nor the scene switch.
+// Missile Defense (md.h) on the whole screen. Its way in: Buddy's alert on his stage (MDS_ALERT), then the scene
+// switch into the game scene (the clock's two-step full redraw of both buffers, office_switch.h, as its own instance:
+// .office means "the game scene"), the game (MDS_PLAY), and the same switch back out. Clock Mode during the game ends it
+// first (s_mg.clock_after): the zoom starts once Buddy is back on his stage.
+typedef enum { MDS_OFF, MDS_ALERT, MDS_IN, MDS_PLAY, MDS_OUT } md_stage_t;
+#define MD_ALERT_MS 900 // "INCOMING!" on his stage before the game scene comes up
+static md_t s_md;
+static md_view_t s_md_view;
+static struct {
+    md_stage_t stage;
+    uint32_t alert_at;
+    office_switch_t sw;
+    bool has_view;    // the view could be set up (else the tile does nothing)
+    bool clock_after; // Clock Mode was asked for during the game
+} s_mg;
+
+static bool md_on(void)
+{
+    return s_mg.stage != MDS_OFF;
+}
+
+// No scene change under way or asked for: neither Buddy's zoom nor a scene switch (the clock's or the game's), nor his
+// alert before the game.
 static bool scene_settled(const office_switch_t *screen)
 {
     return !office_zoom_busy(&s_zoom) && !office_switch_busy(screen) && screen->want_office == screen->office &&
-           s_zoom.want_office == screen->office;
+           s_zoom.want_office == screen->office && s_mg.stage != MDS_ALERT && !office_switch_busy(&s_mg.sw) &&
+           s_mg.sw.want_office == s_mg.sw.office;
 }
 
 // The strip-copy timing of a window (app_scanout_stats_t), on its own line after the window's line; nothing where
@@ -171,6 +197,9 @@ static void zoom_log(const char *way, const perf_t *p, int64_t window_us)
 
 static void perf_log(const perf_t *p, int64_t window_us)
 {
+    if (window_us < 50000) {
+        return; // a window that just began (one switch right after another): nothing to say yet
+    }
     app_scanout_stats_t d;
     app_port_scanout_stats(&d);
     const double s = window_us / 1e6;
@@ -318,6 +347,9 @@ static void brain_rest(buddy_brain_t *b, uint32_t now)
 static const char *s_mood_src;
 static bool s_smoke_break; // a smoke break (JA to the question) is under way: its start and end are src=break
 
+static void missile_start(uint32_t now);
+static void missile_leave(const char *why, uint32_t now);
+
 // Carries out what a tap in the menu asks for, the way the companion's commands do (so `evt mood` and `evt mode`
 // tell the companion, whichever side changed it).
 static void run_menu_action(const menu_result_t *r, buddy_brain_t *brain, uint32_t now)
@@ -352,6 +384,9 @@ static void run_menu_action(const menu_result_t *r, buddy_brain_t *brain, uint32
         if (pdc_ready(&s_pdc, now) && buddy_brain_event(brain, BUDDY_EVENT_ASK_ZDMW, now)) {
             APP_LOGI(TAG, "ZDMW: asking for confirmation");
         }
+        break;
+    case MENU_DO_MISSILE:
+        missile_start(now);
         break;
     default:
         break;
@@ -406,12 +441,13 @@ static const char *mode_name(const office_switch_t *screen, const buddy_brain_t 
     return brain->state == BUDDY_STATE_MONSTER ? "monster" : brain->state == BUDDY_STATE_GAME ? "game" : "normal";
 }
 
-// A message can go up now: the screen is lit, the sign is free, no zoom is under way, and no Monster sequence would
-// be interrupted (in Office Mode the character is paused, so the sign appears under the clock right away).
+// A message can go up now: the screen is lit, the sign is free, no zoom is under way, no Monster sequence would be
+// interrupted (in Office Mode the character is paused, so the sign appears under the clock right away), and no
+// Missile Defense game is on (it waits until the game is over).
 static bool msg_can_start(const office_switch_t *screen, const buddy_brain_t *brain, bool lit)
 {
     return lit && (!marquee_active(&s_msg.sign) || s_msg.caption) && !office_zoom_busy(&s_zoom) &&
-           (screen->office || brain->state != BUDDY_STATE_MONSTER);
+           (screen->office || brain->state != BUDDY_STATE_MONSTER) && !md_on();
 }
 
 static void msg_start(uint32_t id, const char *text, const office_switch_t *screen, buddy_brain_t *brain,
@@ -535,6 +571,10 @@ static void run_command(const link_command_t *c, buddy_brain_t *brain, office_sw
             strcpy(body, "err unavailable");
         } else if (!lit) {
             snprintf(body, sizeof(body), "err busy mode=%s", mode_name(screen, brain));
+        } else if (c->u.office && md_on()) { // the game ends first; the zoom starts once he is back on his stage
+            s_mg.clock_after = true;
+            missile_leave("clock", now);
+            APP_LOGI(TAG, "Clock Mode on (companion), after Missile Defense");
         } else {
             office_zoom_request(&s_zoom, c->u.office); // the same way in and out as from the menu and a tap
             APP_LOGI(TAG, "Clock Mode %s (companion)", c->u.office ? "on" : "off");
@@ -752,7 +792,7 @@ static bool game_resume(uint32_t now, uint32_t *wait_ms)
 // The face he pulls now: from the phase of the round and when it began, so it only changes when the game moves on.
 static buddy_game_t game_face(uint32_t now)
 {
-    buddy_game_t f = {BUDDY_GAME_WATCH, game_attitude(), (int8_t)(s_cfg.panel_left ? -1 : 1), s_ttt.phase_at};
+    buddy_game_t f = {BUDDY_GAME_WATCH, game_attitude(), (int8_t)(s_cfg.panel_left ? -1 : 1), s_ttt.phase_at, 0, 0};
     switch (s_ttt.phase) {
     case TTT_YOUR_TURN:
     case TTT_THINKING:
@@ -801,7 +841,7 @@ static uint32_t game_update(uint32_t now)
         return UINT32_MAX;
     }
     if (!s_playing) {
-        const buddy_game_t ready = {BUDDY_GAME_READY, game_attitude(), 1, now};
+        const buddy_game_t ready = {BUDDY_GAME_READY, game_attitude(), 1, now, 0, 0};
         if (!buddy_brain_game(&s.brain, &ready, now)) { // a show started first: he plays once it is over
             menu_open(&s.menu, MENU_GAMES, now);
             return UINT32_MAX;
@@ -857,6 +897,179 @@ static bool game_touch(const app_event_t *ev, menu_touch_t type, uint32_t now)
         s.pending_touch_us = ev->at_us; // the cell sinks in
     }
     return menu_ttt_holding(&s_ttt_touch) || hit != MENU_TTT_HIT_NONE;
+}
+
+// ---- Missile Defense (md.h) on the whole screen; its stages: s_mg ----------------------------------------------------
+//
+// GAMES -> MISSILES: Buddy's alert on his stage ("INCOMING!"), then the game scene (both buffers redrawn, as for the
+// clock): the game view's background and overlay, Buddy at his game place (md_view.h), the menu folded away. The X,
+// QUIT, nobody touching the game-over screen, and Clock Mode end it: the same switch back, the menu on GAMES. While it
+// is on he is playing (BUDDY_STATE_GAME: mode=game, shows refused as busy), messages wait, and nothing is recorded.
+
+static const char k_incoming[] = "INCOMING!";
+
+static void missile_start(uint32_t now)
+{
+    if (md_on() || !s_mg.has_view || s.screen.office || !scene_settled(&s.screen)) {
+        return;
+    }
+    const buddy_game_t alert = {BUDDY_GAME_MD_ALERT, BUDDY_GAME_EVEN, 0, now, 0, 0};
+    if (!buddy_brain_game(&s.brain, &alert, now)) {
+        return; // a show is playing (the tile shows him busy)
+    }
+    s_mg.stage = MDS_ALERT;
+    s_mg.alert_at = now;
+    s_mg.clock_after = false;
+    APP_LOGI(TAG, "missile defense: incoming!");
+}
+
+// Back to his stage (an alert is just dropped). Clock Mode asked for meanwhile follows once he is back.
+static void missile_leave(const char *why, uint32_t now)
+{
+    switch (s_mg.stage) {
+    case MDS_ALERT:
+        s_mg.stage = MDS_OFF;
+        buddy_brain_game_leave(&s.brain, now);
+        if (s_mg.clock_after) {
+            s_mg.clock_after = false;
+            office_zoom_request(&s_zoom, true);
+        }
+        break;
+    case MDS_IN:
+    case MDS_PLAY:
+        s_mg.stage = MDS_OUT;
+        md_view_cancel(&s_md_view);
+        office_switch_request(&s_mg.sw, false);
+        break;
+    default:
+        return;
+    }
+    APP_LOGI(TAG, "missile defense: over (%s); wave %u, score %u, best %u", why, (unsigned)s_md.wave,
+             (unsigned)s_md.score, (unsigned)s_md.best);
+}
+
+// The scene switch's swap: the game scene comes up (in) or his stage and the menu come back.
+static void missile_swap(bool in, uint32_t now)
+{
+    if (in) {
+        menu_cancel(&s.menu);
+        menu_view_show(&s.menu_view, false);
+        buddy_view_camera(&s.view, MD_BUDDY_SCALE, MD_BUDDY_X0, MD_BUDDY_Y0);
+        s_scene.background = md_view_background;
+        s_scene.background_ctx = &s_md_view;
+        s_scene.overlay = md_view_overlay;
+        s_scene.overlay_ctx = &s_md_view;
+        md_view_show(&s_md_view, true);
+        md_start(&s_md, now);
+        if (s_mg.stage == MDS_IN) {
+            s_mg.stage = MDS_PLAY;
+        }
+        return;
+    }
+    md_view_show(&s_md_view, false);
+    md_stop(&s_md);
+    s_scene.background = layout_background;
+    s_scene.background_ctx = &s_layout;
+    s_scene.overlay = NULL;
+    s_scene.overlay_ctx = NULL;
+    buddy_view_camera_home(&s.view);
+    menu_view_show(&s.menu_view, true);
+    menu_reveal(&s.menu, now); // GAMES, flipping back in
+    buddy_brain_game_leave(&s.brain, now); // his mood carries on (one chosen meanwhile shows now)
+}
+
+// A full redraw finished: logged like the clock's, and the performance windows start afresh (so they cover only the
+// game, or only the normal screen).
+static void missile_drawn(const char *what)
+{
+    app_scanout_stats_t sw;
+    app_port_scanout_stats(&sw);
+    APP_LOGI(TAG, "%s drawn (%" PRIu32 " scanout resyncs, fill max %" PRIu32 " us)", what, sw.resyncs, sw.fill_us_max);
+    strips_log(what, &sw);
+    memset(&s.perf, 0, sizeof(s.perf));
+    s.perf_since = app_port_time_us();
+}
+
+// Once per frame, before Buddy's pose: the alert, the switch, the game and his face. Returns ms until any of it
+// changes on its own.
+static uint32_t missile_update(uint32_t now)
+{
+    if (!md_on()) {
+        return UINT32_MAX;
+    }
+    if (s_mg.stage == MDS_ALERT) {
+        if (now - s_mg.alert_at < MD_ALERT_MS) {
+            return MD_ALERT_MS - (now - s_mg.alert_at);
+        }
+        s_mg.stage = MDS_IN;
+        office_switch_request(&s_mg.sw, true);
+        perf_log(&s.perf, app_port_time_us() - s.perf_since); // the window before the switch
+        memset(&s.perf, 0, sizeof(s.perf));
+        s.perf_since = app_port_time_us();
+    }
+    const office_step_t step = office_switch_step(&s_mg.sw);
+    if (step.swap) {
+        missile_swap(s_mg.sw.office, now);
+    }
+    if (step.redraw_all) {
+        gfx_scene_invalidate(&s_scene, s_layout.screen);
+    } else if (step.redraw_kick) {
+        gfx_scene_invalidate(&s_scene, (gfx_rect_t){0, 0, 1, 1}); // the repair redraws the other buffer fully
+    }
+    if (step.redrawn) {
+        missile_drawn(s_mg.sw.office ? "Missile Defense" : "DeskBuddy");
+        if (!s_mg.sw.office) {
+            s_mg.stage = MDS_OFF;
+            if (s_mg.clock_after) {
+                s_mg.clock_after = false;
+                office_zoom_request(&s_zoom, true);
+            }
+            return 0;
+        }
+    }
+    uint32_t next = step.next_ms;
+    if (s_mg.stage == MDS_PLAY) {
+        const uint32_t n = md_tick(&s_md, now);
+        next = n < next ? n : next;
+        if (md_bored(&s_md, now)) {
+            missile_leave("nobody playing", now);
+        } else {
+            const buddy_game_t face = md_buddy_face(&s_md, now);
+            buddy_brain_game(&s.brain, &face, now);
+        }
+    }
+    return step.redrawn ? 0 : next;
+}
+
+// A touch while the game is on: shots as the finger comes down, the buttons on release.
+static void missile_touch(const app_event_t *ev, uint32_t now)
+{
+    if (ev->type == APP_TOUCH_DOWN) {
+        md_touched(&s_md, now);
+    }
+    const md_view_touch_t type = ev->type == APP_TOUCH_DOWN   ? MD_VIEW_TOUCH_DOWN
+                                 : ev->type == APP_TOUCH_MOVE ? MD_VIEW_TOUCH_MOVE
+                                                              : MD_VIEW_TOUCH_UP;
+    switch (md_view_touch(&s_md_view, &s_md, type, ev->x, ev->y, now)) {
+    case MD_VIEW_HIT_SKY:
+        md_fire(&s_md, ev->x, ev->y, now);
+        break;
+    case MD_VIEW_HIT_EXIT:
+        missile_leave("exit", now);
+        break;
+    case MD_VIEW_HIT_QUIT:
+        missile_leave("quit", now);
+        break;
+    case MD_VIEW_HIT_RETRY:
+        APP_LOGI(TAG, "missile defense: retry (score %u, best %u)", (unsigned)s_md.score, (unsigned)s_md.best);
+        md_start(&s_md, now);
+        break;
+    default:
+        break;
+    }
+    if (ev->type == APP_TOUCH_DOWN && !s.pending_touch_us) {
+        s.pending_touch_us = ev->at_us; // the shot, or a button sinking in: the reaction to measure
+    }
 }
 
 // A face chosen on the touchscreen or by the companion: shown at once if the clock is up (a full redraw of both
@@ -948,6 +1161,11 @@ bool app_init(const app_config_t *config)
                  s_faces.skeleton.frame_copied ? "internal RAM" : "constant data");
     }
     office_switch_init(&s.screen);
+    office_switch_init(&s_mg.sw);
+    s_mg.has_view = md_view_init(&s_md_view, &s_scene);
+    if (!s_mg.has_view) {
+        APP_LOGW(TAG, "Missile Defense unavailable (its art is malformed)");
+    }
     office_zoom_init(&s_zoom);
     s_msg.ready = marquee_init(&s_msg.sign, &s_scene, 30); // above everything
     if (!s_msg.ready) {
@@ -960,9 +1178,9 @@ bool app_init(const app_config_t *config)
     pdc_init(&s_pdc, (uint16_t)app_port_random()); // click ids start somewhere new on every boot
     s_ia.next_own = app_port_random();              // as do the device's own interaction ids
     gfx_scene_invalidate(&s_scene, s_layout.screen); // both buffers start black: first two frames are full
-    APP_LOGI(TAG, "stage %dx%d at x=%d, panel %dx%d at x=%d; character scale %d at (%d,%d)", s_layout.stage.w,
-             s_layout.stage.h, s_layout.stage.x, s_layout.panel.w, s_layout.panel.h, s_layout.panel.x, s.view.scale,
-             s.view.x0, s.view.y0);
+    APP_LOGI(TAG, "stage %dx%d at x=%d, panel %dx%d at x=%d; character scale %d at (%d,%d); scene sprites %d of %d",
+             s_layout.stage.w, s_layout.stage.h, s_layout.stage.x, s_layout.panel.w, s_layout.panel.h,
+             s_layout.panel.x, s.view.scale, s.view.x0, s.view.y0, s_scene.count, GFX_SCENE_MAX_SPRITES);
 
     s.perf_since = app_port_time_us();
     s.mood = buddy_brain_mood(&s.brain, t_start);
@@ -1003,6 +1221,10 @@ void app_event(const app_event_t *ev)
     // In Office Mode any tap (on release) brings DeskBuddy back. Otherwise the menu takes the touches in the control
     // panel (it acts on release, see menu.h), and a touch-down on the robot pokes him.
     const uint32_t t = now_ms();
+    if (s_mg.stage == MDS_PLAY) { // the game takes every touch on its screen
+        missile_touch(ev, t);
+        return;
+    }
     if (s.screen.office) {
         if (ev->type == APP_TOUCH_UP) {
             office_zoom_request(&s_zoom, false); // he wakes up
@@ -1117,6 +1339,7 @@ uint32_t app_frame(void)
     const uint32_t now = now_ms();
     run_demos(now);
     const uint32_t game_next = game_update(now);
+    const uint32_t md_next = missile_update(now);
 
     // Buddy's zoom into Office Mode and back: it asks the scene switch for the clock or for Buddy.
     const office_zoom_step_t zoom = office_zoom_step(&s_zoom, &s.screen, now);
@@ -1222,10 +1445,21 @@ uint32_t app_frame(void)
         }
         const uint32_t view_next = buddy_view_apply(&s.view, &pose, now);
         next = view_next < next ? view_next : next;
-        menu_thought_apply(&s_thought, zoom.animate ? NULL : &pose.thought); // not while the camera moves
+        if (s_md_view.shown) { // the game around him; his beams start at his eyes
+            int ex[2], ey[2];
+            for (int i = 0; i < 2; i++) {
+                const gfx_rect_t e = gfx_sprite_bounds(&s.view.eye[i]);
+                ex[i] = e.x + e.w / 2;
+                ey[i] = e.y + e.h / 2;
+            }
+            const uint32_t md_view_next = md_view_apply(&s_md_view, &s_md, ex, ey, now);
+            next = md_view_next < next ? md_view_next : next;
+        }
+        // His thoughts: not while the camera moves, nor in the game.
+        menu_thought_apply(&s_thought, zoom.animate || md_on() ? NULL : &pose.thought);
         if (pose.say != s_msg.said) { // a line of his own on the sign, if it is free
             s_msg.said = pose.say;
-            if (pose.say && s_msg.ready && !marquee_active(&s_msg.sign) && !s_msg.queued) {
+            if (pose.say && s_msg.ready && !marquee_active(&s_msg.sign) && !s_msg.queued && !md_on()) {
                 marquee_start(&s_msg.sign, buddy_say_text((buddy_say_t)pose.say), now);
                 s_msg.caption = true;
             }
@@ -1250,15 +1484,18 @@ uint32_t app_frame(void)
             next = hold_wait < next ? hold_wait : next;
         }
     }
-    // The question shows while he asks it, his game lines while he plays: not during the zoom or in Clock Mode.
+    // The question shows while he asks it, his game lines while he plays (Tic-Tac-Toe), his alert before Missile
+    // Defense: not during the zoom or in Clock Mode.
     const uint32_t ask_left = !s.screen.office && !zoom.animate ? buddy_brain_asking(&s.brain, now) : 0;
     const char *question = s.brain.state == BUDDY_STATE_CONFIRM ? k_ask_zdmw : k_ask_peukie;
     const uint32_t ask_next =
-        s_playing && !zoom.animate
-            ? menu_ask_say(&s_ask, ttt_line(&s_ttt, now))
+        s_playing && !zoom.animate ? menu_ask_say(&s_ask, ttt_line(&s_ttt, now))
+        : s_mg.stage == MDS_ALERT
+            ? menu_ask_say(&s_ask, k_incoming)
             : menu_ask_apply(&s_ask, ask_left ? question : NULL, ask_left, buddy_activity_ms(s.brain.state));
     next = ask_next < next ? ask_next : next;
     next = game_next < next ? game_next : next;
+    next = md_next < next ? md_next : next;
     const uint32_t pdc_wake = pdc_next(&s_pdc, now); // the lease, the cooldown, a click without answer
     next = pdc_wake < next ? pdc_wake : next;
     next = step.next_ms < next ? step.next_ms : next;
@@ -1267,9 +1504,11 @@ uint32_t app_frame(void)
 
     // The message sign: above the robot, or below the clock in Office Mode (which stays on).
     if (s_msg.ready) {
-        const gfx_rect_t area = s.screen.office ? s_layout.screen : s_layout.stage;
+        // In the game scene: at the top of the sky, until a message that was already up has run.
+        const bool game = s_md_view.shown;
+        const gfx_rect_t area = s.screen.office || game ? s_layout.screen : s_layout.stage;
         const int mx = area.x + (area.w - MARQUEE_W) / 2;
-        const int my = s.screen.office ? area.y + area.h - MARQUEE_H - 36 : area.y + 22;
+        const int my = s.screen.office ? area.y + area.h - MARQUEE_H - 36 : game ? MD_SKY_TOP + 8 : area.y + 22;
         const bool was_showing = marquee_active(&s_msg.sign);
         uint32_t sign_next = marquee_apply(&s_msg.sign, mx, my, now);
         if (was_showing && !marquee_active(&s_msg.sign)) {
@@ -1327,6 +1566,7 @@ uint32_t app_frame(void)
         app_port_present();
         presented = true;
         office_switch_presented(&s.screen);
+        office_switch_presented(&s_mg.sw);
 
         const int area = gfx_dirty_area(&s.redraw);
         s.perf.renders++;

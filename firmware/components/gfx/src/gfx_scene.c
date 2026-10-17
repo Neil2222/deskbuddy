@@ -138,6 +138,11 @@ static void render_rect(const gfx_scene_t *s, gfx_rect_t r, const gfx_surface_t 
                 draw_sprite(hits[i], clip, s->strip, r.w, r.x, y0);
             }
         }
+        if (s->overlay) {
+            for (int row = 0; row < rows; row++) {
+                s->overlay(s->overlay_ctx, s->strip + (size_t)row * r.w, r.x, y0 + row, r.w);
+            }
+        }
         for (int row = 0; row < rows; row++) {
             gfx_color_t *line = dst->px + (size_t)(y0 + row) * dst->stride + r.x;
             memcpy(line, s->strip + (size_t)row * r.w, (size_t)r.w * sizeof(gfx_color_t));

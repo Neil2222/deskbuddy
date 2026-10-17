@@ -16,6 +16,8 @@
 #include "buddy_kitt.h"
 #include "buddy_view.h"
 #include "layout.h"
+#include "md.h"
+#include "md_view.h"
 #include "menu.h"
 #include "menu_ask.h"
 #include "menu_ttt.h"
@@ -891,6 +893,106 @@ void test_app_tic_tac_toe_pauses_in_clock_mode(void)
     command(225, "mood.set name=idle");
     tap_back();
     run(600);
+    tap_back(); // Home, for whatever runs next
+    run(600);
+}
+
+// ---- Missile Defense ----
+
+static uint16_t front_px(int x, int y)
+{
+    return s_fb[s_back ^ 1][y * W + x];
+}
+
+static bool game_on_screen(void)
+{
+    return front_px(300, 2) == GFX_RGB(14, 16, 28); // the game's score bar, where the stage is otherwise
+}
+
+static void open_missiles(void)
+{
+    tap_slot(MENU_LIST, 4); // GAMES (no PDC offered: the fifth row)
+    run(600);
+    tap_slot(MENU_GRID, 1); // MISSILES
+}
+
+// Its tile: Buddy's alert on his stage (busy, mode=game), then the game on the whole screen; shots on the touchscreen;
+// shows refused and messages kept waiting while it is on; the X brings back his stage, the menu on GAMES and his mood,
+// and the waiting message goes up. Clock Mode ends the game first and then zooms in. A game left alone ends with the
+// desk gone; RETRY starts afresh; and nobody touching the game-over screen closes it.
+void test_app_missile_defense_fullscreen_and_back(void)
+{
+    CHECK(start());
+    command(300, "mood.set name=happy");
+    run(100);
+    clear_out();
+    open_missiles();
+    CHECK(sent("evt mode mode=game"));
+    run(300);
+    CHECK(!game_on_screen()); // his alert, still on his stage
+    run(900);
+    CHECK(game_on_screen());
+    command(301, "status");
+    CHECK(sent(" mode=game mood=happy "));
+    command(302, "act name=sneeze iid=302");
+    CHECK(sent("<DB1 302 err busy mode=game #"));
+    command(303, "msg.show id=303 text=HELLO");
+    CHECK(sent("<DB1 303 ok queued=1 #"));
+    run(3000);
+    CHECK(!sent("evt msg id=303 state=showing"));
+    touch(300, 200); // a shot (as the finger comes down)
+    touch(700, 150);
+    run(500);
+    CHECK(game_on_screen());
+
+    // The X: back to his stage, the menu on GAMES, his mood; then the message.
+    clear_out();
+    touch(MD_W - 34, 20);
+    run(800);
+    CHECK(!game_on_screen());
+    CHECK(sent("evt mode mode=normal"));
+    CHECK(sent("evt msg id=303 state=showing"));
+    command(304, "status");
+    CHECK(sent(" mode=normal mood=happy "));
+    run(15000); // the message runs its course
+
+    // Clock Mode during the game: the game ends, then he zooms into the clock; a tap brings him back.
+    clear_out();
+    tap_slot(MENU_GRID, 1);
+    run(1500);
+    CHECK(game_on_screen());
+    command(305, "mode.set mode=clock");
+    CHECK(sent("<DB1 305 ok #"));
+    run(4000);
+    CHECK(sent("evt mode mode=normal"));
+    CHECK(sent("evt mode mode=office"));
+    command(306, "status");
+    CHECK(sent(" mode=office mood=happy "));
+    touch(W / 2, H / 2);
+    run(3000);
+    command(307, "status");
+    CHECK(sent(" mode=normal mood=happy "));
+
+    // Left alone, the missiles take the desk and the game is over; RETRY starts a new one; left alone again, the
+    // game-over screen closes by itself.
+    clear_out();
+    tap_slot(MENU_GRID, 1);
+    run(1500);
+    CHECK(game_on_screen());
+    run(150000); // over after about 70 s; its buttons from 1.5 s later
+    CHECK(game_on_screen()); // the game-over screen
+    CHECK(front_px(69, 507) != GFX_RGB(204, 210, 220)); // the mug is rubble
+    touch(MD_W / 2 - 112, 240); // RETRY
+    run(1000);
+    CHECK(game_on_screen());
+    CHECK(front_px(69, 507) == GFX_RGB(204, 210, 220)); // a new game: the mug stands again
+    command(308, "status");
+    CHECK(sent(" mode=game "));
+    run(240000 + MD_OVER_IDLE_MS);
+    CHECK(!game_on_screen());
+    command(309, "status");
+    CHECK(sent(" mode=normal mood=happy "));
+    command(310, "mood.set name=idle");
     tap_back(); // Home, for whatever runs next
     run(600);
 }

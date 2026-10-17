@@ -5,4 +5,4 @@
 idf_component_register(SRCS "src/app.c" "src/app_link.c" "src/app_events.c"
                        INCLUDE_DIRS "include"
                        REQUIRES gfx link
-                       PRIV_REQUIRES buddy layout log marquee menu office pdc ttt)
+                       PRIV_REQUIRES buddy layout log marquee menu missile office pdc ttt)

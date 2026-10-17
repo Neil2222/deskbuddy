@@ -22,7 +22,7 @@ enum { W = 1024, H = 600, ALIGN = 32 };
 
 static buddy_pose_t face_at(uint8_t face, uint8_t attitude, uint32_t t)
 {
-    const buddy_game_t g = {face, attitude, 1, 0};
+    const buddy_game_t g = {face, attitude, 1, 0, 0, 0};
     buddy_pose_t p = {0};
     buddy_game_pose(&g, t, &p);
     return p;
@@ -87,7 +87,7 @@ void test_game_faces_hold_until_the_next_round(void)
     for (uint8_t f = 0; f < BUDDY_GAME_FACE_COUNT; f++) {
         const uint32_t from = f == BUDDY_GAME_READY ? 1000 : f >= BUDDY_GAME_WON ? BUDDY_GAME_REACT_MS : 0;
         for (uint32_t t = from; t < 60000;) {
-            const buddy_game_t g = {f, BUDDY_GAME_EVEN, 1, 0};
+            const buddy_game_t g = {f, BUDDY_GAME_EVEN, 1, 0, 0, 0};
             buddy_pose_t a = {0}, b = {0};
             const uint32_t next = buddy_game_pose(&g, t, &a);
             CHECK(next >= 1);
@@ -107,7 +107,7 @@ void test_game_brain_plays_over_his_mood(void)
     buddy_brain_init(&b, 0, 7);
     buddy_brain_set_mood(&b, BUDDY_MOOD_HAPPY, 0, 0);
     CHECK(buddy_brain_event(&b, BUDDY_EVENT_SNEEZE, 100));
-    const buddy_game_t think = {BUDDY_GAME_THINK, BUDDY_GAME_EVEN, 1, 200};
+    const buddy_game_t think = {BUDDY_GAME_THINK, BUDDY_GAME_EVEN, 1, 200, 0, 0};
     CHECK(!buddy_brain_game(&b, &think, 200)); // the sneeze plays to its end
     CHECK_EQ(b.state, BUDDY_STATE_SNEEZE);
     CHECK(buddy_brain_game(&b, &think, 100 + BUDDY_SNEEZE_MS));
@@ -124,7 +124,7 @@ void test_game_brain_plays_over_his_mood(void)
     CHECK_EQ(buddy_brain_mood(&b, 11000), BUDDY_MOOD_SLEEPY);
     buddy_brain_tick(&b, 11100, &p);
     CHECK_EQ(p.state, BUDDY_STATE_GAME); // ...but he keeps playing
-    const buddy_game_t won = {BUDDY_GAME_WON, BUDDY_GAME_EVEN, 1, 12000};
+    const buddy_game_t won = {BUDDY_GAME_WON, BUDDY_GAME_EVEN, 1, 12000, 0, 0};
     CHECK(buddy_brain_game(&b, &won, 12000)); // a new face, same game
     buddy_brain_tick(&b, 12100, &p);
     CHECK_EQ(p.eyes, BUDDY_EYES_HAPPY);
@@ -245,7 +245,7 @@ static uint8_t s_mem[MENU_VIEW_MEMORY];
 
 static buddy_game_t face_for(const ttt_t *g, uint32_t now)
 {
-    buddy_game_t f = {BUDDY_GAME_WATCH, BUDDY_GAME_EVEN, 1, g->phase_at};
+    buddy_game_t f = {BUDDY_GAME_WATCH, BUDDY_GAME_EVEN, 1, g->phase_at, 0, 0};
     if ((g->phase == TTT_YOUR_TURN || g->phase == TTT_THINKING) && now - g->round_at < BUDDY_GAME_READY_MS) {
         f.face = BUDDY_GAME_READY;
         f.since = g->round_at;
@@ -414,8 +414,9 @@ void test_game_redraws_match_full_redraw(void)
     CHECK(quiet_frames <= 50); // his breathing, blinks and glances, the header's blink: about 4 frames a second
     CHECK_EQ(brain.state, BUDDY_STATE_IDLE);
     CHECK(ask.bubble.flags & GFX_SPRITE_HIDDEN);
-    for (int i = 1; i < MENU_SLOTS; i++) { // GAMES again: its one tile, nothing of the board left
+    for (int i = 2; i < MENU_SLOTS; i++) { // GAMES again: its two tiles, nothing of the board left
         CHECK(mv.slot[i].flags & GFX_SPRITE_HIDDEN);
     }
     CHECK(!(mv.slot[0].flags & GFX_SPRITE_HIDDEN));
+    CHECK(!(mv.slot[1].flags & GFX_SPRITE_HIDDEN));
 }

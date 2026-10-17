@@ -173,6 +173,32 @@ Looping animations (`components/buddy/src/buddy_mood.c`). They use the same path
 
 Slow swaps stayed at 0 throughout. The one large redraw (284 k px, 30.7 ms to render) came when a message arrived during Sleepy: the sign appearing, Buddy jumping and three Zs vanishing in one frame, plus the previous frame's rectangles, probably overflowed the 16-entry dirty list, which then merges into larger boxes [INFERENCE]. It costs one late frame, not a glitch, and is not chased further. Host test `mood_redraws_match_full_redraw`: 2,338 frames over every mood with rapid switching, taps and a Monster sequence, all equal to a full redraw, largest redraw 107,520 px (17 % of the screen).
 
+### Missile Defense (2026-10-17; host tests and simulator only, not yet on the board)
+
+**How it draws.** The game takes the whole screen through the clock's scene switch (`office_switch`, its own instance): two full redraws in, two out, as for the Clock switch (0 resyncs there on the board). In the game, Buddy is the only sprite user: the game adds **no sprites** to the scene (66 of 72 used before and after, logged at start). The sky, the desk and his plate are the scene's background; everything that moves (trails, missile heads, blasts, both eye beams, the desk items, text, buttons, the heat bar) is drawn by a new **overlay** function, row by row, over the sprites. The overlay is the one engine change: an optional `gfx_scene_t.overlay`, NULL everywhere else, so every other scene renders exactly as before (all 141 earlier snapshots unchanged except the two that show the GAMES page, which now has a second tile). The game view invalidates only what changed: a missile's new rows, a blast's square, a beam's length in 32-row pieces; diagonal lines never become one large rectangle. The two limits the proposal wanted to raise were measured first and stay: `GFX_SCENE_MAX_SPRITES` 72 (the game needs none) and `GFX_DIRTY_MAX` 16 (never reached, see below).
+
+**Measured off the board** (host test `md_view_redraws_match_full_redraw`: whole games through the render loop's double-buffer repair, every frame compared with a full redraw; the simulator with `--verify`):
+
+| | Waves 1–3, unhurried player | Waves 8–10, busy player |
+|---|---|---|
+| Frames (full redraws) | 3,544 (6: boot, switch in, switch out) | 3,071 (6) |
+| Every frame vs a full redraw | equal | equal |
+| Redraw p50 / p95 / p99 | 2,240 / 38,272 / 71,872 px | 6,720 / 46,592 / 77,024 px |
+| Largest redraw with a beam on screen | 126,272 px | 165,056 px |
+| Largest redraw | 150,400 px | 165,056 px (a beam frame) |
+| The game-over screen once its last flames are out | nothing of the game redrawn (the world is frozen) | the same |
+| Dirty rectangles in a frame | at most 13 (limit 16; never reached) | at most 14 (never reached) |
+| Rectangles the view invalidated in a frame | at most 35 (merged to the above) | at most 48 |
+| Simulator, `--verify` (about 3 minutes: entering, play, overheat, items lost, game over, RETRY, X, Clock during the game, Tic-Tac-Toe, KITT) | 0 mismatched frames | |
+
+For comparison on the board: Tic-Tac-Toe's largest redraw was 266 k px (render 36.6 ms, fill max 280 µs, 0 resyncs). Scaled by that ratio, the game's largest frames (a beam) would render in about 23 ms and a p99 frame in about 10 ms [INFERENCE: the overlay's per-row cost on the ESP32 is not measured].
+
+**Game over freezes the world** (since the review): from the moment the last item is lost no missile moves, no blast grows, nothing lands or scores (`md_world_ms`); only the last item's flames burn out, the game-over screen appears and Buddy sighs. RETRY lets the frozen trails shrink back over the normal 300 ms trail fade instead of removing them in one frame (that single frame measured 477 k px before this).
+
+**Memory.** Firmware image 553,659 B (Tic-Tac-Toe: 535,648 B); static DIRAM 156,355 B (150,763 B): +5.6 KB internal RAM for the game state (`md_t`, about 0.5 KB), the view's two layer states (`md_view_t`, about 3.6 KB: what is drawn and what is drawn next), the desk items' art (972 B) and 304 B more for the menu's icon pool (the new tile's icon). No allocation during play; nothing in PSRAM. Free internal RAM after start is expected about 5.6 KB lower than Tic-Tac-Toe's 77,091 B [INFERENCE until the board logs it].
+
+**Still to measure on the board:** fill max and STRIPS margin while playing (a steady 25–33 frames/s of small redraws plus a beam now and then), the switch in and out (expected as the Clock switch: about 427–430 µs, margin 19–24 µs), the overlay's render cost per frame, free internal RAM and the render task's stack after a long game, and touch latency for shots (they act on touch-down).
+
 ### Tic-Tac-Toe (2026-10-17; passed two board tests)
 
 **Board test of `5b453b4` (2026-10-17, 15:58–16:17): passed.** Flashed over COM6 (`Hash of data verified`; `App version: 5b453b4`) after a fresh full-flash backup of the board running `66aa983` (`Documents\DeskBuddy-backups\fw-66aa983-before-tictactoe-20261017-155256`, `verify_flash` digest matched, SHA-256 `627aef5e…b0c11`). The user played on the touchscreen and saw no glitches, tearing, flicker or stale pixels: 5 complete rounds (2 won by the user, 1 by Buddy, 2 draws) with "HEY, MY TURN!" and taps on taken cells ignored, his thinking pause, win / loss / draw reactions and the faces he keeps afterwards, rematches with the starter alternating; Back restoring his mood (happy); Clock from the game; holding the clock for CLOCK FACES; the 2-minute timeout (*BORED...*, closed exactly 120.0 s after opening; `act`, `poke`, `monster` meanwhile `err busy mode=game`, a `mood.set` during the game shown afterwards); KITT and the menu pages as before. No watchdog warning, crash or error in the log.

@@ -251,6 +251,7 @@ typedef struct {
     int8_t shake;  // sideways offset of the whole robot in art pixels (-1..1)
     int8_t wobble; // extra sideways offset of the head alone (-1..1): trembling on the neck, cheap to redraw
     int8_t look;  // sideways eye offset within the face (-1..1)
+    int8_t look_y; // up/down eye offset within the face (-1 up .. 1 down): aiming at the sky
     uint8_t nod;  // the head sinks onto the neck by this many art pixels (0..1): drooping, dozing off
     uint8_t pop;  // the head flies up off the neck by this many art pixels (0..BUDDY_MAX_POP): a sneeze
     uint8_t closeup; // the camera pushes in on his face: 0 his place on the stage .. 255 his head filling the stage

@@ -96,7 +96,7 @@ static uint32_t think(const buddy_game_t *g, uint32_t t, buddy_pose_t *p)
 static uint32_t won(const buddy_game_t *g, uint32_t t, buddy_pose_t *p)
 {
     if (t >= BUDDY_GAME_REACT_MS) { // smug and self-satisfied, waiting for the rematch
-        const buddy_game_t smug = {BUDDY_GAME_WATCH, BUDDY_GAME_SMUG, g->side, 0};
+        const buddy_game_t smug = {BUDDY_GAME_WATCH, BUDDY_GAME_SMUG, g->side, 0, 0, 0};
         return watch(&smug, t - BUDDY_GAME_REACT_MS, p);
     }
     p->eyes = BUDDY_EYES_HAPPY;
@@ -189,6 +189,173 @@ static uint32_t drew(const buddy_game_t *g, uint32_t t, buddy_pose_t *p)
     return next;
 }
 
+// --- Missile Defense ----------------------------------------------------------------------------------------------
+#define MD_START_MS 360u      // the start when the alert goes off
+#define MD_HOP_MS 450u
+#define MD_TREMBLE_MS 90u     // panic: his head trembles on his neck
+#define MD_SWEAT_MS 200u
+#define MD_POP_MS 600u        // a hit: the head flies off and lands
+#define MD_DIZZY_MS 200u      // ...then it wobbles, stars around it
+#define MD_STEAM_MS 120u      // overheated: the steam rises one art pixel this often
+#define MD_DISMAY_MS 500u     // an item lost: the shock, then the frown
+#define MD_OVER_DROOP_MS 2500u // game over: the droop with a tear; then glum, a sigh every so often
+#define MD_SIGH_CYCLE_MS 4000u
+#define MD_SIGH_MS 300u
+#define MD_STILL_MS 60000u    // a face that holds still: looked at again in a minute (the game changes it sooner)
+
+static void aim(const buddy_game_t *g, buddy_pose_t *p)
+{
+    p->look = g->aim_x < -1 ? -1 : g->aim_x > 1 ? 1 : g->aim_x;
+    p->look_y = g->aim_y < -1 ? -1 : g->aim_y > 1 ? 1 : g->aim_y;
+}
+
+static uint32_t md_alert(uint32_t t, buddy_pose_t *p)
+{
+    p->eyes = BUDDY_EYES_WIDE;
+    p->mouth = BUDDY_MOUTH_OPEN;
+    p->antenna = BUDDY_ANTENNA_OVERLOAD;
+    p->props.alert = true;
+    emit(p, 0, BUDDY_PART_SWEAT, BUDDY_FROM_HEAD_R, 1, 3, 0);
+    if (t >= MD_START_MS) {
+        return MD_STILL_MS;
+    }
+    p->shake = (t / 60) & 1u ? 1 : -1;
+    return buddy_min_u32(60 - t % 60, MD_START_MS - t);
+}
+
+static uint32_t md_aim(const buddy_game_t *g, uint32_t t, buddy_pose_t *p, buddy_eyes_t eyes, buddy_mouth_t mouth)
+{
+    p->eyes = eyes;
+    p->mouth = mouth;
+    p->antenna = BUDDY_ANTENNA_CALM;
+    aim(g, p);
+    return bob(t, p);
+}
+
+static uint32_t md_ready(const buddy_game_t *g, uint32_t t, buddy_pose_t *p)
+{
+    if (t >= MD_HOP_MS) {
+        return md_aim(g, t - MD_HOP_MS, p, BUDDY_EYES_ANGRY, BUDDY_MOUTH_SMIRK);
+    }
+    p->eyes = BUDDY_EYES_ANGRY;
+    p->mouth = BUDDY_MOUTH_SMIRK;
+    p->antenna = BUDDY_ANTENNA_EXCITED;
+    aim(g, p);
+    p->lift = buddy_hop(t, MD_HOP_MS, 2);
+    return buddy_min_u32(TICK, MD_HOP_MS - t);
+}
+
+static uint32_t md_fire(const buddy_game_t *g, buddy_pose_t *p)
+{
+    p->eyes = BUDDY_EYES_WIDE;
+    p->mouth = BUDDY_MOUTH_GRIT;
+    p->antenna = BUDDY_ANTENNA_EXCITED;
+    aim(g, p);
+    return MD_STILL_MS;
+}
+
+static uint32_t md_panic(const buddy_game_t *g, uint32_t t, buddy_pose_t *p)
+{
+    p->eyes = BUDDY_EYES_WIDE;
+    p->mouth = BUDDY_MOUTH_OPEN;
+    p->antenna = BUDDY_ANTENNA_EXCITED;
+    aim(g, p);
+    p->wobble = (t / MD_TREMBLE_MS) & 1u ? 1 : -1;
+    emit(p, 0, BUDDY_PART_SWEAT, BUDDY_FROM_HEAD_R, 1, 2 + (int)((t / MD_SWEAT_MS) % 3), 0);
+    return buddy_min_u32(MD_TREMBLE_MS - t % MD_TREMBLE_MS, MD_SWEAT_MS - t % MD_SWEAT_MS);
+}
+
+static uint32_t md_hit(uint32_t t, buddy_pose_t *p)
+{
+    p->antenna = BUDDY_ANTENNA_OVERLOAD;
+    p->mouth = BUDDY_MOUTH_OPEN;
+    if (t < MD_POP_MS) {
+        p->eyes = BUDDY_EYES_SQUEEZE;
+        p->pop = buddy_hop(t, MD_POP_MS, BUDDY_MAX_POP);
+        return buddy_min_u32(TICK, MD_POP_MS - t);
+    }
+    // Dazed: the head wobbles, two stars circle it.
+    const uint32_t d = t - MD_POP_MS, s = d / MD_DIZZY_MS;
+    p->eyes = BUDDY_EYES_HALF;
+    p->wobble = s & 1u ? 1 : -1;
+    emit(p, 0, BUDDY_PART_SPARKLE, BUDDY_FROM_HEAD_L, 0, -(int)(s % 3), (int)(s & 1u));
+    emit(p, 1, BUDDY_PART_SPARKLE, BUDDY_FROM_HEAD_R, 0, -(int)((s + 2) % 3), (int)((s + 1) & 1u));
+    return MD_DIZZY_MS - d % MD_DIZZY_MS;
+}
+
+static uint32_t md_hot(uint32_t t, buddy_pose_t *p)
+{
+    p->tint = BUDDY_TINT_FURY;
+    p->eyes = BUDDY_EYES_SQUEEZE;
+    p->mouth = BUDDY_MOUTH_GRIT;
+    p->antenna = BUDDY_ANTENNA_OVERLOAD;
+    const uint32_t s = t / MD_STEAM_MS;
+    emit(p, 0, BUDDY_PART_STEAM, BUDDY_FROM_HEAD_L, -1, -(int)(s % 4), (int)((s / 2) & 1u));
+    emit(p, 1, BUDDY_PART_STEAM, BUDDY_FROM_HEAD_R, 1, -(int)((s + 2) % 4), (int)(((s + 1) / 2) & 1u));
+    return MD_STEAM_MS - t % MD_STEAM_MS;
+}
+
+static uint32_t md_lost(const buddy_game_t *g, uint32_t t, buddy_pose_t *p)
+{
+    p->look = g->aim_x < -1 ? -1 : g->aim_x > 1 ? 1 : g->aim_x; // at what is left of it
+    if (t < MD_DISMAY_MS) {
+        p->eyes = BUDDY_EYES_WIDE;
+        p->mouth = BUDDY_MOUTH_OPEN;
+        p->antenna = BUDDY_ANTENNA_EXCITED;
+        if (t < 200) {
+            p->shake = (t / 50) & 1u ? 1 : -1;
+            return buddy_min_u32(50 - t % 50, 200 - t);
+        }
+        return MD_DISMAY_MS - t;
+    }
+    p->eyes = BUDDY_EYES_HALF;
+    p->mouth = BUDDY_MOUTH_FROWN;
+    p->antenna = BUDDY_ANTENNA_DIM;
+    return MD_STILL_MS;
+}
+
+static uint32_t md_cheer(uint32_t t, buddy_pose_t *p)
+{
+    p->eyes = BUDDY_EYES_HAPPY;
+    p->mouth = BUDDY_MOUTH_GRIN;
+    p->antenna = BUDDY_ANTENNA_EXCITED;
+    uint32_t next = WON_SPARKLE_MS - t % WON_SPARKLE_MS;
+    if (t < WON_HOPS * WON_HOP_MS) {
+        p->lift = buddy_hop(t % WON_HOP_MS, WON_HOP_MS, BUDDY_MAX_LIFT);
+        next = buddy_min_u32(next, TICK);
+    }
+    const uint32_t s = t / WON_SPARKLE_MS;
+    emit(p, 0, BUDDY_PART_SPARKLE, BUDDY_FROM_HEAD_L, 0, -(int)(s % 3), (int)(s & 1u));
+    emit(p, 1, BUDDY_PART_SPARKLE, BUDDY_FROM_HEAD_R, 0, -(int)((s + 1) % 3), (int)((s + 1) & 1u));
+    return next;
+}
+
+static uint32_t md_over(uint32_t t, buddy_pose_t *p)
+{
+    p->eyes = BUDDY_EYES_HALF;
+    p->mouth = BUDDY_MOUTH_FROWN;
+    p->antenna = BUDDY_ANTENNA_DIM;
+    p->tint = BUDDY_TINT_DROWSY;
+    p->nod = 1;
+    uint32_t next;
+    if (t < MD_OVER_DROOP_MS) { // a tear runs down
+        next = MD_OVER_DROOP_MS - t;
+        edge(&next, t, 500);
+        if (t >= 500) {
+            emit(p, 0, BUDDY_PART_SWEAT, BUDDY_FROM_BROW, 8, 4 + (int)((t - 500) * 4 / 2000), 0);
+            next = buddy_min_u32(next, 500 - (t - 500) % 500);
+        }
+        return next;
+    }
+    const uint32_t c = (t - MD_OVER_DROOP_MS) % MD_SIGH_CYCLE_MS;
+    if (c < MD_SIGH_MS) {
+        p->mouth = BUDDY_MOUTH_PUFF;
+    }
+    next = MD_SIGH_CYCLE_MS - c;
+    edge(&next, c, MD_SIGH_MS);
+    return next;
+}
+
 uint32_t buddy_game_pose(const buddy_game_t *g, uint32_t t, buddy_pose_t *pose)
 {
     uint32_t next;
@@ -207,6 +374,39 @@ uint32_t buddy_game_pose(const buddy_game_t *g, uint32_t t, buddy_pose_t *pose)
         break;
     case BUDDY_GAME_DREW:
         next = drew(g, t, pose);
+        break;
+    case BUDDY_GAME_MD_ALERT:
+        next = md_alert(t, pose);
+        break;
+    case BUDDY_GAME_MD_READY:
+        next = md_ready(g, t, pose);
+        break;
+    case BUDDY_GAME_MD_AIM:
+        next = md_aim(g, t, pose, BUDDY_EYES_FOCUS, BUDDY_MOUTH_NEUTRAL);
+        break;
+    case BUDDY_GAME_MD_FIRE:
+        next = md_fire(g, pose);
+        break;
+    case BUDDY_GAME_MD_SMUG:
+        next = md_aim(g, t, pose, BUDDY_EYES_LIDDED, BUDDY_MOUTH_SMIRK);
+        break;
+    case BUDDY_GAME_MD_PANIC:
+        next = md_panic(g, t, pose);
+        break;
+    case BUDDY_GAME_MD_HIT:
+        next = md_hit(t, pose);
+        break;
+    case BUDDY_GAME_MD_HOT:
+        next = md_hot(t, pose);
+        break;
+    case BUDDY_GAME_MD_LOST:
+        next = md_lost(g, t, pose);
+        break;
+    case BUDDY_GAME_MD_CHEER:
+        next = md_cheer(t, pose);
+        break;
+    case BUDDY_GAME_MD_OVER:
+        next = md_over(t, pose);
         break;
     default:
         next = watch(g, t, pose);

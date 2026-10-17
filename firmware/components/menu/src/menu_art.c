@@ -270,6 +270,25 @@ static const char *const k_ttt[] = { // a little board: your X in amber, Buddy's
     "E...EL.....L.a.a.",
     ".EEE.L.....La...a",
 };
+static const char *const k_missile[] = { // a missile's trail ending in a blast, Buddy's beam coming in from below
+    "Rr...............",
+    ".RR..............",
+    "..RF.............",
+    "...FF...Y........",
+    "....FYF.Y........",
+    "..Y.YWWYF..Y.....",
+    "...FWWWWY.Y......",
+    "....YWWWF........",
+    "..FYFWYFY........",
+    ".F..Y.F.EE.......",
+    "....Y....EE......",
+    "..........EE.....",
+    "...........EE....",
+    "............EE...",
+    ".............EE..",
+    "..............EE.",
+    "...............EE",
+};
 static const char *const k_led[] = {
     ".KKKK.",
     "KEWEEK",
@@ -290,10 +309,10 @@ static const struct {
     [MENU_ICON_SCHEDULE] = ART(k_calendar), [MENU_ICON_OFFICE] = ART(k_moon), [MENU_ICON_WATER] = ART(k_water),
     [MENU_ICON_COFFEE] = ART(k_coffee),   [MENU_ICON_LUNCH] = ART(k_burger), [MENU_ICON_SNACKS] = ART(k_cookie),
     [MENU_ICON_MEETING] = ART(k_bubbles), [MENU_ICON_WALK] = ART(k_sneaker),
-    [MENU_ICON_GEAR] = ART(k_gear), [MENU_ICON_TTT] = ART(k_ttt),
+    [MENU_ICON_GEAR] = ART(k_gear), [MENU_ICON_TTT] = ART(k_ttt), [MENU_ICON_MISSILE] = ART(k_missile),
 };
 
-static uint8_t s_pool[4096]; // decoded pixels, internal RAM
+static uint8_t s_pool[4400]; // decoded pixels, internal RAM (4,385 B used)
 static size_t s_used;
 static gfx_image_t s_icons[MENU_ICON_COUNT], s_led, s_triangle, s_chevron;
 static bool s_ready;

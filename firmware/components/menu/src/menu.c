@@ -33,7 +33,7 @@ menu_avail_t menu_item_avail(const menu_item_t *it, const menu_status_t *st)
     if ((it->action == MENU_DO_EVENT || it->action == MENU_DO_PDC) && st->busy) {
         return MENU_ITEM_BUSY;
     }
-    if (it->action == MENU_DO_OPEN && it->arg == MENU_TTT && st->busy) {
+    if (((it->action == MENU_DO_OPEN && it->arg == MENU_TTT) || it->action == MENU_DO_MISSILE) && st->busy) {
         return MENU_ITEM_BUSY; // he plays once the show is over
     }
     if (it->action == MENU_DO_PDC && !st->pdc_ready) {

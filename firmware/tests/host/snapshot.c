@@ -9,8 +9,10 @@
 // menu_sheet.png: the control panel in every state side by side), the message marquee (marquee_intro.png,
 // marquee.png, office_marquee.png), the Clock Mode clock: office_clock.png and office_not_set.png, and the
 // Mechanical Skeleton face (skeleton_*.png: the face, its tick positions, the minute roll, the hourly flourish,
-// a close-up, the menu page that picks it, and the zoom arriving at it), and Tic-Tac-Toe (ttt_*.png and ttt_sheet.png:
-// the game's page, Buddy watching, thinking, winning, losing, puzzled by a draw, and asking for a rematch).
+// a close-up, the menu page that picks it, and the zoom arriving at it), Tic-Tac-Toe (ttt_*.png and ttt_sheet.png:
+// the game's page, Buddy watching, thinking, winning, losing, puzzled by a draw, and asking for a rematch), and
+// Missile Defense (md_*.png and md_sheet.png: his alert on the stage, then the whole screen: a wave starting, aiming,
+// firing, a desk item lost, a missile on his head, overheated eyes, panic, a wave cleared, the game over).
 #include <stdio.h>
 #include <string.h>
 
@@ -22,6 +24,9 @@
 #include "buddy_view.h"
 #include "layout.h"
 #include "marquee.h"
+#include "md.h"
+#include "md_buddy.h"
+#include "md_view.h"
 #include "menu.h"
 #include "menu_ask.h"
 #include "menu_thought.h"
@@ -30,7 +35,6 @@
 #include "office_faces.h"
 #include "office_zoom.h"
 #include "png.h"
-#include "ttt.h"
 
 enum { W = 1024, H = 600, ALIGN = 32, STAGE_PERCENT = 65 }; // firmware defaults (Kconfig)
 
@@ -675,7 +679,7 @@ static void ttt_set(ttt_t *g, const char *board, ttt_phase_t phase, uint32_t pha
 static bool ttt_moment(const char *name, int tile, ttt_t *g, uint8_t face, uint8_t attitude, uint32_t since,
                        uint32_t now, menu_ask_t *ask)
 {
-    const buddy_game_t f = {face, attitude, 1, since};
+    const buddy_game_t f = {face, attitude, 1, since, 0, 0};
     buddy_pose_t pose = {.state = BUDDY_STATE_GAME};
     buddy_game_pose(&f, now - since, &pose);
     buddy_view_apply(&s_view, &pose, now);
@@ -742,6 +746,187 @@ static bool ttt_screens(menu_ask_t *ask)
     const int sheet_w = TTT_COLS * TTT_TILE_W;
     const gfx_surface_t sheet = {s_ttt_sheet, sheet_w, TTT_ROWS * TTT_TILE_H, sheet_w};
     return write("ttt_sheet", &sheet);
+}
+
+// Missile Defense: real game states (md.h, played forward or set up), Buddy's face for them and the game view, as the
+// firmware draws them; full size, and halved on md_sheet.png (4 x 4).
+enum { MD_COLS = 4, MD_ROWS = 4, MD_TILE_W = W / 2, MD_TILE_H = H / 2 };
+static gfx_color_t s_md_sheet[MD_COLS * MD_TILE_W * MD_ROWS * MD_TILE_H];
+static md_view_t s_mdv;
+
+static void md_tile(int i)
+{
+    const int sheet_w = MD_COLS * MD_TILE_W, ox = (i % MD_COLS) * MD_TILE_W, oy = (i / MD_COLS) * MD_TILE_H;
+    for (int y = 0; y < MD_TILE_H; y++) {
+        for (int x = 0; x < MD_TILE_W; x++) {
+            s_md_sheet[(size_t)(oy + y) * sheet_w + ox + x] =
+                x == 0 || y == 0 ? GFX_RGB(255, 255, 255) : s_px[(size_t)(2 * y) * W + 2 * x];
+        }
+    }
+}
+
+static void md_run(md_t *g, uint32_t *t, uint32_t to)
+{
+    while ((int32_t)(to - *t) > 0) {
+        *t += 16;
+        md_tick(g, *t);
+    }
+}
+
+static bool md_moment(const char *name, int tile, const md_t *g, uint32_t now)
+{
+    const buddy_game_t f = md_buddy_face(g, now);
+    buddy_pose_t pose = {.state = BUDDY_STATE_GAME};
+    buddy_game_pose(&f, now - f.since, &pose);
+    buddy_view_apply(&s_view, &pose, now);
+    int ex[2], ey[2];
+    for (int i = 0; i < 2; i++) {
+        const gfx_rect_t e = gfx_sprite_bounds(&s_view.eye[i]);
+        ex[i] = e.x + e.w / 2;
+        ey[i] = e.y + e.h / 2;
+    }
+    md_view_apply(&s_mdv, g, ex, ey, now);
+    if (!shot(name)) {
+        return false;
+    }
+    md_tile(tile);
+    return true;
+}
+
+// A missile by hand: launched at `born` from x0 towards target, falling for fall ms.
+static void md_place(md_t *g, int slot, int x0, int target, uint16_t fall, uint32_t born)
+{
+    g->missile[slot] = (md_missile_t){MD_MISSILE_FLYING, (uint8_t)target, false, (int16_t)x0, MD_SKY_TOP,
+                                      target == MD_TARGET_BUDDY ? MD_BUDDY_X : md_item_x[target],
+                                      target == MD_TARGET_BUDDY ? MD_BUDDY_Y : MD_ITEM_HIT_Y, fall, born, 0, 0, 0};
+}
+
+static bool md_screens(menu_ask_t *ask)
+{
+    if (!md_view_init(&s_mdv, &s_scene)) {
+        return false;
+    }
+    uint32_t t = 30000000;
+    // His alert on the stage, the GAMES page behind it.
+    menu_open(&s_menu, MENU_GAMES, t);
+    const menu_status_t busy = {.mood = BUDDY_MOOD_IDLE, .office = true, .busy = true};
+    menu_view_apply(&s_menu_view, &s_menu, &busy, t + 1000);
+    const buddy_game_t alert = {BUDDY_GAME_MD_ALERT, BUDDY_GAME_EVEN, 0, t, 0, 0};
+    buddy_pose_t pose = {.state = BUDDY_STATE_GAME};
+    buddy_game_pose(&alert, 500, &pose);
+    buddy_view_apply(&s_view, &pose, t + 500);
+    menu_ask_say(ask, "INCOMING!");
+    if (!shot("md_alert")) {
+        return false;
+    }
+    md_tile(0);
+    menu_ask_say(ask, NULL);
+
+    // The game scene, as the firmware switches to it.
+    menu_view_show(&s_menu_view, false);
+    buddy_view_camera(&s_view, MD_BUDDY_SCALE, MD_BUDDY_X0, MD_BUDDY_Y0);
+    s_scene.background = md_view_background;
+    s_scene.background_ctx = &s_mdv;
+    s_scene.overlay = md_view_overlay;
+    s_scene.overlay_ctx = &s_mdv;
+    md_view_show(&s_mdv, true);
+
+    md_t g;
+    md_init(&g, 9);
+    t += 10000;
+    md_start(&g, t);
+    g.best = 2480;
+    g.best_before = 2480;
+    bool ok = md_moment("md_ready", 1, &g, t + 700);
+
+    // Wave 3 under way: he tracks the lowest missile; then a shot: both beams, the blast, the points.
+    g.wave = 3;
+    md_run(&g, &t, t + MD_READY_MS + 7000);
+    g.say = MD_SAY_NONE;
+    ok = ok && md_moment("md_aim", 2, &g, t);
+    int lowest = -1, ly = -1;
+    for (int i = 0; i < MD_MAX_MISSILES; i++) {
+        int x, y;
+        if (g.missile[i].state == MD_MISSILE_FLYING && (md_missile_head(&g.missile[i], t, &x, &y), y > ly)) {
+            lowest = i;
+            ly = y;
+        }
+    }
+    if (lowest >= 0) {
+        int x, y;
+        md_missile_head(&g.missile[lowest], t + 150, &x, &y);
+        md_fire(&g, x, y, t);
+    }
+    md_run(&g, &t, t + 64);
+    ok = ok && md_moment("md_fire", 3, &g, t);
+    md_run(&g, &t, t + 220);
+    ok = ok && md_moment("md_blast", 4, &g, t);
+
+    // A missile gets through to the coffee mug: the flash, then flames over the rubble; he is dismayed.
+    md_place(&g, 9, 160, 0, 2500, t - 2400);
+    md_run(&g, &t, t + 120);
+    ok = ok && md_moment("md_item_hit", 5, &g, t);
+    md_run(&g, &t, t + 500);
+    ok = ok && md_moment("md_item_lost", 6, &g, t);
+
+    // One on his head: it flies off his neck.
+    md_run(&g, &t, t + 2500);
+    md_place(&g, 8, 560, MD_TARGET_BUDDY, 1200, t - 1150);
+    md_run(&g, &t, t + 330);
+    ok = ok && md_moment("md_hit", 7, &g, t);
+    md_run(&g, &t, t + 1000);
+    ok = ok && md_moment("md_dazed", 8, &g, t);
+
+    // Fired too fast: overheated eyes.
+    md_run(&g, &t, t + 1500);
+    for (int i = 0; i < 5; i++) {
+        md_fire(&g, 150 + i * 180, 120 + (i % 2) * 60, t);
+        md_run(&g, &t, t + 40);
+    }
+    md_run(&g, &t, t + 420);
+    ok = ok && md_moment("md_hot", 9, &g, t);
+
+    // Wave 8, many close at once: panic.
+    md_run(&g, &t, t + 3000);
+    g.wave = 8;
+    g.next_spawn = t + 100000000u;
+    g.lost_at = 0; // nothing just lost: his panic shows
+    g.say = MD_SAY_NONE;
+    for (int i = 0; i < MD_MAX_MISSILES; i++) {
+        g.missile[i].state = MD_MISSILE_FREE;
+    }
+    for (int i = 0; i < 5; i++) {
+        md_place(&g, i, 120 + i * 190, i + 1, 6000, t - 4200 + (uint32_t)i * 150);
+    }
+    md_run(&g, &t, t + 120);
+    ok = ok && md_moment("md_panic", 10, &g, t);
+
+    // The wave cleared: the bonus, hops and sparkles.
+    for (int i = 0; i < MD_MAX_MISSILES; i++) {
+        g.missile[i].state = MD_MISSILE_FREE;
+    }
+    g.spawned = md_wave(g.wave).missiles;
+    md_run(&g, &t, t + 1200);
+    ok = ok && md_moment("md_clear", 11, &g, t);
+    if (!ok) {
+        return false;
+    }
+
+    // Game over: the last item goes; RETRY and QUIT; a new best.
+    md_run(&g, &t, t + MD_CLEAR_MS + MD_READY_MS + 400);
+    g.items = 1u << 5;
+    g.score = 3120;
+    g.next_spawn = t + 100000000u;
+    md_place(&g, 0, 900, 5, 2000, t - 1990);
+    md_run(&g, &t, t + 50);
+    md_run(&g, &t, g.phase_at + MD_OVER_BUTTONS_MS + 300);
+    g.best = 3120;
+    if (!md_moment("md_over", 12, &g, t)) {
+        return false;
+    }
+    const int sheet_w = MD_COLS * MD_TILE_W;
+    const gfx_surface_t sheet = {s_md_sheet, sheet_w, MD_ROWS * MD_TILE_H, sheet_w};
+    return write("md_sheet", &sheet);
 }
 
 int main(int argc, char **argv)
@@ -997,7 +1182,7 @@ int main(int argc, char **argv)
     }
     office_faces_apply(&faces, &tm, 100);
     return zoom_screens(&faces) && skeleton_screens(&faces, &marquee) && kitt_menu_screen(&faces) &&
-                   ttt_screens(&ask)
+                   ttt_screens(&ask) && md_screens(&ask)
                ? 0
                : 1;
 }

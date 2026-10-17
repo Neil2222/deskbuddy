@@ -160,7 +160,27 @@ extern int g_test_failed;
     X(game_brain_plays_over_his_mood)                \
     X(game_touch_takes_only_the_board)               \
     X(game_lines_fit_his_bubble)                     \
-    X(game_redraws_match_full_redraw)
+    X(game_redraws_match_full_redraw)                \
+    X(md_waves_start_gentle_then_get_harder)         \
+    X(md_a_shot_catches_missiles_and_chains)         \
+    X(md_multi_kills_score_more)                     \
+    X(md_lost_items_end_the_game)                    \
+    X(md_a_hit_on_buddy_only_stuns)                  \
+    X(md_eyes_overheat_and_cool)                     \
+    X(md_a_miss_breaks_the_streak)                   \
+    X(md_shots_stay_in_the_sky)                      \
+    X(md_late_frames_never_skip_a_blast)             \
+    X(md_cleared_waves_pay_and_the_next_is_harder)   \
+    X(md_first_waves_are_approachable)               \
+    X(md_unplayed_game_ends_by_itself)               \
+    X(md_is_deterministic_across_wraparound)         \
+    X(md_tick_says_when_next)                        \
+    X(md_lines_are_short)                            \
+    X(md_view_lines_fit_his_bubble)                  \
+    X(md_buddy_faces_follow_the_game)                \
+    X(md_view_touch_shoots_at_once_buttons_on_release) \
+    X(md_view_redraws_match_full_redraw)             \
+    X(app_missile_defense_fullscreen_and_back)
 
 #define X(name) void test_##name(void);
 TEST_LIST

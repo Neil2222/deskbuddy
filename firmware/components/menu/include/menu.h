@@ -7,7 +7,8 @@
 //   food & drink activities that are meals: Monster today; water, coffee, lunch and snacks later (his shows)
 //   my day       what YOU are doing now, as you tell Buddy (MENU_DO_LOG): coffee, a smoke, a meeting. The companion
 //                records it (evt did); Buddy only cheers. Never one of his shows, which record nothing
-//   games        interactive experiences with their own screens: Tic-Tac-Toe (MENU_TTT, menu_ttt.h)
+//   games        interactive experiences with their own screens: Tic-Tac-Toe (MENU_TTT, menu_ttt.h) in the panel,
+//                Missile Defense (MENU_DO_MISSILE) on the whole screen
 //   pdc          the PDC Manager integration (ZDMW), only while the companion offers it (menu_status_t.pdc)
 // Scenarios (combinations of actions run by the companion) and needs (hunger, thirst, energy) are not menu items:
 // they will trigger the same actions and change what the items show.
@@ -66,6 +67,7 @@ typedef enum {
     MENU_DO_PDC,     // asks to confirm a ZDMW click (then the companion sends it to PDC Manager)
     MENU_DO_LOG,     // you are doing what the item says (MY DAY): reported to the companion, never refused
     MENU_DO_FACE,    // selects Clock Mode's face `arg` (office_face_t); a tap on the header's head then shows that face
+    MENU_DO_MISSILE, // starts Missile Defense: the firmware takes the whole screen for it (md.h), the menu waits
 } menu_do_t;
 
 typedef enum {
@@ -94,6 +96,7 @@ typedef enum {
     MENU_ICON_GEAR,     // a brass gear: the Mechanical Skeleton face
     MENU_ICON_KITT,     // his head with KITT's scanner on the face screen
     MENU_ICON_TTT,      // a little Tic-Tac-Toe board
+    MENU_ICON_MISSILE,  // a missile's trail ending in a blast, and a cyan eye beam
     MENU_ICON_COUNT,
 } menu_icon_t;
 

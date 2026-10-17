@@ -30,6 +30,7 @@ static const menu_item_t k_items[] = {
     {"games", "GAMES", MENU_HOME, MENU_ICON_GAMES, MENU_DO_OPEN, MENU_GAMES, false},
 
     {"game.ttt", "TIC-TAC-TOE", MENU_GAMES, MENU_ICON_TTT, MENU_DO_OPEN, MENU_TTT, false},
+    {"game.missile", "MISSILES", MENU_GAMES, MENU_ICON_MISSILE, MENU_DO_MISSILE, 0, false}, // the whole screen
 
     MOOD("idle", "IDLE", BUDDY_MOOD_IDLE),
     MOOD("relaxed", "RELAXED", BUDDY_MOOD_RELAXED),

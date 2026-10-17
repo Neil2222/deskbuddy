@@ -30,11 +30,11 @@ The desktop simulator (`tools/simulator.ps1`) carries the same byte stream, fram
 |---|---|---|
 | `hello` | | `ok proto=1 fw=<version> caps=<list> styles=<list> moods=<list> acts=<list> faces=<list> dev=<device id> boot=<16 hex>` (`dev`, `boot`: cap `log`, see *Recorded events*; `faces=`: cap `face`) |
 | `ping` | | `ok` |
-| `status` | | `ok mode=<normal\|office\|monster\|game> mood=<mood> time=<set\|unset> msg=<showing\|idle> queued=<0\|1> uptime=<s> act=<none\|iid:state[:result]> face=<face>` (`office`: Clock Mode, see below; `game`: Tic-Tac-Toe on the touchscreen; `act=`: the last interaction, see *Interactions*; `face=`: cap `face`) |
+| `status` | | `ok mode=<normal\|office\|monster\|game> mood=<mood> time=<set\|unset> msg=<showing\|idle> queued=<0\|1> uptime=<s> act=<none\|iid:state[:result]> face=<face>` (`office`: Clock Mode, see below; `game`: Tic-Tac-Toe or Missile Defense on the touchscreen; `act=`: the last interaction, see *Interactions*; `face=`: cap `face`) |
 | `poke` | | `ok`, or `err busy mode=<mode>` (Clock Mode, an activity running (Monster, water, sneeze, stare, meditate, focus, the peukie question), a game (`mode=game`), a zoom under way, screen not up yet) |
 | `monster` | | `ok`, or `err busy mode=<mode>` (as `poke`) |
 | `act` | `name=<activity> [iid=<1-4294967295>]` | `ok` (it starts), `ok dup=1 state=<started\|shown\|done>` (this iid already started: a retry never starts it twice), `err busy mode=<mode>` (as `poke`), `err unsupported` (an activity this firmware does not have), `err bad_args` |
-| `mode.set` | `mode=office\|clock\|normal` | `ok` (switches like *Clock* in the touchscreen menu / a tap on the clock: Buddy zooms into the clock or out of it, about 1.5 s; `evt mode` follows when the new scene is on screen; a request during a zoom is carried out after it), or `err unavailable` |
+| `mode.set` | `mode=office\|clock\|normal` | `ok` (switches like *Clock* in the touchscreen menu / a tap on the clock: Buddy zooms into the clock or out of it, about 1.5 s; `evt mode` follows when the new scene is on screen; a request during a zoom is carried out after it; during Missile Defense the game ends first (`evt mode mode=normal`), then he zooms in), or `err unavailable` |
 | `time.set` | `utc=<s> [ms=<0-999>] off=<min> [next=<utc s> next_off=<min>]` | `ok` |
 | `msg.show` | `id=<1-4294967295> [style=marquee] text=<percent-encoded UTF-8>` | `ok` (on the sign now), `ok queued=1` (waits its turn), `ok dup=1` (this id was already taken), `err busy mode=<mode>` (one is already waiting), `err unsupported` (unknown style), `err bad_args` |
 | `mood.set` | `name=<mood> [secs=<1-86400>]` | `ok`, `err unsupported` (a mood this firmware does not have), `err bad_args` |
@@ -81,7 +81,7 @@ The desktop simulator (`tools/simulator.ps1`) carries the same byte stream, fram
 - **Text:** UTF-8, 1 to 100 characters (Unicode code points) and at most 200 bytes, percent-encoded: letters, digits and `. _ : + -` as they are, every other byte as `%XX` (`Hallo%2C%20Buddy%21`). Invalid UTF-8 (truncated, overlong, surrogates, above U+10FFFF), `%00`, broken escapes and over-long text are rejected with `err bad_args`.
 - **What the LED font shows:** printable ASCII; accented Latin letters without their accents (`café` shows as `cafe`); typographic quotes, dashes and the ellipsis as `' " - .`; € ° and hearts as their own glyphs; control characters as spaces; emoji variation selectors and zero-width characters dropped; everything else (emoji, other scripts) as a hollow box. The companion sends the text as typed (normalised to NFC, line breaks and tabs as spaces).
 - **`id`:** chosen by the companion (random start per run, then counting up). The same id again is acknowledged with `ok dup=1` and not shown twice, so a resent command cannot show a message twice. The companion never resends on its own.
-- **Queue:** one message can wait. It waits while another message is on the sign, or while a Monster sequence runs (it never interrupts one). A second waiting message gets `err busy`.
+- **Queue:** one message can wait. It waits while another message is on the sign, while a Monster sequence runs (it never interrupts one), or while Missile Defense is played (it goes up once the game is over). A second waiting message gets `err busy`.
 - **Clock Mode** stays on: the sign appears below the clock, without the robot's reaction.
 - **`style`:** how to present it; only `marquee` exists. Later styles (speech bubble, notification) get their own names here and in `hello`'s `styles` list; the command stays the same.
 
@@ -98,7 +98,7 @@ The desktop simulator (`tools/simulator.ps1`) carries the same byte stream, fram
 | Event | When |
 |---|---|
 | `evt boot proto=1 fw=<version> dev=<device id> boot=<16 hex>` | the firmware started (the companion re-sends the time; `dev`, `boot`: cap `log`) |
-| `evt mode mode=<normal\|office\|monster\|game>` | the mode changed, by touch or by command (`game`: a Tic-Tac-Toe round is being played; Clock Mode pauses it (`office`, then `game` again when it carries on), Back or two minutes without a touch end it) |
+| `evt mode mode=<normal\|office\|monster\|game>` | the mode changed, by touch or by command (`game`: a Tic-Tac-Toe round is being played (Clock Mode pauses it: `office`, then `game` again when it carries on; Back or two minutes without a touch end it), or Missile Defense, from Buddy's alert to the end of the game (Clock Mode ends it)) |
 | `evt mood mood=<mood> src=<cmd\|touch\|break\|timer>` | the mood changed: by `mood.set`, on the touchscreen menu, a smoke break began or ended, or a timed mood ran out (`src`: firmware with `track`) |
 | `evt msg id=<id> state=<showing\|done>` | a message went up on the sign / finished |
 | `evt face name=<face> src=<cmd\|touch>` | the Clock Mode face changed: by `clock.face` or on the touchscreen (cap `face`) |
