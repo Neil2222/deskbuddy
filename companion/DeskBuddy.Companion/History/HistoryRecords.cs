@@ -55,9 +55,10 @@ public sealed record BootEndEntry(string Dev, string Boot, uint After, bool Seen
 
 /// <summary>
 /// Which scheduled occurrence a request or skip belongs to: <see cref="Occurrence"/> is
-/// <c>&lt;block id&gt;/&lt;local date&gt;</c>; the planned time as the wall clock showed it and as an instant.
+/// <c>&lt;block id&gt;/&lt;local date&gt;</c>; the planned time as the wall clock showed it and as an instant;
+/// <see cref="BlockName"/> as the block was called then (records before P7 have none).
 /// </summary>
-public sealed record ScheduleRef(string Occurrence, Guid Block, DateTime PlannedLocal, DateTimeOffset PlannedUtc);
+public sealed record ScheduleRef(string Occurrence, Guid Block, DateTime PlannedLocal, DateTimeOffset PlannedUtc, string? BlockName = null);
 
 /// <summary>
 /// An activity the Companion asked the device to start (companion-events.jsonl), written (and flushed) before sending.
@@ -74,6 +75,13 @@ public sealed record RequestResultEntry(string Dev, string Boot, uint Iid, strin
 /// unsupported. Written whether or not a device is connected (<see cref="Dev"/>/<see cref="Boot"/> then null).
 /// </summary>
 public sealed record SkipEntry(ScheduleRef Schedule, string Action, string Reason, DateTimeOffset AtUtc, string? Dev, string? Boot);
+
+/// <summary>
+/// The schedule's switch as the Companion applied it, written when it changes: <see cref="Live"/> and the pause
+/// (<see cref="PausedUntil"/>: an instant, <c>DateTimeOffset.MaxValue</c> for "until resumed", null for not paused).
+/// A pause that runs out by itself writes no line: it is over when its time has passed.
+/// </summary>
+public sealed record ScheduleStateEntry(bool Live, DateTimeOffset? PausedUntil, DateTimeOffset AtUtc, string? Dev, string? Boot);
 
 /// <summary>JSON lines of the history files. Unknown fields are ignored; a line that does not parse is skipped.</summary>
 public static class HistoryCodec
@@ -197,6 +205,12 @@ public static class HistoryCodec
             return ScheduleFrom(o) is { } s && Str(o["action"]) is { } a && Str(o["reason"]) is { } reason
                 ? new SkipEntry(s, a, reason, at.Value, dev, boot) : null;
         }
+        if (Str(o["kind"]) == "schedule_state")
+        {
+            var live = o["live"] is JsonValue lv && lv.TryGetValue<bool>(out var l) ? l : (bool?)null;
+            var paused = Str(o["paused_until"]) is { } p ? p == "resume" ? DateTimeOffset.MaxValue : Time(o["paused_until"]) : null;
+            return live is null ? null : new ScheduleStateEntry(live.Value, paused, at.Value, dev, boot);
+        }
         var iid = UInt(o["iid"]);
         if (dev is null || boot is null || iid is null or 0)
         {
@@ -211,10 +225,20 @@ public static class HistoryCodec
         };
     }
 
+    public static JsonObject ToJson(ScheduleStateEntry s, string source, string installation, TimeZoneInfo zone) => Stamp(new()
+    {
+        ["v"] = Version, ["kind"] = "schedule_state", ["dev"] = s.Dev, ["boot"] = s.Boot, ["live"] = s.Live,
+        ["paused_until"] = s.PausedUntil is not { } p ? null : p == DateTimeOffset.MaxValue ? "resume" : Iso(p.ToUniversalTime()),
+    }, s.AtUtc, source, installation, zone);
+
     private static void Schedule(JsonObject o, ScheduleRef s)
     {
         o["occurrence"] = s.Occurrence;
         o["block"] = s.Block.ToString();
+        if (s.BlockName is { Length: > 0 } name)
+        {
+            o["block_name"] = name;
+        }
         o["planned"] = s.PlannedLocal.ToString("yyyy-MM-dd'T'HH:mm", CultureInfo.InvariantCulture);
         o["planned_utc"] = Iso(s.PlannedUtc.ToUniversalTime());
     }
@@ -222,7 +246,7 @@ public static class HistoryCodec
     private static ScheduleRef? ScheduleFrom(JsonObject o) =>
         Str(o["occurrence"]) is { } occ && Guid.TryParse(Str(o["block"]), out var block) && Time(o["planned_utc"]) is { } utc &&
         DateTime.TryParseExact(Str(o["planned"]), "yyyy-MM-dd'T'HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out var local)
-            ? new ScheduleRef(occ, block, local, utc) : null;
+            ? new ScheduleRef(occ, block, local, utc, Str(o["block_name"])) : null;
 
     private static JsonObject Stamp(JsonObject o, DateTimeOffset atUtc, string source, string installation, TimeZoneInfo zone)
     {

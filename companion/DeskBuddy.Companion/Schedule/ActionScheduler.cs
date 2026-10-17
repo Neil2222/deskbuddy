@@ -4,7 +4,7 @@ namespace DeskBuddy.Companion.Schedule;
 /// One block's action on one local calendar day. <see cref="Id"/> (<c>&lt;block id&gt;/&lt;yyyy-MM-dd&gt;</c>) is the
 /// same however often the day is evaluated, so it runs at most once per block per day, the repeated DST hour included.
 /// </summary>
-public sealed record Occurrence(string Id, Guid BlockId, string Action, DateTime PlannedLocal, DateTimeOffset PlannedUtc)
+public sealed record Occurrence(string Id, Guid BlockId, string Action, DateTime PlannedLocal, DateTimeOffset PlannedUtc, string BlockName = "")
 {
     public TimeSpan Grace => ScheduledActions.Grace(Action);
     public DateTimeOffset Deadline => PlannedUtc + Grace;
@@ -146,7 +146,7 @@ public sealed class ActionScheduler(TimeZoneInfo zone, IEnumerable<string> decid
             foreach (var b in schedule[date.DayOfWeek].Where(b => b.Enabled && b.Action is not null && ScheduledActions.IsAllowed(b.Action)))
             {
                 var local = date.AddMinutes(b.Start);
-                var o = new Occurrence(Occurrence.IdFor(b.Id, date), b.Id, b.Action!, local, ToUtc(local, Zone));
+                var o = new Occurrence(Occurrence.IdFor(b.Id, date), b.Id, b.Action!, local, ToUtc(local, Zone), b.Name);
                 if (o.PlannedUtc <= now && (date == today || o.Deadline >= midnight))
                 {
                     list.Add(o);

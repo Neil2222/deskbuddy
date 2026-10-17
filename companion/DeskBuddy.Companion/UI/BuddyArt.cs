@@ -26,6 +26,16 @@ public sealed class BuddyArt : IDisposable
         }
     }
 
+    /// <summary>The embedded art of that name, or null when there is none (an action this version has no face for).</summary>
+    public Bitmap? Find(string name)
+    {
+        if (_images.TryGetValue(name, out var bitmap))
+        {
+            return bitmap;
+        }
+        return typeof(BuddyArt).Assembly.GetManifestResourceInfo($"DeskBuddy.Assets.{name}.png") is null ? null : this[name];
+    }
+
     public static Icon AppIcon()
     {
         using var stream = typeof(BuddyArt).Assembly.GetManifestResourceStream("DeskBuddy.Assets.buddy.ico")!;

@@ -66,6 +66,7 @@ target_compile_options(buddy_snapshot PRIVATE ${WARNINGS})
 add_executable(buddy_icons icons.c png.c)
 target_link_libraries(buddy_icons PRIVATE deskbuddy_core)
 target_compile_options(buddy_icons PRIVATE ${WARNINGS})
+target_include_directories(buddy_icons PRIVATE ${COMPONENTS_DIR}/menu/src) # menu_art.h: the menu's icons
 
 # The desktop simulator: components/app with firmware/simulator as its platform (app_port.h). The version is the
 # one ESP-IDF gives the firmware (git describe at configure time).

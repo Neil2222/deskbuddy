@@ -2,15 +2,15 @@
 
 Snapshot at the end of the rendering-engine milestone (2026-10-13), with the status table kept up to date since. For a new machine, start with the README "Fresh Windows setup" section.
 
-## Continue here (16 Oct 2026)
+## Continue here (17 Oct 2026)
 
-Work in progress is on the branch **`feature/schedule`** (not merged into `master`): the Schedule milestone, phases P1–P6 done.
+The Schedule milestone (P1–P6) is merged into `master` (`321af2f`). Work in progress is on the branch **`feature/history-ui`** (from `master`, not pushed): **P7 — Buddy History & Companion Polish**.
 
-- **Where it stands:** P1–P5 approved (P4 / P4.1 firmware `29f5c80` flashed and checked on the board; P5 history checked on the board). P6 live scheduling is implemented, tested (151 Companion tests, end to end in the simulator), published on the home PC and checked on the board on 17 Oct (scheduled moods, scheduled questions with JA / NEE / timeout, one linked smoke break, manual override, Clock Mode not interrupted, no repeats after a restart; results in [docs/schedule-board-test.md](docs/schedule-board-test.md)). Only the paused / offline skips were not repeated on the board (shown in the simulator).
-- **Next step:** the user's final approval of P6. P7 (history page, polish) only when approved. Optional: the paused / offline part on the board with `tools/schedule-board-test/` (leave Clock Mode by touching the clock).
+- **Where it stands:** P7.1–P7.4 approved. P7.5 (scale, keyboard and polish: fonts per DPI, window kept on its screen, keyboard for the History's month picker, journal and *Technical details*; *Turn Live on* / *Off* clear a stored pause) implemented and committed locally, awaiting the user's review: 202 Companion tests; real captures at 100 / 125 / 150 % on a secondary monitor (set back to 100 % afterwards). No existing test session has been hidden; the user decides that in the app. Live stays Off.
+- **Next step:** the user's review of P7.5, then (only after approval) P7.6: publish the Companion and merge `feature/history-ui` into `master`.
 - **Rules that still hold:** no merge into `master` and no push without asking; no flashing without asking; keep the approved visuals (Buddy, Clock zoom, Schedule page); Live stays off unless the user switches it on; back up `%APPDATA%\DeskBuddy` before any test that touches it, and never delete recorded history without asking.
 - **Design and decisions:** [docs/schedule.md](docs/schedule.md) (Mood / Action / Plan, protocol, history, replay rules, live scheduling, roadmap); protocol in [docs/protocol.md](docs/protocol.md); the status table below.
-- **A second PC (laptop):** `git fetch`, `git switch feature/schedule`; `tools\setup-dotnet.ps1` and `tools\companion.ps1 -Publish` for the Companion; `tools\simulator.ps1` (or *Device → Build and start*) for the simulator; ESP-IDF (`tools\setup-idf.ps1`) only to build firmware. `%APPDATA%\DeskBuddy` is not in Git: the laptop gets its own installation id and history (by design); for the example week copy `docs\examples\schedule.demo.json` to `%APPDATA%\DeskBuddy\schedule.json` before the first start.
+- **A second PC (laptop):** `git fetch`, `git switch master` (or `feature/history-ui` once pushed); `tools\setup-dotnet.ps1` and `tools\companion.ps1 -Publish` for the Companion; `tools\simulator.ps1` (or *Device → Build and start*) for the simulator; ESP-IDF (`tools\setup-idf.ps1`) only to build firmware. `%APPDATA%\DeskBuddy` is not in Git: the laptop gets its own installation id and history (by design); for the example week copy `docs\examples\schedule.demo.json` to `%APPDATA%\DeskBuddy\schedule.json` before the first start.
 
 ## Goal
 

@@ -60,7 +60,7 @@ public sealed record ActivityRecord(
 /// </summary>
 public sealed record ScheduledOccurrence(
     string Id, Guid BlockId, string Action, DateTime PlannedLocal, DateTimeOffset PlannedUtc, string? Skipped,
-    uint? Iid, string? Dev, string? Boot, DateTimeOffset? RequestedAtUtc, string? LastResult)
+    uint? Iid, string? Dev, string? Boot, DateTimeOffset? RequestedAtUtc, string? LastResult, string? BlockName = null)
 {
     /// <summary>
     /// Never acted on again: skipped, or requested with any answer except "busy" and "not_connected" (which leave it
@@ -73,9 +73,10 @@ public sealed record ScheduledOccurrence(
 
 public sealed record HistorySnapshot(
     IReadOnlyList<Interaction> Interactions, IReadOnlyList<ActivityRecord> Activities,
-    IReadOnlyList<GapEntry> Gaps, IReadOnlyList<BootEndEntry> BootEnds, IReadOnlyList<ScheduledOccurrence> Occurrences)
+    IReadOnlyList<GapEntry> Gaps, IReadOnlyList<BootEndEntry> BootEnds, IReadOnlyList<ScheduledOccurrence> Occurrences,
+    IReadOnlyList<ScheduleStateEntry> ScheduleStates)
 {
-    public static readonly HistorySnapshot Empty = new([], [], [], [], []);
+    public static readonly HistorySnapshot Empty = new([], [], [], [], [], []);
 }
 
 /// <summary>
@@ -146,6 +147,7 @@ public static class HistoryDeriver
         }
 
         var occurrences = new Dictionary<string, ScheduledOccurrence>();
+        var states = new List<ScheduleStateEntry>();
         foreach (var j in journal)
         {
             switch (j)
@@ -158,7 +160,7 @@ public static class HistoryDeriver
                 if (r.Schedule is { } s && !occurrences.ContainsKey(s.Occurrence))
                 {
                     occurrences[s.Occurrence] = new ScheduledOccurrence(s.Occurrence, s.Block, r.Action, s.PlannedLocal, s.PlannedUtc,
-                                                                        null, r.Iid, r.Dev, r.Boot, r.AtUtc, null);
+                                                                        null, r.Iid, r.Dev, r.Boot, r.AtUtc, null, s.BlockName);
                 }
                 break;
             case RequestResultEntry r:
@@ -170,12 +172,15 @@ public static class HistoryDeriver
                 if (!occurrences.TryGetValue(k.Schedule.Occurrence, out var known))
                 {
                     occurrences[k.Schedule.Occurrence] = new ScheduledOccurrence(k.Schedule.Occurrence, k.Schedule.Block, k.Action,
-                        k.Schedule.PlannedLocal, k.Schedule.PlannedUtc, k.Reason, null, k.Dev, k.Boot, null, null);
+                        k.Schedule.PlannedLocal, k.Schedule.PlannedUtc, k.Reason, null, k.Dev, k.Boot, null, null, k.Schedule.BlockName);
                 }
                 else if (known.Skipped is null)
                 {
-                    occurrences[k.Schedule.Occurrence] = known with { Skipped = k.Reason };
+                    occurrences[k.Schedule.Occurrence] = known with { Skipped = k.Reason, BlockName = known.BlockName ?? k.Schedule.BlockName };
                 }
+                break;
+            case ScheduleStateEntry st:
+                states.Add(st);
                 break;
             }
         }
@@ -194,7 +199,7 @@ public static class HistoryDeriver
                                 builders[(i.Dev, i.Boot, i.Iid)].Position));
             }
         }
-        return new HistorySnapshot(interactions, activities.OrderBy(a => a.Order).Select(a => a.Activity).ToList(), gaps, ends, occurrenceList);
+        return new HistorySnapshot(interactions, activities.OrderBy(a => a.Order).Select(a => a.Activity).ToList(), gaps, ends, occurrenceList, states);
     }
 
     private sealed class Builder(string dev, string boot, uint iid, int position)

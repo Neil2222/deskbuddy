@@ -9,9 +9,11 @@ namespace DeskBuddy.Companion.History;
 /// (log lines on disk, then checkpoints) and, when it needs one, <see cref="FetchNeeded"/> asks for a
 /// <c>log.since</c>. Events, logs and changes are raised on the worker.
 /// </summary>
-public sealed class HistoryRecorder : IDisposable
+public sealed class HistoryRecorder : IHistoryAccess, IDisposable
 {
     private readonly HistoryLedger _ledger;
+    private readonly AnnotationStore _annotations;
+    private HistoryState _state = HistoryState.Empty;
     private readonly Channel<(Action? Run, TaskCompletionSource? Done)> _queue =
         Channel.CreateUnbounded<(Action?, TaskCompletionSource?)>(new UnboundedChannelOptions { SingleReader = true });
     private readonly Task _worker;
@@ -23,7 +25,9 @@ public sealed class HistoryRecorder : IDisposable
     {
         _time = time ?? TimeProvider.System;
         Source = source;
-        _ledger = new HistoryLedger(directory, source, Installation.Id(directory));
+        var installation = Installation.Id(directory);
+        _ledger = new HistoryLedger(directory, source, installation);
+        _annotations = new AnnotationStore(directory, source, installation);
         _ledger.Log += text => Log?.Invoke(text);
         _lastIid = Random.Shared.Next(1, 1 << 30); // somewhere new each run, in case the journal cannot be read
         _worker = Task.Run(RunAsync);
@@ -32,12 +36,15 @@ public sealed class HistoryRecorder : IDisposable
             try
             {
                 _ledger.Load();
+                _annotations.Load();
                 _usable = true;
                 if (_ledger.MaxRequestIid is > 0 and < int.MaxValue)
                 {
                     Interlocked.Exchange(ref _lastIid, (int)_ledger.MaxRequestIid); // continue above the last one used
                 }
                 IsLoaded = true;
+                Publish();
+                Changed?.Invoke();
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException)
             {
@@ -49,6 +56,12 @@ public sealed class HistoryRecorder : IDisposable
     public HistorySource Source { get; }
     public HistorySnapshot Snapshot => _ledger.Snapshot;
 
+    /// <summary>
+    /// What the History page shows: the snapshot and its entries with the annotations applied, made on the worker after
+    /// loading and after every change, never changed afterwards (read it from any thread).
+    /// </summary>
+    public HistoryState State => Volatile.Read(ref _state);
+
     /// <summary>The files have been read: <see cref="Snapshot"/> holds what was there (the scheduler waits for it).</summary>
     public bool IsLoaded { get => Volatile.Read(ref _loaded); private set => Volatile.Write(ref _loaded, value); }
     private bool _loaded;
@@ -56,6 +69,7 @@ public sealed class HistoryRecorder : IDisposable
     /// <summary>A <c>log.since</c> should be sent; answer with <see cref="ReplayAnswered"/> or <see cref="ReplayFailed"/>.</summary>
     public event Action<FetchRequest>? FetchNeeded;
     public event Action<string>? Log;
+    /// <summary>The history changed (raised on the worker, after <see cref="State"/> is updated).</summary>
     public event Action? Changed;
 
     /// <summary>A fresh id for an <c>act</c> the Companion sends.</summary>
@@ -85,7 +99,57 @@ public sealed class HistoryRecorder : IDisposable
     public void Requested(uint iid, string action, string origin, ScheduleRef? schedule = null) =>
         Post(now => _ledger.Requested(iid, action, origin, now, schedule));
     public void Skipped(ScheduleRef schedule, string action, string reason) => Post(now => _ledger.Skipped(schedule, action, reason, now));
+    public void ScheduleStateChanged(bool live, DateTimeOffset? pausedUntil) => Post(now => _ledger.ScheduleStateChanged(live, pausedUntil, now));
     public void RequestAnswered(uint iid, string result) => Post(now => _ledger.RequestAnswered(iid, result, now));
+
+    public Task<Annotation> HideItem(string id, string? note) => Annotate(now => _annotations.HideItem(id, "test", note, now));
+
+    public Task<Annotation> HidePeriod(DateTimeOffset fromUtc, DateTimeOffset toUtc, string? note) =>
+        Annotate(now => _annotations.HidePeriod(fromUtc, toUtc, "test", note, now));
+
+    public Task Unhide(IReadOnlyList<string> hideIds) => Annotate(now =>
+    {
+        foreach (var id in hideIds)
+        {
+            _annotations.Unhide(id, now);
+        }
+        return true;
+    });
+
+    // An annotation written on the worker (the store is not shared). The state is published first, then the task
+    // completes: once the line is on disk, or failed, with the state showing what the file holds (see AnnotationStore).
+    private Task<T> Annotate<T>(Func<DateTimeOffset, T> write)
+    {
+        var done = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var queued = _queue.Writer.TryWrite((() =>
+        {
+            if (!_usable)
+            {
+                done.TrySetException(new InvalidOperationException("the history could not be read, so nothing can be hidden"));
+                return;
+            }
+            T result;
+            try
+            {
+                result = write(_time.GetUtcNow());
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException)
+            {
+                Publish();
+                Changed?.Invoke();
+                done.TrySetException(e);
+                return;
+            }
+            Publish();
+            Changed?.Invoke();
+            done.TrySetResult(result);
+        }, null));
+        if (!queued)
+        {
+            done.TrySetException(new ObjectDisposedException(nameof(HistoryRecorder)));
+        }
+        return done.Task;
+    }
 
     /// <summary>Re-checks whether a postponed <c>log.since</c> is due (call every second or so).</summary>
     public void Tick() => Post(() => { });
@@ -133,6 +197,7 @@ public sealed class HistoryRecorder : IDisposable
                 {
                     if (_ledger.Commit())
                     {
+                        Publish();
                         Changed?.Invoke();
                     }
                 }
@@ -151,6 +216,9 @@ public sealed class HistoryRecorder : IDisposable
             }
         }
     }
+
+    private void Publish() => Volatile.Write(ref _state, new HistoryState(
+        _ledger.Snapshot, HistoryView.Items(_ledger.Snapshot, _ledger.Entries, _annotations.Current), Loaded: true, _annotations.Current));
 
     public void Dispose()
     {

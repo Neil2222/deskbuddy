@@ -115,11 +115,11 @@ public sealed class WeekStrip : Control
             }
             var name = day.ToString()[..3].ToUpperInvariant();
             var top = new Rectangle(r.X, r.Y + LogicalToDeviceUnits(6), r.Width, LogicalToDeviceUnits(18));
-            TextRenderer.DrawText(g, name, _theme.Section, top, selected ? Theme.Text : Theme.Muted,
+            TextRenderer.DrawText(g, name, _theme.At(DeviceDpi).Section, top, selected ? Theme.Text : Theme.Muted,
                                   TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
             if (day == Today)
             {
-                var size = TextRenderer.MeasureText(name, _theme.Section);
+                var size = TextRenderer.MeasureText(name, _theme.At(DeviceDpi).Section);
                 var d = LogicalToDeviceUnits(5);
                 using var dot = new SolidBrush(Theme.Cyan);
                 g.FillEllipse(dot, r.X + (r.Width + size.Width) / 2f + LogicalToDeviceUnits(2), top.Y + (top.Height - d) / 2f, d, d);
@@ -492,7 +492,7 @@ public sealed class DayTimeline : Control
                 {
                     g.DrawLine(half, labelWidth, Y(h * 60 + 30), right, Y(h * 60 + 30));
                 }
-                TextRenderer.DrawText(g, DayTime.Format(h * 60), _theme.Small, new Rectangle(0, y - LogicalToDeviceUnits(9), labelWidth - LogicalToDeviceUnits(6), LogicalToDeviceUnits(18)),
+                TextRenderer.DrawText(g, DayTime.Format(h * 60), _theme.At(DeviceDpi).Small, new Rectangle(0, y - LogicalToDeviceUnits(9), labelWidth - LogicalToDeviceUnits(6), LogicalToDeviceUnits(18)),
                                       Theme.Muted, TextFormatFlags.Right | TextFormatFlags.VerticalCenter);
             }
         }
@@ -525,7 +525,7 @@ public sealed class DayTimeline : Control
         if (_layers.Count == 0)
         {
             var hint = new Rectangle(labelWidth, Y(8 * 60), right - labelWidth, LogicalToDeviceUnits(HourHeight));
-            TextRenderer.DrawText(g, "No blocks on this day. Double-click a time, or use + New block.", _theme.Text10, hint,
+            TextRenderer.DrawText(g, "No blocks on this day. Double-click a time, or use + New block.", _theme.At(DeviceDpi).Text10, hint,
                                   Theme.Faint, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.WordBreak);
         }
 
@@ -544,7 +544,7 @@ public sealed class DayTimeline : Control
     private void DrawTimes(Graphics g, ScheduleBlock b, Rectangle r)
     {
         var text = $"{DayTime.Format(b.Start)}–{DayTime.Format(b.End)} · {DayTime.Duration(b.Duration)}";
-        var size = TextRenderer.MeasureText(g, text, _theme.Small, Size.Empty, TextFormatFlags.NoPadding);
+        var size = TextRenderer.MeasureText(g, text, _theme.At(DeviceDpi).Small, Size.Empty, TextFormatFlags.NoPadding);
         var pad = LogicalToDeviceUnits(6);
         var w = size.Width + 2 * pad;
         var h = size.Height + pad;
@@ -559,7 +559,7 @@ public sealed class DayTimeline : Control
         using var pen = new Pen(Theme.Cyan);
         g.FillPath(fill, path);
         g.DrawPath(pen, path);
-        TextRenderer.DrawText(g, text, _theme.Small, box, Theme.Text,
+        TextRenderer.DrawText(g, text, _theme.At(DeviceDpi).Small, box, Theme.Text,
                               TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
     }
 
@@ -617,13 +617,13 @@ public sealed class DayTimeline : Control
         var width = r.Right - x - LogicalToDeviceUnits(20);
         if (r.Height >= LogicalToDeviceUnits(40))
         {
-            TextRenderer.DrawText(g, title, _theme.Strong, new Rectangle(x, r.Y + pad / 2, width, line), text, flags);
-            TextRenderer.DrawText(g, detail, _theme.Small, new Rectangle(x, r.Y + pad / 2 + line, width, line),
+            TextRenderer.DrawText(g, title, _theme.At(DeviceDpi).Strong, new Rectangle(x, r.Y + pad / 2, width, line), text, flags);
+            TextRenderer.DrawText(g, detail, _theme.At(DeviceDpi).Small, new Rectangle(x, r.Y + pad / 2 + line, width, line),
                                   b.Enabled ? Theme.Muted : Theme.Faint, flags);
         }
         else
         {
-            TextRenderer.DrawText(g, $"{title} · {detail}", _theme.Small, new Rectangle(x, r.Y, width, r.Height), text, flags);
+            TextRenderer.DrawText(g, $"{title} · {detail}", _theme.At(DeviceDpi).Small, new Rectangle(x, r.Y, width, r.Height), text, flags);
         }
 
         if (_active.Contains(b.Id))
@@ -722,7 +722,10 @@ public sealed class TimeBox : TextBox
 
     protected override void OnEnter(EventArgs e)
     {
-        BeginInvoke(SelectAll);
+        if (IsHandleCreated)
+        {
+            BeginInvoke(SelectAll);
+        }
         base.OnEnter(e);
     }
 

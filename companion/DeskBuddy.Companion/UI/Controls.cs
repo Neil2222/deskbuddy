@@ -48,7 +48,7 @@ public sealed class Card : Panel
             }
             x += 3 * (d + gap) + LogicalToDeviceUnits(4);
         }
-        TextRenderer.DrawText(g, Title.ToUpperInvariant(), _theme.Section, new Point(x, top), Theme.Muted,
+        TextRenderer.DrawText(g, Title.ToUpperInvariant(), _theme.At(DeviceDpi).Section, new Point(x, top), Theme.Muted,
                               TextFormatFlags.NoPadding);
     }
 }
@@ -216,7 +216,7 @@ public sealed class FlatButton : Button
                 BuddyArt.Draw(g, _icon, iconArea, BuddyArt.Scale(scale, DeviceDpi), Enabled ? 1f : 0.35f);
             }
             var label = new Rectangle(0, Height - labelHeight - LogicalToDeviceUnits(4), Width, labelHeight);
-            TextRenderer.DrawText(g, Text, _theme.Strong, label, _selected ? Theme.Cyan : text, flags);
+            TextRenderer.DrawText(g, Text, _theme.At(DeviceDpi).Strong, label, _selected ? Theme.Cyan : text, flags);
             if (_selected)
             {
                 // A small lit LED in the corner: this mode is on.
@@ -240,13 +240,13 @@ public sealed class FlatButton : Button
             var glyphWidth = LogicalToDeviceUnits(22);
             if (Glyph is not null)
             {
-                TextRenderer.DrawText(g, Glyph, _theme.Glyphs, new Rectangle(x, 0, glyphWidth, Height),
+                TextRenderer.DrawText(g, Glyph, _theme.At(DeviceDpi).Glyphs, new Rectangle(x, 0, glyphWidth, Height),
                                       _selected ? Theme.Cyan : text, TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
             }
             var dot = LogicalToDeviceUnits(8);
             var right = ShowDot ? dot + LogicalToDeviceUnits(14) : LogicalToDeviceUnits(8);
             var labelX = x + glyphWidth + LogicalToDeviceUnits(8);
-            TextRenderer.DrawText(g, Text, _selected ? _theme.Strong : _theme.Text10,
+            TextRenderer.DrawText(g, Text, _selected ? _theme.At(DeviceDpi).Strong : _theme.At(DeviceDpi).Text10,
                                   new Rectangle(labelX, 0, Width - labelX - right, Height), text,
                                   flags & ~TextFormatFlags.HorizontalCenter);
             if (ShowDot)
@@ -265,27 +265,27 @@ public sealed class FlatButton : Button
                 g.FillEllipse(dot, x, (Height - d) / 2f, d, d);
             }
             var textRect = new Rectangle(x + d + LogicalToDeviceUnits(8), 0, Width - x - d - LogicalToDeviceUnits(20), Height);
-            TextRenderer.DrawText(g, Text, _theme.Small, textRect, text, flags & ~TextFormatFlags.HorizontalCenter);
+            TextRenderer.DrawText(g, Text, _theme.At(DeviceDpi).Small, textRect, text, flags & ~TextFormatFlags.HorizontalCenter);
             break;
         }
         default:
         {
-            var font = Look == ButtonLook.Accent ? _theme.Strong : _theme.Text10;
+            var font = Look == ButtonLook.Accent ? _theme.At(DeviceDpi).Strong : _theme.At(DeviceDpi).Text10;
             var label = Text;
             if (Glyph is not null && label.Length == 0)
             {
-                TextRenderer.DrawText(g, Glyph, _theme.Glyphs, ClientRectangle, text, flags);
+                TextRenderer.DrawText(g, Glyph, _theme.At(DeviceDpi).Glyphs, ClientRectangle, text, flags);
                 break;
             }
             if (Glyph is not null)
             {
-                var glyphSize = TextRenderer.MeasureText(g, Glyph, _theme.Glyphs, Size.Empty, TextFormatFlags.NoPadding);
+                var glyphSize = TextRenderer.MeasureText(g, Glyph, _theme.At(DeviceDpi).Glyphs, Size.Empty, TextFormatFlags.NoPadding);
                 var textSize = TextRenderer.MeasureText(g, label, font, Size.Empty, TextFormatFlags.NoPadding);
                 var gap = LogicalToDeviceUnits(8);
                 var x = (Width - glyphSize.Width - gap - textSize.Width) / 2;
                 TextRenderer.DrawText(g, label, font, new Rectangle(x, 0, textSize.Width + 2, Height), text,
                                       TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding | TextFormatFlags.SingleLine);
-                TextRenderer.DrawText(g, Glyph, _theme.Glyphs,
+                TextRenderer.DrawText(g, Glyph, _theme.At(DeviceDpi).Glyphs,
                                       new Rectangle(x + textSize.Width + gap, 0, glyphSize.Width + 2, Height), text,
                                       TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
             }
@@ -408,7 +408,7 @@ public sealed class HistoryList : ListBox
             e.Graphics.FillEllipse(dot, e.Bounds.X + LogicalToDeviceUnits(10), e.Bounds.Y + (e.Bounds.Height - d) / 2f, d, d);
         }
         var text = new Rectangle(e.Bounds.X + LogicalToDeviceUnits(24), e.Bounds.Y, e.Bounds.Width - LogicalToDeviceUnits(30), e.Bounds.Height);
-        TextRenderer.DrawText(e.Graphics, Items[e.Index]?.ToString(), _theme.Text10, text, selected ? Theme.Text : Theme.Muted,
+        TextRenderer.DrawText(e.Graphics, Items[e.Index]?.ToString(), _theme.At(DeviceDpi).Text10, text, selected ? Theme.Text : Theme.Muted,
                               TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.SingleLine |
                               TextFormatFlags.NoPrefix);
     }
@@ -571,11 +571,11 @@ public sealed class Picker : Control
         }
         var pad = LogicalToDeviceUnits(10);
         var chevron = LogicalToDeviceUnits(18);
-        TextRenderer.DrawText(g, SelectedItem?.ToString(), _theme.Text10, new Rectangle(pad, 0, Width - 2 * pad - chevron, Height),
+        TextRenderer.DrawText(g, SelectedItem?.ToString(), _theme.At(DeviceDpi).Text10, new Rectangle(pad, 0, Width - 2 * pad - chevron, Height),
                               Enabled ? Theme.Text : Theme.Faint,
                               TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.SingleLine |
                               TextFormatFlags.NoPrefix);
-        TextRenderer.DrawText(g, Theme.GlyphChevronDown, _theme.Glyphs, new Rectangle(Width - pad - chevron, 0, chevron, Height),
+        TextRenderer.DrawText(g, Theme.GlyphChevronDown, _theme.At(DeviceDpi).Glyphs, new Rectangle(Width - pad - chevron, 0, chevron, Height),
                               Theme.Muted, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
     }
 }
@@ -620,6 +620,13 @@ internal sealed class DarkMenuRenderer() : ToolStripProfessionalRenderer(new Col
         public override Color MenuItemPressedGradientBegin => Theme.TilePressed;
         public override Color MenuItemPressedGradientEnd => Theme.TilePressed;
     }
+}
+
+/// <summary>The window's menus opened from code (a button, a key): ready for the keyboard on their first item.</summary>
+internal static class Menus
+{
+    public static void SelectFirst(ToolStripDropDown menu) =>
+        menu.Items.OfType<ToolStripMenuItem>().FirstOrDefault(i => i.Enabled && i.Available)?.Select();
 }
 
 internal static class NativeLook

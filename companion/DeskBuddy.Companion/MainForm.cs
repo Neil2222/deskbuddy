@@ -7,20 +7,25 @@ namespace DeskBuddy.Companion;
 
 /// <summary>
 /// The DeskBuddy Control Center: a sidebar (Buddy's face, the pages, the connection status) and one page at a time:
-/// Buddy (mode and mood), Activities, Message (the LED sign), PDC Manager (Ze Doen Maar Wat) and Device (connection,
-/// the desktop simulator, diagnostics).
+/// Buddy (mode and mood), Activities, Schedule, History (his day journal), Message (the LED sign), PDC Manager (Ze Doen
+/// Maar Wat) and Device (connection, the desktop simulator, diagnostics).
 /// </summary>
 public sealed class MainForm : Form
 {
     private const int MaxLogLines = 3000;
     private const int MaxHistory = 10;
     private const int HistoryRow = 24; // recent messages: row height
+    private const int MinWidth = 800, MinHeight = 560; // the window at 100 % (logical pixels)
 
     private readonly Theme _theme = new();
     private readonly BuddyArt _art = new();
     private readonly CompanionService _service; // created in the constructor: needs the form's UI context
     private readonly SimulatorLauncher _simulator;
     private readonly SchedulePage _schedule;
+    private readonly HistoryPage _historyPage;
+    private readonly ScheduleQuickControls _quick;
+    // The bottom of the sidebar: the connection status, and under it the schedule's (both on every page).
+    private readonly Panel _sidebarBottom = new() { Dock = DockStyle.Bottom, Height = 74 };
     private readonly ToolTip _tips = new();
     private readonly System.Windows.Forms.Timer _reactionTimer = new() { Interval = 1800 };
     private string? _reaction; // a face shown for a moment after something happened
@@ -121,7 +126,7 @@ public sealed class MainForm : Form
         ForeColor = Theme.Text;
         Font = _theme.Text10;
         ClientSize = new Size(990, 650); // seven mood tiles in one row beside the sidebar
-        MinimumSize = new Size(800, 560);
+        MinimumSize = new Size(MinWidth, MinHeight);
 
         _status = new FlatButton(_theme, ButtonLook.Pill) { Dock = DockStyle.Bottom, Height = 34 };
         _ports = new Picker(_theme) { Width = 260, Height = 32, Margin = new Padding(0, 0, 10, 0), AccessibleName = "Port" };
@@ -169,8 +174,16 @@ public sealed class MainForm : Form
                 schedulePage.Nav.DotColor = color;
                 schedulePage.Nav.Invalidate();
             }
+            _historyPage?.ScheduleChanged(); // today's plan on the History page
+            _quick?.UpdateStatus();          // the sidebar's schedule status (also on the page's clock: a pause that ends)
         };
         _schedule.ResumeRequested += _service.ResumeSchedule;
+        _quick = new ScheduleQuickControls(_theme, _tips, _schedule, () => _service.IsConnected, () => ShowPage(schedulePage));
+        _quick.Pill.Dock = DockStyle.Bottom;
+        _sidebarBottom.Controls.Add(_quick.Pill);
+        _historyPage = new HistoryPage(_theme, _art, _tips, _service.HistoryOf, () => _service.HasSimulatorHistory, () => _schedule.Schedule);
+        AddPage(nav, "History", "Buddy's day journal: what you did, what he asked and how it went", Theme.GlyphHistory, _historyPage);
+        _service.HistoryChanged += _historyPage.HistoryChanged;
         _messagePage = AddPage(nav, "Message", "Text that scrolls across his LED sign", Theme.GlyphMessage, BuildMessagePage());
         _pdcPage = AddPage(nav, "PDC Manager", "The ZDMW Teams button, from here or from Buddy's menu", Theme.GlyphPdc, BuildPdcPage());
         _devicePage = AddPage(nav, "Device", "Connection, the desktop simulator and the protocol log", Theme.GlyphDevice, BuildDevicePage());
@@ -206,6 +219,7 @@ public sealed class MainForm : Form
             _history.ItemHeight = LogicalToDeviceUnits(HistoryRow);
             ReflowTiles();
             LayoutPdc();
+            FitToScreen();
             _schedule.LoadSchedule();
         };
         Shown += (_, _) => _service.Start();
@@ -243,7 +257,9 @@ public sealed class MainForm : Form
         nav = new Panel { Dock = DockStyle.Fill };
         sidebar.Controls.Add(nav);
         sidebar.Controls.Add(brand);
-        sidebar.Controls.Add(_status);
+        _status.Dock = DockStyle.Top;
+        _sidebarBottom.Controls.Add(_status);
+        sidebar.Controls.Add(_sidebarBottom);
 
         _status.Click += (_, _) => ShowPage(_devicePage);
         return sidebar;
@@ -918,6 +934,7 @@ public sealed class MainForm : Form
     {
         var connected = _service.IsConnected;
         var (status, dot) = StatusSummary();
+        _quick.UpdateStatus(); // connected or not changes what a live schedule can do
         _status.Text = status;
         _status.DotColor = dot;
         _status.Invalidate();
@@ -984,7 +1001,33 @@ public sealed class MainForm : Form
         {
             _history.ItemHeight = LogicalToDeviceUnits(HistoryRow);
             ReflowTiles();
+            LayoutPdc();
+            FitToScreen();
         });
+    }
+
+    /// <summary>
+    /// Keeps the window on its screen's work area: the minimum size (800 × 560 at 100 %) and the size never larger
+    /// than the screen allows at its scale (a small laptop screen at 150 %), and the title bar within reach.
+    /// </summary>
+    private void FitToScreen()
+    {
+        if (WindowState != FormWindowState.Normal)
+        {
+            return;
+        }
+        var area = Screen.FromControl(this).WorkingArea;
+        var min = new Size(Math.Min(LogicalToDeviceUnits(MinWidth), area.Width), Math.Min(LogicalToDeviceUnits(MinHeight), area.Height));
+        if (MinimumSize != min)
+        {
+            MinimumSize = min;
+        }
+        var size = new Size(Math.Min(Width, area.Width), Math.Min(Height, area.Height));
+        var location = new Point(Math.Clamp(Left, area.Left, area.Right - size.Width), Math.Clamp(Top, area.Top, area.Bottom - size.Height));
+        if (size != Size || location != Location)
+        {
+            Bounds = new Rectangle(location, size);
+        }
     }
 
     protected override void OnFormClosed(FormClosedEventArgs e)
@@ -1003,6 +1046,7 @@ public sealed class MainForm : Form
         if (disposing)
         {
             Icon?.Dispose();
+            _quick.Dispose();
             _art.Dispose();
             _theme.Dispose();
         }
