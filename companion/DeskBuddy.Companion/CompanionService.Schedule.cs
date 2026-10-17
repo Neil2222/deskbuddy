@@ -16,6 +16,7 @@ public sealed partial class CompanionService
     private readonly DateTimeOffset _startedAt = DateTimeOffset.Now;
     private readonly Dictionary<HistoryRecorder, ActionScheduler> _schedulers = [];
     private readonly Dictionary<string, uint> _occurrenceIids = []; // occurrence → the iid of its request
+    private readonly Dictionary<HistoryRecorder, (bool Live, DateTimeOffset? PausedUntil)> _journaledStates = [];
 
     /// <summary>The schedule as the Schedule page holds it: blocks, the Live switch and the pause.</summary>
     public WeekSchedule ActiveSchedule { get; set; } = WeekSchedule.Empty;
@@ -57,6 +58,17 @@ public sealed partial class CompanionService
 
     private void TickActions(WeekSchedule schedule, DateTimeOffset now)
     {
+        // The switch (Live, pause) as the Companion applies it, into the journal of the device in use when it changes
+        // (History explains skips and quiet days with it; the ledger also ignores a state it has already recorded).
+        if ((_history ?? _lastHistory) is { IsLoaded: true } target)
+        {
+            var state = (schedule.Live, schedule.PausedUntil);
+            if (!_journaledStates.TryGetValue(target, out var last) || last != state)
+            {
+                _journaledStates[target] = state;
+                target.ScheduleStateChanged(state.Live, state.PausedUntil);
+            }
+        }
         if (!schedule.Live)
         {
             foreach (var s in _schedulers.Values)
@@ -86,7 +98,7 @@ public sealed partial class CompanionService
             foreach (var d in scheduler.Tick(schedule, now, IsConnected && _history == history))
             {
                 var o = d.Occurrence;
-                var reference = new ScheduleRef(o.Id, o.BlockId, o.PlannedLocal, o.PlannedUtc);
+                var reference = new ScheduleRef(o.Id, o.BlockId, o.PlannedLocal, o.PlannedUtc, o.BlockName.Length > 0 ? o.BlockName : null);
                 if (d.Step == ActionStep.Skip)
                 {
                     history.Skipped(reference, o.Action, d.Reason!);

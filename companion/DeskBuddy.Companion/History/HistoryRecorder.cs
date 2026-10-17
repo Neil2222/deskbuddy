@@ -85,6 +85,7 @@ public sealed class HistoryRecorder : IDisposable
     public void Requested(uint iid, string action, string origin, ScheduleRef? schedule = null) =>
         Post(now => _ledger.Requested(iid, action, origin, now, schedule));
     public void Skipped(ScheduleRef schedule, string action, string reason) => Post(now => _ledger.Skipped(schedule, action, reason, now));
+    public void ScheduleStateChanged(bool live, DateTimeOffset? pausedUntil) => Post(now => _ledger.ScheduleStateChanged(live, pausedUntil, now));
     public void RequestAnswered(uint iid, string result) => Post(now => _ledger.RequestAnswered(iid, result, now));
 
     /// <summary>Re-checks whether a postponed <c>log.since</c> is due (call every second or so).</summary>

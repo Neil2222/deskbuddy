@@ -310,6 +310,25 @@ public sealed class HistoryLedger
         }
     }
 
+    /// <summary>The schedule's switch as last recorded in this journal (null: never recorded).</summary>
+    public ScheduleStateEntry? LastScheduleState => _journalEntries.OfType<ScheduleStateEntry>().LastOrDefault();
+
+    /// <summary>
+    /// The schedule went live or off, or its pause was set or cleared. Written only when it differs from the last
+    /// recorded state, so restarts and repeated calls add nothing.
+    /// </summary>
+    public void ScheduleStateChanged(bool live, DateTimeOffset? pausedUntil, DateTimeOffset at)
+    {
+        if (LastScheduleState is { } last && last.Live == live && last.PausedUntil == pausedUntil)
+        {
+            return;
+        }
+        var s = new ScheduleStateEntry(live, pausedUntil, at, _current?.Dev, _current?.Boot);
+        _journalEntries.Add(s);
+        _journalOut.Add(HistoryCodec.ToJson(s, _source, _installation, Zone));
+        _changed = true;
+    }
+
     /// <summary>A scheduled occurrence did not run (connected or not).</summary>
     public void Skipped(ScheduleRef schedule, string action, string reason, DateTimeOffset at)
     {

@@ -123,6 +123,32 @@ there is nothing to deduplicate. A record holds:
 - A MY DAY "Smoke" is a separate record: a different source of evidence.
 - Moods and Buddy's shows are never activities. `ended_at` stays empty until there is an explicit end.
 
+### The History view (P7.1: `History/HistoryView.cs`, `History/HistoryAnnotations.cs`)
+
+A pure projection of one source's snapshot, log and annotations; the records above are not changed.
+
+| Entry | From | Time |
+|---|---|---|
+| Activity (MY DAY) | `ActivityRecord` via `myday:` | `started_at` |
+| Question | an `ask_*` interaction; its YES smoke break is `Linked`, not a second entry | shown, else ended, else the request |
+| Show | any other interaction (collapsed in the UI; never an activity) | idem |
+| Skipped | an occurrence with a skip (a busy-then-skipped request appears once, as skipped) | planned time |
+| Notice | a gap (`n` recorded entries lost): explains missing entries | receipt |
+
+- Status words: Yes, No, Timed out, Interrupted, Played, Not started, Unconfirmed, No outcome received (shown, no
+  `done`), Not shown (accepted, never confirmed shown). "Displayed" only after a confirmed `shown`.
+- Days are local calendar days in the current zone (the repeated DST hour stays on its day, in real order).
+  Uptime-only entries get no time: they are listed apart on the day they were received, by boot and seq.
+- Restarts and schedule-state changes are *technical*: listed apart, not in the timeline.
+- Numbers count visible entries only; each activity once (a YES smoke break and a MY DAY smoke are two).
+- Today's plan comes from the current schedule and only for today; older days are never reconstructed from it.
+- **Annotations** (`history-annotations.jsonl`, `.sim` for the simulator; append-only): `hide` an item (interaction,
+  activity or occurrence id) or a period (UTC from–to; uptime-only entries by receipt), `unhide` withdraws a hide by
+  its id. Hiding a question hides its smoke break and occurrence; a smoke break can be hidden alone. `Affected`
+  previews what a period would hide before anything is written. The canonical logs are never touched.
+- **Journal additions (P7):** `block_name` on scheduled requests and skips; `schedule_state` lines (`live`,
+  `paused_until`) when the switch or the pause changes (not repeated after a restart).
+
 ## 4. Live scheduling (P6: `CompanionService.Schedule.cs`, `ActionScheduler`, `MoodDirector`)
 
 **Off until switched on.** The Schedule header's switch (*Off* / *Live*, stored as `live` in `schedule.json`
@@ -272,5 +298,5 @@ could repeat after a crash, and its result would be lost. So the journals come b
 | **P4.1** Recorded events (done, on `feature/schedule`) | Identity `(dev, boot, seq)` (MAC / machine hash, 64-bit boot id from a true entropy source), event time `t=` or `up=`, the last 64 events in PSRAM, `log.since` replay (2 lines per frame, reply after the last, `lost=` on overflow), cap `log`; no flash writes; `evt did n=` replaced by `seq=` | 97 host tests; simulator; on the board (`29f5c80`): 20/20 automated checks over the UART (identity, new boot per restart, `up=`/`t=`, reconnect replay, identical repeat, overflow `lost=4`, 64 events in 1.31 s at 27.9 fps with 0 resyncs) and the user's JA / NEE / MY DAY replayed identically |
 | **P5** History (done, on `feature/schedule`) | `device-events.jsonl` (canonical, keyed), checkpoints, `companion-events.jsonl` (requests with iid), `installation.json`, all with `.sim` twins; replay after hello and on holes, gaps and boot ends; interactions and activities derived (`HistoryDeriver`); worker thread (`HistoryRecorder`); Activities tiles send `act … iid=`; restart during the handshake; `boot_end seen_live` | 21 unit tests (live, replay, duplicates, out of order, holes, overflow, unexplained loss, wire loss, boot end seen live / while away, restarts during the handshake, bounded retries, crash before checkpoint, checkpoint ahead of the log, torn line, uptime-only time, outcomes, origins, MY DAY, one JA smoke break, shows and moods no activity, simulator isolation); end to end with the simulator: 12 events, nothing missing or doubled; on the board (`29f5c80`, Companion `bdc8eb6`): the 13 buffered P4.1 events recovered with their original seq, iids, times and outcomes; reconnect and two Companion restarts added nothing; a new MY DAY tap and a touch question that timed out stored live and kept after a restart (18 events, 18 keys); YES → one linked smoke, NO / TIMEOUT / shows → none |
 | **P6** Live scheduling (done, on `feature/schedule`) | Live switch (off by default, schedule v2), MoodDirector wired (manual = `src=touch` or a foreign `src=cmd`; settle on `src=timer` / end of a break; connect, boot), `ActionScheduler` (occurrence ids, grace, busy retries, offline / companion_off / asleep / paused / unsupported skips, in-flight guard, DST), the `request` journaled and flushed before `act`, occurrence state rebuilt from the journal on restart, `action` in the editor, Pause presets and Resume | 18 new tests (scheduler: off, once, busy every 10 s then `busy:office`, 3 vs 1 min grace, connect within grace, companion_off / offline / asleep, restart, pause and resume, switched on mid-day, not sent after all, answer after the deadline, DST fall-back and spring-forward, past midnight, allowlist; history: scheduled correlation and one smoke break, decided after a restart, busy-then-skipped, answer after the link went; store v2) on top of the MoodDirector tests; end to end in the simulator with the real clock (blocks a few minutes ahead): companion_off, scheduled `working`, JA → yes + one smoke, NEE → no, a manual Happy kept over a moodless boundary, Clock Mode → `busy:office` without interrupting, disconnected → `offline`, Companion restart → nothing repeated |
-| **P7** History + polish | History page (today, this week, outcomes), Away presets, optional reminders, DPI pass (125/150 %), regression tests | Screenshots at 3 DPIs; history matches the journals |
+| **P7** History + polish | P7.1 data layer (done, on `feature/history-ui`): `HistoryView`, annotations, `block_name`, `schedule_state`. Then: History page, test-data hiding UI, sidebar schedule pill, DPI pass | P7.1: 16 unit tests (local days and DST, outcome words, linked smoke, shows, uptime-only, busy-then-skipped, hiding and unhiding, period preview, canonical logs unchanged, simulator separation, schedule states, block names, gaps, today's plan) |
 | Future | PatternAnalyzer, SuggestionEngine, edit provenance | Separate approval |
