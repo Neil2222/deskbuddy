@@ -215,8 +215,8 @@ void test_app_hello_offers_tracking_and_the_question(void)
     CHECK(start());
     clear_out();
     command(1, "hello");
-    CHECK(sent("caps=poke,monster,mode,time,status,msg,mood,act,pdc,track,did,log "));
-    CHECK(sent("acts=water,sneeze,stare,meditate,focus,ask_peukie"));
+    CHECK(sent("caps=poke,monster,mode,time,status,msg,mood,act,pdc,track,did,log,face "));
+    CHECK(sent("acts=water,sneeze,stare,meditate,focus,ask_peukie faces=classic,skeleton dev="));
     clear_out();
     command(2, "status");
     CHECK(sent(" act=none"));
@@ -323,11 +323,11 @@ void test_app_shows_and_touches_report_their_own_ids(void)
     CHECK(sent(own));
     run(BUDDY_SNEEZE_MS + 500);
 
-    // On the touchscreen: Activities, SNEEZE.
+    // On the touchscreen: Activities, SNEEZE (after SURPRISE!, CLOCK and CLOCK FACES).
     clear_out();
     tap_slot(MENU_LIST, 1);
     run(600); // the tiles flip in
-    tap_slot(MENU_GRID, 2);
+    tap_slot(MENU_GRID, 3);
     run(50);
     snprintf(own, sizeof(own), "evt act iid=%" PRIu32 " name=sneeze state=shown src=touch", 0x80000000u | 12346u);
     CHECK(sent(own));
@@ -476,4 +476,83 @@ void test_app_events_replay_reports_what_was_lost(void)
     CHECK(!sent(text));
     snprintf(text, sizeof(text), "<DB1 60 ok boot=" BOOT " last=%" PRIu32 " lost=9 #", last);
     CHECK(sent(text));
+}
+
+// Pixels of the last presented frame that are not the clock's plain background.
+static int lit_pixels(void)
+{
+    const uint16_t *front = s_fb[s_back ^ 1];
+    int n = 0;
+    for (int i = 0; i < W * H; i++) {
+        n += front[i] != GFX_RGB(8, 9, 12);
+    }
+    return n;
+}
+
+// Clock faces: chosen by command or on the CLOCK FACES page, reported once per change (evt face, status face=);
+// the CLOCK shortcut enters the selected face, a face chosen meanwhile shows at once, a tap still leaves Clock Mode,
+// and his mood (changed meanwhile) carries on afterwards.
+void test_app_clock_faces_by_touch_and_command(void)
+{
+    CHECK(start());
+    clear_out();
+    command(70, "status");
+    CHECK(sent(" face=classic #"));
+    command(71, "clock.face name=skeleton");
+    CHECK(sent("<DB1 71 ok #"));
+    CHECK_EQ(count("evt face name=skeleton src=cmd"), 1);
+    command(72, "clock.face name=skeleton"); // already: ok, nothing to report
+    command(73, "clock.face name=nixie");
+    command(74, "clock.face name=Nixie!");
+    CHECK(sent("<DB1 72 ok #"));
+    CHECK_EQ(count("evt face"), 1);
+    CHECK(sent("<DB1 73 err unsupported #"));
+    CHECK(sent("<DB1 74 err bad_args #"));
+
+    // Activities, CLOCK FACES: CLASSIC, then SKELETON again.
+    clear_out();
+    tap_slot(MENU_LIST, 1);
+    run(600);
+    tap_slot(MENU_GRID, 2);
+    run(600);
+    tap_slot(MENU_GRID, 0);
+    run(100);
+    CHECK_EQ(count("evt face name=classic src=touch"), 1);
+    tap_slot(MENU_GRID, 1);
+    run(100);
+    CHECK_EQ(count("evt face name=skeleton src=touch"), 1);
+    command(75, "status");
+    CHECK(sent(" face=skeleton #"));
+
+    // Back to Activities: CLOCK zooms into the Skeleton.
+    tap_back();
+    run(600);
+    clear_out();
+    tap_slot(MENU_GRID, 1);
+    run(4000);
+    CHECK(sent("evt mode mode=office"));
+    const int skeleton = lit_pixels(); // the movement, the timeplate
+    CHECK(skeleton > W * H / 5);
+    command(76, "mood.set name=happy");
+
+    // Classic chosen while the clock shows: it changes at once (both buffers redrawn), and back.
+    command(77, "clock.face name=classic");
+    run(300);
+    const int classic = lit_pixels(); // the digits and the date only
+    CHECK(classic > 0 && classic * 3 < skeleton);
+    command(78, "clock.face name=skeleton");
+    run(300);
+    CHECK(lit_pixels() > W * H / 5);
+
+    // A tap anywhere: Buddy again, in the mood chosen meanwhile.
+    clear_out();
+    touch(W / 2, H / 2);
+    run(3000);
+    CHECK(sent("evt mode mode=normal"));
+    command(79, "status");
+    CHECK(sent(" mode=normal mood=happy "));
+    CHECK(sent(" face=skeleton #"));
+    command(80, "mood.set name=idle");
+    tap_back(); // Home, for whatever runs next
+    run(600);
 }

@@ -231,6 +231,45 @@ static const char *const k_sneaker[] = { // a running shoe: stretch your legs
     "KLLLLLLLLLLLLLLLLLLLLK",
     ".KKKKKKKKKKKKKKKKKKKK.",
 };
+static const char *const k_dial[] = { // a small clock: CLOCK FACES
+    ".......KKK.......",
+    "....KKKhhhKKK....",
+    "...KKhhhhhaaKK...",
+    "..KhhWWWKWWWaaK..",
+    ".KKhWWWWKWWWWaKK.",
+    ".KhWWWWWKWWWWWaK.",
+    ".KhWWWWWKWWWWWaK.",
+    "KhhWWKWWKWWWWWadK",
+    "KhhKWWKKdWWWWKddK",
+    "KhhWWWWWWWWWWWddK",
+    ".KaWWWWWWWWWWWdK.",
+    ".KaWWWWWWWWWWWdK.",
+    ".KKaWWWWWWWWWdKK.",
+    "..KaaWWWKWWWddK..",
+    "...KKaaaddddKK...",
+    "....KKKdddKKK....",
+    ".......KKK.......",
+};
+static const char *const k_gear[] = { // a brass gear: the Mechanical Skeleton face
+    ".......KKKK.......",
+    ".......KhhK.......",
+    "...KK..KhhK..KK...",
+    "..KhhKKhhhaKKaaK..",
+    "..KhhhhhhaaaaaaK..",
+    "...KhhhhaaaaaaK...",
+    "...KhhhKKKKaaaK...",
+    "KKKhhhK....KaadKKK",
+    "KhhhhaK....KaddddK",
+    "KhhhaaK....KdddddK",
+    "KKKaaaK....KdddKKK",
+    "...KaaaKKKKdddK...",
+    "...KaaaaadddddK...",
+    "..KaaaaadddddddK..",
+    "..KaaKKddddKKddK..",
+    "...KK..KddK..KK...",
+    ".......KddK.......",
+    ".......KKKK.......",
+};
 static const char *const k_led[] = {
     ".KKKK.",
     "KEWEEK",
@@ -250,7 +289,8 @@ static const struct {
     [MENU_ICON_ACTIVITIES] = ART(k_star), [MENU_ICON_FOOD] = ART(k_apple),   [MENU_ICON_GAMES] = ART(k_gamepad),
     [MENU_ICON_SCHEDULE] = ART(k_calendar), [MENU_ICON_OFFICE] = ART(k_moon), [MENU_ICON_WATER] = ART(k_water),
     [MENU_ICON_COFFEE] = ART(k_coffee),   [MENU_ICON_LUNCH] = ART(k_burger), [MENU_ICON_SNACKS] = ART(k_cookie),
-    [MENU_ICON_MEETING] = ART(k_bubbles), [MENU_ICON_WALK] = ART(k_sneaker),
+    [MENU_ICON_MEETING] = ART(k_bubbles), [MENU_ICON_WALK] = ART(k_sneaker), [MENU_ICON_CLOCKFACES] = ART(k_dial),
+    [MENU_ICON_GEAR] = ART(k_gear),
 };
 
 static uint8_t s_pool[4096]; // decoded pixels, internal RAM

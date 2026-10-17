@@ -7,7 +7,9 @@
 // stage every 200 ms of the sequence, at half size, on one sheet), mood_sheet.png (one row per mood: the stage
 // every MOOD_STEP_MS of its loop, as the brain plays it), the touchscreen menu (menu_<screen>.png, and
 // menu_sheet.png: the control panel in every state side by side), the message marquee (marquee_intro.png,
-// marquee.png, office_marquee.png) and the Clock Mode clock: office_clock.png and office_not_set.png.
+// marquee.png, office_marquee.png), the Clock Mode clock: office_clock.png and office_not_set.png, and the
+// Mechanical Skeleton face (skeleton_*.png: the face, its tick positions, the minute roll, the hourly flourish,
+// a close-up, the menu page that picks it, and the zoom arriving at it).
 #include <stdio.h>
 #include <string.h>
 
@@ -21,7 +23,7 @@
 #include "menu_ask.h"
 #include "menu_thought.h"
 #include "menu_view.h"
-#include "office_clock.h"
+#include "office_faces.h"
 #include "office_zoom.h"
 #include "png.h"
 
@@ -325,10 +327,10 @@ static void zoom_render(const office_zoom_t *z, const menu_status_t *st, uint32_
 
 // Clock from the menu's Activities page with Buddy relaxed, then a tap on the clock: every ZOOM_STEP_MS of both ways
 // on a sheet (zoom_in_sheet.png, zoom_out_sheet.png, the clock in between), and full-size key moments.
-static bool zoom_screens(office_clock_t *clock)
+static bool zoom_screens(office_faces_t *faces)
 {
     const menu_status_t st = {.mood = BUDDY_MOOD_RELAXED, .office = true};
-    office_clock_show(clock, false);
+    office_faces_show(faces, false);
     s_scene.background = layout_background;
     s_scene.background_ctx = &s_layout;
     menu_view_show(&s_menu_view, true);
@@ -355,9 +357,8 @@ static bool zoom_screens(office_clock_t *clock)
     // The clock takes his dark face's place.
     buddy_view_hide(&s_view);
     menu_view_show(&s_menu_view, false);
-    office_clock_show(clock, true);
-    s_scene.background = office_background;
-    s_scene.background_ctx = NULL;
+    office_faces_show(faces, true);
+    s_scene.background = office_faces_background(faces, &s_scene.background_ctx);
     if (!shot("zoom_clock")) {
         return false;
     }
@@ -367,7 +368,7 @@ static bool zoom_screens(office_clock_t *clock)
     }
 
     // A tap: his dark face, then he wakes up and steps back; the menu comes back on its page.
-    office_clock_show(clock, false);
+    office_faces_show(faces, false);
     s_scene.background = layout_background;
     s_scene.background_ctx = &s_layout;
     zoom_tile(0);
@@ -404,12 +405,151 @@ static bool zoom_screens(office_clock_t *clock)
     return true;
 }
 
+// The Mechanical Skeleton face at a time of day (ms into its second), rendered.
+static void skeleton_at(office_faces_t *faces, int h, int m, int s, uint32_t ms)
+{
+    const struct tm tm = {.tm_year = 126, .tm_mon = 9, .tm_mday = 17, .tm_wday = 6, .tm_hour = h, .tm_min = m,
+                          .tm_sec = s};
+    office_faces_apply(faces, &tm, ms);
+    const gfx_surface_t dst = {s_px, W, H, W};
+    gfx_scene_render(&s_scene, &s_all, &dst);
+}
+
+enum { SK_COLS = 4, SK_TILE_W = W / 2, SK_TILE_H = H / 2 };
+static gfx_color_t s_sk_sheet[SK_COLS * SK_TILE_W * 3 * SK_TILE_H];
+
+// The last render, halved, as tile i of a SK_COLS-wide sheet.
+static void sk_tile(int i)
+{
+    const int sheet_w = SK_COLS * SK_TILE_W, ox = (i % SK_COLS) * SK_TILE_W, oy = (i / SK_COLS) * SK_TILE_H;
+    for (int y = 0; y < SK_TILE_H; y++) {
+        for (int x = 0; x < SK_TILE_W; x++) {
+            s_sk_sheet[(size_t)(oy + y) * sheet_w + ox + x] =
+                x == 0 || y == 0 ? GFX_RGB(255, 255, 255) : s_px[(size_t)(2 * y) * W + 2 * x];
+        }
+    }
+}
+
+static bool sk_sheet(const char *name, int tiles)
+{
+    const int sheet_w = SK_COLS * SK_TILE_W;
+    const gfx_surface_t sheet = {s_sk_sheet, sheet_w, (tiles + SK_COLS - 1) / SK_COLS * SK_TILE_H, sheet_w};
+    return write(name, &sheet);
+}
+
+// A part of the last render, enlarged 2x (nearest neighbour): the pixel art up close.
+static bool sk_closeup(const char *name, int x0, int y0)
+{
+    static gfx_color_t px[W * H];
+    for (int y = 0; y < H; y++) {
+        for (int x = 0; x < W; x++) {
+            px[(size_t)y * W + x] = s_px[(size_t)(y0 + y / 2) * W + x0 + x / 2];
+        }
+    }
+    const gfx_surface_t s = {px, W, H, W};
+    return write(name, &s);
+}
+
+static bool skeleton_screens(office_faces_t *faces, marquee_t *marquee)
+{
+    buddy_view_hide(&s_view);
+    menu_view_show(&s_menu_view, false);
+    if (!office_faces_select(faces, OFFICE_FACE_SKELETON)) {
+        fprintf(stderr, "no Mechanical Skeleton face\n");
+        return false;
+    }
+    office_faces_show(faces, true);
+    s_scene.background = office_faces_background(faces, &s_scene.background_ctx);
+    skeleton_at(faces, 14, 37, 21, 300);
+    if (!shot("skeleton_clock") || !sk_closeup("skeleton_closeup_left", 0, 40) ||
+        !sk_closeup("skeleton_closeup_escapement", 256, 300)) {
+        return false;
+    }
+    // Eight seconds: the escapement every second, the left train at 14:37:25, the right one at 14:37:30.
+    for (int i = 0; i < 8; i++) {
+        skeleton_at(faces, 14, 37, 23 + i, 300);
+        sk_tile(i);
+    }
+    if (!sk_sheet("skeleton_ticks_sheet", 8)) {
+        return false;
+    }
+    // 14:37:59 -> 14:38: the minute digit rolls up in its window.
+    static const uint32_t k_roll[] = {30, 90};
+    for (int i = 0; i < 2; i++) {
+        skeleton_at(faces, 14, 38, 0, k_roll[i]);
+        char name[32];
+        snprintf(name, sizeof(name), "skeleton_roll_%d", i + 1);
+        if (!shot(name)) {
+            return false;
+        }
+    }
+    // 19:59 -> 20:00: three digits roll, then the movement whirs for the hour.
+    skeleton_at(faces, 20, 0, 0, 90);
+    if (!shot("skeleton_roll_hour")) {
+        return false;
+    }
+    int n = 0;
+    for (uint32_t t = 0; t < OFFICE_SKELETON_FLOURISH_STEPS * OFFICE_SKELETON_FLOURISH_MS; t += 2 * OFFICE_SKELETON_FLOURISH_MS) {
+        skeleton_at(faces, 20, 0, (int)(t / 1000), t % 1000);
+        if (n == 3 && !shot("skeleton_flourish")) {
+            return false;
+        }
+        sk_tile(n++);
+    }
+    if (!sk_sheet("skeleton_flourish_sheet", n)) {
+        return false;
+    }
+    marquee_start(marquee, "Goodnight, Buddy!", 0);
+    skeleton_at(faces, 22, 5, 9, 300);
+    marquee_apply(marquee, (W - MARQUEE_W) / 2, H - MARQUEE_H - 36, MARQUEE_INTRO_MS + 60 * MARQUEE_COL_MS);
+    if (!shot("skeleton_marquee")) {
+        return false;
+    }
+    marquee_apply(marquee, 0, 0, marquee_duration_ms(marquee)); // over: hidden
+    office_faces_apply(faces, NULL, 0);
+    if (!shot("skeleton_not_set")) {
+        return false;
+    }
+    // The CLOCK FACES page with Skeleton selected.
+    office_faces_show(faces, false);
+    s_scene.background = layout_background;
+    s_scene.background_ctx = &s_layout;
+    const buddy_pose_t rest = {.eyes = BUDDY_EYES_OPEN};
+    buddy_view_apply(&s_view, &rest, 0);
+    menu_view_show(&s_menu_view, true);
+    const menu_status_t st = {.mood = BUDDY_MOOD_IDLE, .office = true, .faces = 3, .face = OFFICE_FACE_SKELETON};
+    menu_open(&s_menu, MENU_ACTIVITIES, 0); // CLOCK, and CLOCK FACES next to it
+    menu_view_apply(&s_menu_view, &s_menu, &st, 5000);
+    if (!shot("skeleton_menu_activities")) {
+        return false;
+    }
+    menu_open(&s_menu, MENU_CLOCKFACES, 0);
+    menu_view_apply(&s_menu_view, &s_menu, &st, 5000);
+    if (!shot("skeleton_menu")) {
+        return false;
+    }
+    // Into the clock: his dark face, and the Skeleton taking its place.
+    menu_view_close(&s_menu_view, 6000);
+    office_zoom_t z = {.state = OFFICE_ZOOM_ENTERING, .want_office = true, .start = 6000};
+    zoom_render(&z, &st, 6000 + OFFICE_ENTER_MS - 10);
+    if (!shot("skeleton_zoom_dark_face")) {
+        return false;
+    }
+    buddy_view_hide(&s_view);
+    menu_view_show(&s_menu_view, false);
+    office_faces_show(faces, true);
+    s_scene.background = office_faces_background(faces, &s_scene.background_ctx);
+    skeleton_at(faces, 9, 41, 5, 0);
+    return shot("skeleton_zoom_arrived");
+}
+
 int main(int argc, char **argv)
 {
     s_dir = argc > 1 ? argv[1] : ".";
     static gfx_color_t strip[16 * 1024];
-    static office_clock_t clock;
+    static office_faces_t faces;
     static uint8_t clock_mem[OFFICE_CLOCK_MEMORY];
+    static uint8_t skeleton_mem[OFFICE_SKELETON_MEMORY];
     static uint8_t menu_mem[MENU_VIEW_MEMORY];
     static marquee_t marquee;
     static menu_ask_t ask;
@@ -420,7 +560,7 @@ int main(int argc, char **argv)
         !buddy_view_init(&s_view, &s_scene, s_layout.stage, 10, 0) ||
         !menu_init(&s_menu, &menu_default, layout_panel_content(&s_layout), 0) ||
         !menu_view_init(&s_menu_view, &s_scene, &s_menu, menu_mem, sizeof(menu_mem), 10) ||
-        !office_clock_init(&clock, &s_scene, s_layout.screen, clock_mem, sizeof(clock_mem), 20) ||
+        !office_faces_init(&faces, &s_scene, s_layout.screen, clock_mem, skeleton_mem, 20) ||
         !marquee_init(&marquee, &s_scene, 30) ||
         !menu_ask_init(&ask, &s_scene, s_layout.stage, s_view.home_y0 - BUDDY_MAX_LIFT * s_view.home_scale, 25) ||
         !menu_thought_init(&thought, &s_scene, s_layout.stage, s_view.home_x0 + s_view.art->w * s_view.home_scale / 2,
@@ -634,11 +774,10 @@ int main(int argc, char **argv)
     // Clock Mode, as the firmware switches to it.
     buddy_view_hide(&s_view);
     menu_view_show(&s_menu_view, false);
-    office_clock_show(&clock, true);
-    s_scene.background = office_background;
-    s_scene.background_ctx = NULL;
+    office_faces_show(&faces, true);
+    s_scene.background = office_faces_background(&faces, &s_scene.background_ctx);
     const struct tm tm = {.tm_year = 126, .tm_mon = 9, .tm_mday = 14, .tm_wday = 3, .tm_hour = 9, .tm_min = 41};
-    office_clock_apply(&clock, &tm, 100);
+    office_faces_apply(&faces, &tm, 100);
     marquee_apply(&marquee, (W - MARQUEE_W) / 2, H - MARQUEE_H - 36, MARQUEE_INTRO_MS + 120 * MARQUEE_COL_MS);
     if (!shot("office_marquee")) {
         return 1;
@@ -647,10 +786,10 @@ int main(int argc, char **argv)
     if (!shot("office_clock")) {
         return 1;
     }
-    office_clock_apply(&clock, NULL, 0);
+    office_faces_apply(&faces, NULL, 0);
     if (!shot("office_not_set")) {
         return 1;
     }
-    office_clock_apply(&clock, &tm, 100);
-    return zoom_screens(&clock) ? 0 : 1;
+    office_faces_apply(&faces, &tm, 100);
+    return zoom_screens(&faces) && skeleton_screens(&faces, &marquee) ? 0 : 1;
 }

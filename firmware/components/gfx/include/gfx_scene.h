@@ -16,7 +16,7 @@
 extern "C" {
 #endif
 
-#define GFX_SCENE_MAX_SPRITES 56
+#define GFX_SCENE_MAX_SPRITES 72
 
 #define GFX_SPRITE_HIDDEN (1u << 0)
 #define GFX_SPRITE_FLIP_X (1u << 1)

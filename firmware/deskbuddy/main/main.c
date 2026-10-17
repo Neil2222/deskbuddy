@@ -24,6 +24,8 @@ static const char *TAG = "deskbuddy";
 
 #define RENDER_PRIO 5
 #define RENDER_CORE 1
+#define RENDER_STACK 6144
+#define STACK_CHECK_US (10 * 1000000LL)
 
 #ifdef CONFIG_DESKBUDDY_PANEL_LEFT
 #define PANEL_LEFT true
@@ -57,6 +59,9 @@ static void render_task(void *arg)
     if (!app_init(&config)) {
         abort();
     }
+    // The render task's stack: its deepest use so far, logged whenever it reaches a new depth (checked every 10 s).
+    UBaseType_t stack_low = UINT32_MAX;
+    int64_t next_stack_check = 0;
     uint32_t wait_ms = 0;
     for (;;) {
         app_event_t ev;
@@ -66,6 +71,17 @@ static void render_task(void *arg)
             } while (xQueueReceive(events, &ev, 0) == pdTRUE);
         }
         wait_ms = app_frame();
+        const int64_t now = esp_timer_get_time();
+        if (now >= next_stack_check) {
+            next_stack_check = now + STACK_CHECK_US;
+            const UBaseType_t unused = uxTaskGetStackHighWaterMark(NULL);
+            if (unused < stack_low) {
+                stack_low = unused;
+                ESP_LOGI(TAG, "render task stack: %u of %d B never used; free internal %u B, PSRAM %u B",
+                         (unsigned)unused, RENDER_STACK, heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                         heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+            }
+        }
     }
 }
 
@@ -80,7 +96,8 @@ void app_main(void)
     QueueHandle_t events;
     ESP_ERROR_CHECK(input_start(s_board.touch, &events));
     ESP_ERROR_CHECK(serial_link_start(events));
-    if (xTaskCreatePinnedToCore(render_task, "render", 6144, events, RENDER_PRIO, NULL, RENDER_CORE) != pdPASS) {
+    if (xTaskCreatePinnedToCore(render_task, "render", RENDER_STACK, events, RENDER_PRIO, NULL, RENDER_CORE) !=
+        pdPASS) {
         ESP_LOGE(TAG, "cannot start the render task");
         abort();
     }

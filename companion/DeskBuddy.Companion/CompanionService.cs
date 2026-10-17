@@ -35,6 +35,8 @@ public sealed partial class CompanionService : IDisposable
     private readonly PdcLease _pdcLease = new();
     private readonly string? _pdcWarning;
     private readonly string _dataDirectory = PdcStore.DefaultDirectory;
+    private readonly PdcStore _settings; // settings.json: also holds the last Clock face
+    private readonly ClockFacePolicy _facePolicy;
     private HistoryRecorder? _boardHistory;
     private HistoryRecorder? _simulatorHistory;
     private HistoryRecorder? _history; // the current connection's (board or simulator)
@@ -56,6 +58,10 @@ public sealed partial class CompanionService : IDisposable
     public IReadOnlyList<string> Moods { get; private set; } = [];
     /// <summary>The activities the firmware can start with <c>act</c> (hello acts=), in display order; empty: none.</summary>
     public IReadOnlyList<string> Acts { get; private set; } = [];
+    /// <summary>The Clock faces the firmware offers (hello faces=), in the device's display order; empty: none (or no face cap).</summary>
+    public IReadOnlyList<string> Faces { get; private set; } = [];
+    /// <summary>The Clock face the device reports (status face= / evt face); null until known.</summary>
+    public string? Face { get; private set; }
     public string ClockText { get; private set; } = "not synced";
     public IReadOnlySet<string> Caps { get; private set; } = new HashSet<string>();
     /// <summary>The PDC Manager "Ze Doen Maar Wat" integration (off by default; see Pdc/).</summary>
@@ -67,6 +73,8 @@ public sealed partial class CompanionService : IDisposable
     public CompanionService()
     {
         _ui = SynchronizationContext.Current ?? throw new InvalidOperationException("create on the UI thread");
+        _settings = new PdcStore(_dataDirectory);
+        _facePolicy = new ClockFacePolicy(_settings.LoadClockFace());
         _tick.Tick += (_, _) => Tick();
         Pdc = PdcIntegration.CreateDefault(out _pdcWarning);
         Pdc.Log += Write;
@@ -356,17 +364,24 @@ public sealed partial class CompanionService : IDisposable
             Caps = (hello.Arg("caps") ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries).ToHashSet();
             Moods = DeviceMood.ParseList(hello.Arg("moods"));
             Acts = DeviceMood.ParseList(hello.Arg("acts")); // the same comma-separated list
+            Faces = Caps.Contains(ClockFace.Cap) ? ClockFace.ParseList(hello.Arg("faces")) : [];
+            Face = null; // until status says
             Mood = DeviceMood.Idle; // until status says otherwise
             IsConnected = true;
             if (Caps.Contains("log") && hello.Arg("dev") is { } dev && hello.Arg("boot") is { } boot)
             {
                 _history?.Connected(dev, boot, Firmware); // then it asks for what happened meanwhile (log.since)
             }
+            // Decided now, before anything is awaited (a face event may arrive meanwhile); sent after the time.
+            var savedFace = _facePolicy.Saved;
+            var resendFace = _facePolicy.DeviceStarted(Caps, hello.Arg("dev"), hello.Arg("boot"), Faces);
+            SaveFaceIfChanged(savedFace);
             _missedPings = 0;
             _nextPing = DateTime.UtcNow + PingInterval;
             SetConnection($"Connected on {port}");
             Write(LogKind.Info, $"Connected to DeskBuddy on {port} (firmware {Firmware}, protocol {hello.Arg("proto")})");
             await SyncClockAsync("connected");
+            await ApplySavedFaceAsync(resendFace);
             await RefreshStatusAsync();
             ScheduleConnected();
             Pdc.ResetDeviceIds(); // the board may have restarted while disconnected
@@ -425,6 +440,12 @@ public sealed partial class CompanionService : IDisposable
         case PdcWire.ClickEvent:
             _ = HandlePdcClickAsync(frame);
             break;
+        case "face":
+            if (Caps.Contains(ClockFace.Cap) && ClockFace.FromEvent(frame) is { } face)
+            {
+                OnFaceReported(face);
+            }
+            break;
         case "boot":
             Write(LogKind.Info, "DeskBuddy restarted");
             Pdc.ResetDeviceIds();
@@ -432,7 +453,12 @@ public sealed partial class CompanionService : IDisposable
             SendPdcLease();
             if (IsConnected)
             {
-                _ = ResyncAfterBootAsync();
+                // It lost the face too: decided now (before anything else is awaited), sent after the time.
+                var saved = _facePolicy.Saved;
+                var resend = _facePolicy.DeviceStarted(Caps, frame.Arg("dev"), frame.Arg("boot"), Faces);
+                SaveFaceIfChanged(saved);
+                Face = null;
+                _ = ResyncAfterBootAsync(resend);
             }
             break;
         }
@@ -492,11 +518,66 @@ public sealed partial class CompanionService : IDisposable
         }
     }
 
-    private async Task ResyncAfterBootAsync()
+    private async Task ResyncAfterBootAsync(string? resendFace)
     {
         await SyncClockAsync("device restarted");
+        await ApplySavedFaceAsync(resendFace);
         await RefreshStatusAsync();
         ScheduleBooted();
+    }
+
+    // The device's face: the single source of truth. What it reports is remembered with the boot it was seen in.
+    private void OnFaceReported(string face)
+    {
+        var saved = _facePolicy.Saved;
+        Face = face;
+        _facePolicy.FaceReported(face);
+        SaveFaceIfChanged(saved);
+        Changed?.Invoke();
+    }
+
+    private void SaveFaceIfChanged(SavedClockFace? before)
+    {
+        if (_facePolicy.Saved is not { } now || now == before)
+        {
+            return;
+        }
+        try
+        {
+            _settings.SaveClockFace(now);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            Write(LogKind.Warning, $"Could not remember the Clock face: {e.Message}");
+        }
+    }
+
+    // Sends the remembered face after a device restart (the policy decided; null: nothing to send).
+    private async Task ApplySavedFaceAsync(string? face)
+    {
+        if (face is null)
+        {
+            return;
+        }
+        if ((await SendActionAsync($"Clock face {ClockFace.DisplayName(face)}", ClockFace.Command(face))).Done)
+        {
+            OnFaceReported(face);
+        }
+    }
+
+    /// <summary>Selects a Clock face on the device (<c>clock.face</c>; in Clock Mode it changes live). True when it took it.</summary>
+    public async Task<bool> SetClockFaceAsync(string face)
+    {
+        if (!Caps.Contains(ClockFace.Cap))
+        {
+            return false;
+        }
+        var done = (await SendActionAsync($"Clock face {ClockFace.DisplayName(face)}", ClockFace.Command(face))).Done;
+        if (done)
+        {
+            OnFaceReported(face);
+        }
+        return done;
     }
 
     /// <summary>A source's history for the History page (shown and annotated); reading it starts on first use.</summary>
@@ -594,6 +675,10 @@ public sealed partial class CompanionService : IDisposable
             {
                 Mode = reply.Arg("mode") ?? Mode;
                 Mood = DeviceMood.From(reply, Mood);
+                if (Caps.Contains(ClockFace.Cap) && ClockFace.FromStatus(reply) is { } face)
+                {
+                    OnFaceReported(face);
+                }
                 Changed?.Invoke();
             }
         }
@@ -634,6 +719,8 @@ public sealed partial class CompanionService : IDisposable
         IsConnected = false;
         Mode = "unknown";
         Mood = DeviceMood.Idle;
+        Face = null;
+        _facePolicy.Disconnected();
         link?.Dispose();
         _history?.Disconnected();
         _history = null;

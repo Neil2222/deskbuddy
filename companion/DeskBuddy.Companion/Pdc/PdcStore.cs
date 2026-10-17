@@ -2,12 +2,14 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using DeskBuddy.Companion.Protocol;
 
 namespace DeskBuddy.Companion.Pdc;
 
 /// <summary>
 /// What the PDC Manager integration keeps on disk, in its own folder (%APPDATA%\DeskBuddy by default):
-///   settings.json     {"pdcEnabled": bool, "pdcUsername": "..."}  (other keys in the file are kept)
+///   settings.json     {"pdcEnabled": bool, "pdcUsername": "...", "clockFace": "...", "clockFaceDev": "...", "clockFaceBoot": "..."}
+///                     (other keys in the file are kept; the clock face keys are the last face DeskBuddy reported and its boot)
 ///   pdc-session.bin   the session cookies for one server, encrypted with DPAPI for the current Windows user
 /// The password is never stored.
 /// </summary>
@@ -37,6 +39,28 @@ public sealed class PdcStore
         var root = ReadSettings();
         root["pdcEnabled"] = enabled;
         root["pdcUsername"] = username;
+        WriteSettings(root);
+    }
+
+    /// <summary>The Clock face DeskBuddy last reported and the device boot it was seen in (keys clockFace, clockFaceDev, clockFaceBoot); null: none saved.</summary>
+    public SavedClockFace? LoadClockFace()
+    {
+        var root = ReadSettings();
+        static string? Text(JsonNode? n) => n is JsonValue v && v.TryGetValue<string>(out var s) && s.Length > 0 ? s : null;
+        return Text(root["clockFace"]) is { } face ? new SavedClockFace(face, Text(root["clockFaceDev"]), Text(root["clockFaceBoot"])) : null;
+    }
+
+    public void SaveClockFace(SavedClockFace saved)
+    {
+        var root = ReadSettings();
+        root["clockFace"] = saved.Face;
+        root["clockFaceDev"] = saved.Dev;
+        root["clockFaceBoot"] = saved.Boot;
+        WriteSettings(root);
+    }
+
+    private void WriteSettings(JsonObject root)
+    {
         System.IO.Directory.CreateDirectory(Directory);
         WriteAtomically(SettingsPath, Encoding.UTF8.GetBytes(root.ToJsonString(new JsonSerializerOptions { WriteIndented = true })));
     }

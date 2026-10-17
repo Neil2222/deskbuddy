@@ -41,6 +41,7 @@ typedef enum {
     LINK_CMD_PDC_SET,   // state=on|off [count=]: the PDC Manager integration, as the companion sees it (a lease)
     LINK_CMD_PDC_RESULT, // id= result= [count=] [teams=]: how a ZDMW click (evt pdc.click) ended
     LINK_CMD_LOG_SINCE, // [boot=] seq=: replays the recorded events after seq (see app_events.h)
+    LINK_CMD_CLOCK_FACE, // name=: Clock Mode's face (hello faces=)
 } link_cmd_t;
 
 #define LINK_PDC_COUNT_MAX 2147483647
@@ -97,6 +98,9 @@ typedef struct {
             char name[LINK_MOOD_NAME_MAX + 1];
             uint32_t iid; // chosen by the companion (1..2^31-1); 0: not given (the device picks one)
         } act; // ACT
+        struct {
+            char name[LINK_MOOD_NAME_MAX + 1];
+        } face; // CLOCK_FACE
         struct {
             bool on;
             int32_t count; // -1: not given

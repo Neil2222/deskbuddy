@@ -15,6 +15,14 @@ bool office_switch_busy(const office_switch_t *s)
     return s->stage != OFFICE_SETTLED;
 }
 
+void office_switch_redraw(office_switch_t *s)
+{
+    if (s->office) {
+        s->stage = OFFICE_REDRAW;
+        s->presents = 0;
+    }
+}
+
 office_step_t office_switch_step(office_switch_t *s)
 {
     office_step_t out = {.next_ms = UINT32_MAX};

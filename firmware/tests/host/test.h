@@ -69,6 +69,10 @@ extern int g_test_failed;
     X(office_clock_redraws_match_full_redraw)        \
     X(office_pauses_character_mid_monster)           \
     X(office_switch_redraws_fully_only_while_switching) \
+    X(office_switch_redraws_a_new_face)              \
+    X(office_skeleton_keeps_the_time_on_top)         \
+    X(office_skeleton_moves_like_clockwork)          \
+    X(office_skeleton_redraws_match_full_redraw)     \
     X(layout_splits_screen)                          \
     X(link_crc_matches_ccitt_false)                  \
     X(link_parses_commands)                          \
@@ -89,6 +93,7 @@ extern int g_test_failed;
     X(menu_navigates_and_goes_back)                  \
     X(menu_selects_every_mood)                       \
     X(menu_activities_and_availability)              \
+    X(menu_clock_faces_page)                         \
     X(menu_touch_needs_a_clean_tap)                  \
     X(menu_pages_and_swipes)                         \
     X(menu_view_follows_the_state)                   \
@@ -98,6 +103,7 @@ extern int g_test_failed;
     X(zoom_enters_and_leaves_through_the_scene_switch) \
     X(zoom_survives_rapid_and_contrary_requests)     \
     X(zoom_whole_loop_into_the_clock_and_back)       \
+    X(zoom_whole_loop_into_the_skeleton_and_back)    \
     X(activity_plays_to_the_end_then_the_mood_resumes) \
     X(activity_water_short_circuits_him)             \
     X(activity_sneeze_blows_his_head_off)            \
@@ -122,7 +128,8 @@ extern int g_test_failed;
     X(app_my_day_and_mood_sources)                   \
     X(app_events_carry_identity_and_time)            \
     X(app_events_replay_after_a_reconnect)           \
-    X(app_events_replay_reports_what_was_lost)
+    X(app_events_replay_reports_what_was_lost)       \
+    X(app_clock_faces_by_touch_and_command)
 
 #define X(name) void test_##name(void);
 TEST_LIST

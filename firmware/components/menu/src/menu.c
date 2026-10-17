@@ -13,6 +13,14 @@ menu_avail_t menu_item_avail(const menu_item_t *it, const menu_status_t *st)
     if (it->action == MENU_DO_OFFICE && !st->office) {
         return MENU_ITEM_HIDDEN;
     }
+    // Clock faces: only those that exist, and the page only when there is a choice.
+    if (it->action == MENU_DO_FACE && (!st->office || !(st->faces & (1u << it->arg)))) {
+        return MENU_ITEM_HIDDEN;
+    }
+    if (it->action == MENU_DO_OPEN && it->arg == MENU_CLOCKFACES &&
+        (!st->office || (st->faces & (st->faces - 1)) == 0)) {
+        return MENU_ITEM_HIDDEN;
+    }
     // The PDC Manager integration exists only while the companion offers it: no dead buttons without it.
     if ((it->action == MENU_DO_PDC || (it->action == MENU_DO_OPEN && it->arg == MENU_PDC)) && !st->pdc) {
         return MENU_ITEM_HIDDEN;
@@ -31,7 +39,7 @@ menu_avail_t menu_item_avail(const menu_item_t *it, const menu_status_t *st)
 
 bool menu_item_active(const menu_item_t *it, const menu_status_t *st)
 {
-    return it->action == MENU_DO_MOOD && it->arg == st->mood;
+    return (it->action == MENU_DO_MOOD && it->arg == st->mood) || (it->action == MENU_DO_FACE && it->arg == st->face);
 }
 
 gfx_rect_t menu_slot_rect(menu_layout_t layout, int slot)

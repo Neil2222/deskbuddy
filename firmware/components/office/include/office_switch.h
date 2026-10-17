@@ -49,6 +49,10 @@ void office_switch_request(office_switch_t *s, bool office);
 // True while redrawing.
 bool office_switch_busy(const office_switch_t *s);
 
+// The clock's face changed while it shows: both buffers are redrawn again, as after a switch (a request to switch
+// waits until that is done). Does nothing on the normal scene.
+void office_switch_redraw(office_switch_t *s);
+
 office_step_t office_switch_step(office_switch_t *s);
 
 // Call after every presented frame.

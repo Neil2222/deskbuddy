@@ -40,6 +40,7 @@ typedef enum {
     MENU_GAMES,
     MENU_MYDAY,
     MENU_PDC,
+    MENU_CLOCKFACES, // under Activities: which face Clock Mode shows
     MENU_CATEGORY_COUNT,
 } menu_category_t;
 
@@ -62,6 +63,7 @@ typedef enum {
     MENU_DO_OFFICE,  // switches to the Office Mode clock
     MENU_DO_PDC,     // asks to confirm a ZDMW click (then the companion sends it to PDC Manager)
     MENU_DO_LOG,     // you are doing what the item says (MY DAY): reported to the companion, never refused
+    MENU_DO_FACE,    // selects Clock Mode's face `arg` (office_face_t); the CLOCK item then shows that face
 } menu_do_t;
 
 typedef enum {
@@ -87,6 +89,8 @@ typedef enum {
     MENU_ICON_ZDMW,     // the exasperated face: "ZE DOEN MAAR WAT!" (PDC Manager)
     MENU_ICON_MEETING,  // two speech bubbles
     MENU_ICON_WALK,     // a sneaker: stretch your legs
+    MENU_ICON_CLOCKFACES, // a small dial: the CLOCK FACES page
+    MENU_ICON_GEAR,     // a brass gear: the Mechanical Skeleton face
     MENU_ICON_COUNT,
 } menu_icon_t;
 
@@ -119,6 +123,9 @@ typedef struct {
     bool pdc;            // the companion offers the PDC Manager integration: the PDC category shows
     bool pdc_ready;      // ...and a ZDMW click can be sent now (none under way, no cooldown)
     int32_t pdc_count;   // the ZDMW counter; -1: unknown
+    uint8_t faces;       // Clock Mode faces that can be selected: bit n for office_face_t n (CLOCK FACES shows
+                         // with two or more)
+    uint8_t face;        // the selected face (office_face_t)
 } menu_status_t;
 
 typedef enum {

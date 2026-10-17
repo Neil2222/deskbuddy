@@ -9,7 +9,7 @@
 #include "marquee.h"
 #include "menu.h"
 #include "menu_view.h"
-#include "office_clock.h"
+#include "office_faces.h"
 #include "office_switch.h"
 #include "office_zoom.h"
 #include "test.h"
@@ -196,6 +196,7 @@ static gfx_color_t s_buf[2][W * H];
 static gfx_color_t s_ref[W * H];
 static gfx_color_t s_last_face[W * H];
 static uint8_t s_clock_mem[OFFICE_CLOCK_MEMORY];
+static uint8_t s_skeleton_mem[OFFICE_SKELETON_MEMORY];
 static uint8_t s_menu_mem[MENU_VIEW_MEMORY];
 
 static int menu_slot_of(const menu_t *m, const menu_status_t *st, const char *id, int *x, int *y)
@@ -215,24 +216,33 @@ static int menu_slot_of(const menu_t *m, const menu_status_t *st, const char *id
 
 // The render loop as the firmware runs it (scene, Buddy and his brain, the menu, the clock, the sign, the zoom and the
 // scene switch, double-buffer repair): Clock from the menu's Activities page with Buddy relaxed, a mood change and a
-// message while the clock shows, a burst of taps to come back. Every presented buffer must equal a full redraw.
-void test_zoom_whole_loop_into_the_clock_and_back(void)
+// message while the clock shows, a burst of taps to come back. Every presented buffer must equal a full redraw, and
+// the zoom (Buddy's frames, the timeline, his mood afterwards) is the same whichever face is selected.
+typedef struct {
+    int frames, max_area, seam_px, clock_frames, full_in_clock;
+    uint32_t asked_at, back_at; // when the switch was asked for the clock, when he was back on his stage
+} loop_result_t;
+
+static void whole_loop(office_face_t face, loop_result_t *out)
 {
     static gfx_scene_t scene;
     static buddy_view_t view;
     static menu_t menu;
     static menu_view_t mview;
-    static office_clock_t clock;
+    static office_faces_t faces;
     static marquee_t sign;
     static layout_t layout;
     static gfx_dirty_t changes, redraw, all;
     static gfx_repair_t repair;
+    memset(out, 0, sizeof(*out));
+    out->seam_px = -1;
     layout = layout_compute(W, H, 65, false, ALIGN);
     CHECK(gfx_scene_init(&scene, W, H, layout_background, &layout, s_strip, 16 * 1024, ALIGN));
     CHECK(buddy_view_init(&view, &scene, layout.stage, 10, 0));
     CHECK(menu_init(&menu, &menu_default, layout_panel_content(&layout), 0));
     CHECK(menu_view_init(&mview, &scene, &menu, s_menu_mem, sizeof(s_menu_mem), 10));
-    CHECK(office_clock_init(&clock, &scene, layout.screen, s_clock_mem, sizeof(s_clock_mem), 20));
+    CHECK(office_faces_init(&faces, &scene, layout.screen, s_clock_mem, s_skeleton_mem, 20));
+    CHECK(office_faces_select(&faces, face));
     CHECK(marquee_init(&sign, &scene, 30));
     gfx_dirty_init(&changes, W, H, ALIGN);
     gfx_dirty_init(&redraw, W, H, ALIGN);
@@ -252,7 +262,7 @@ void test_zoom_whole_loop_into_the_clock_and_back(void)
     office_switch_init(&sw);
     const struct tm tm = {.tm_year = 126, .tm_mon = 9, .tm_mday = 15, .tm_wday = 4, .tm_hour = 2, .tm_min = 7};
 
-    int back = 0, frames = 0, bad = 0, max_area = 0, clock_frames = 0, seam_px = -1;
+    int back = 0, bad = 0;
     bool tapped = false, mood_changed = false, message = false, taps_done = false, last_was_face = false;
     for (uint32_t t = 0; t < 9000; t += 5) {
         const menu_status_t st = {.mood = buddy_brain_mood(&brain, t), .monster = brain.state == BUDDY_STATE_MONSTER,
@@ -302,11 +312,10 @@ void test_zoom_whole_loop_into_the_clock_and_back(void)
                 buddy_view_hide(&view);
                 menu_cancel(&menu);
                 menu_view_show(&mview, false);
-                office_clock_show(&clock, true);
-                scene.background = office_background;
-                scene.background_ctx = NULL;
+                office_faces_show(&faces, true);
+                scene.background = office_faces_background(&faces, &scene.background_ctx);
             } else {
-                office_clock_show(&clock, false);
+                office_faces_show(&faces, false);
                 scene.background = layout_background;
                 scene.background_ctx = &layout;
             }
@@ -316,8 +325,14 @@ void test_zoom_whole_loop_into_the_clock_and_back(void)
         } else if (step.redraw_kick) {
             gfx_scene_invalidate(&scene, (gfx_rect_t){0, 0, 1, 1});
         }
+        if (z.asked && !out->asked_at) {
+            out->asked_at = t;
+        }
+        if (zs.back) {
+            out->back_at = t;
+        }
         if (sw.office) {
-            office_clock_apply(&clock, &tm, t % 1000);
+            office_faces_apply(&faces, &tm, t % 1000);
         } else {
             buddy_pose_t pose;
             buddy_brain_tick(&brain, t, &pose);
@@ -347,32 +362,57 @@ void test_zoom_whole_loop_into_the_clock_and_back(void)
             CHECK(gfx_rect_contains_rect(k_screen, redraw.rect[i]));
         }
         const int a = gfx_dirty_area(&redraw);
-        max_area = a > max_area ? a : max_area;
+        out->max_area = a > out->max_area ? a : out->max_area;
         // The seam: how much changes between his last dark face and the first clock frame.
-        if (sw.office && last_was_face && seam_px < 0) {
-            seam_px = 0;
+        if (sw.office && last_was_face && out->seam_px < 0) {
+            out->seam_px = 0;
             for (int i = 0; i < W * H; i++) {
-                seam_px += s_ref[i] != s_last_face[i];
+                out->seam_px += s_ref[i] != s_last_face[i];
             }
         }
         last_was_face = !sw.office && zs.animate && z.state == OFFICE_ZOOM_ENTERING;
         if (last_was_face) {
             memcpy(s_last_face, s_ref, sizeof(s_ref));
         }
-        clock_frames += sw.office;
+        out->clock_frames += sw.office;
+        out->full_in_clock += sw.office && !office_switch_busy(&sw) && a == W * H;
         office_switch_presented(&sw);
-        frames++;
+        out->frames++;
         back ^= 1;
     }
     CHECK_EQ(bad, 0);
-    CHECK(clock_frames > 0);
-    CHECK(seam_px >= 0 && seam_px < W * H / 20); // only the digits (and the sign) appear: no visible cut
-    printf("    zoom loop: %d frames, largest redraw %d px, clock replaces the dark face with %d px changed\n", frames,
-           max_area, seam_px);
+    CHECK(out->clock_frames > 0);
+    CHECK_EQ(out->full_in_clock, 0); // in the clock only the switch redraws everything
     // Back: Buddy on his stage, the Activities page, his mood as changed meanwhile.
     CHECK(!sw.office && z.state == OFFICE_ZOOM_NORMAL);
     CHECK(view.scale == view.home_scale && view.x0 == view.home_x0 && view.y0 == view.home_y0);
     CHECK_EQ(menu.category, MENU_ACTIVITIES);
     CHECK(mview.visible && !gfx_rect_is_empty(gfx_sprite_bounds(&mview.slot[0])));
     CHECK_EQ(buddy_brain_mood(&brain, 9000), BUDDY_MOOD_ANGRY);
+    CHECK(!faces.visible);
+}
+
+void test_zoom_whole_loop_into_the_clock_and_back(void)
+{
+    loop_result_t r;
+    whole_loop(OFFICE_FACE_CLASSIC, &r);
+    CHECK(r.frames > 0);
+    CHECK(r.seam_px >= 0 && r.seam_px < W * H / 20); // only the digits (and the sign) appear: no visible cut
+    printf("    zoom loop: %d frames, largest redraw %d px, clock replaces the dark face with %d px changed\n", r.frames,
+           r.max_area, r.seam_px);
+}
+
+// The same way in and out with the Mechanical Skeleton selected: the zoom's timeline and frames are untouched (the
+// switch is asked for and Buddy is back at the same moments), only the face that appears differs.
+void test_zoom_whole_loop_into_the_skeleton_and_back(void)
+{
+    loop_result_t classic, skeleton;
+    whole_loop(OFFICE_FACE_CLASSIC, &classic);
+    whole_loop(OFFICE_FACE_SKELETON, &skeleton);
+    CHECK(classic.frames > 0 && skeleton.frames > 0);
+    CHECK_EQ(skeleton.asked_at, classic.asked_at);
+    CHECK_EQ(skeleton.back_at, classic.back_at);
+    CHECK(skeleton.seam_px > classic.seam_px); // the movement and the timeplate appear with the digits
+    printf("    skeleton zoom loop: %d frames (classic %d), largest redraw %d px\n", skeleton.frames, classic.frames,
+           skeleton.max_area);
 }

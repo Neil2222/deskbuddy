@@ -8,6 +8,7 @@
 #include "app_port.h"
 #include "buddy_activity.h"
 #include "buddy_mood.h"
+#include "office_faces.h"
 
 static const char *TAG = "link";
 
@@ -59,6 +60,10 @@ static void handle_line(const char *line, size_t len, app_link_deliver_fn delive
         }
         for (int i = 0; i < BUDDY_ACTS && n > 0 && (size_t)n < sizeof(body); i++) {
             n += snprintf(body + n, sizeof(body) - (size_t)n, "%s%s", i ? "," : " acts=", buddy_act_name(i));
+        }
+        for (int i = 0; i < OFFICE_FACE_COUNT && n > 0 && (size_t)n < sizeof(body); i++) {
+            n += snprintf(body + n, sizeof(body) - (size_t)n, "%s%s", i ? "," : " faces=",
+                          office_face_name((office_face_t)i));
         }
         if (n > 0 && (size_t)n < sizeof(body)) {
             snprintf(body + n, sizeof(body) - (size_t)n, " dev=%s boot=%s", app_events_device(), app_events_boot());

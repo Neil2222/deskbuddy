@@ -249,6 +249,16 @@ void test_link_parses_moods(void)
     CHECK_EQ(parse(frame(">DB1 14 act name=sneeze iid=-1"), &c), LINK_ERR_ARGS);
     CHECK_EQ(parse(frame(">DB1 14 act name=sneeze iid="), &c), LINK_ERR_ARGS);
     CHECK_EQ(parse(frame(">DB1 14 act name=sneeze iid=x1"), &c), LINK_ERR_ARGS);
+
+    // clock.face: a face by name, shape only too (which ones exist: hello faces=, err unsupported).
+    CHECK_EQ(parse(frame(">DB1 15 clock.face name=skeleton"), &c), LINK_OK);
+    CHECK(c.cmd == LINK_CMD_CLOCK_FACE && c.seq == 15 && strcmp(c.u.face.name, "skeleton") == 0);
+    CHECK_EQ(parse(frame(">DB1 16 clock.face name=pdc_dashboard extra=1"), &c), LINK_OK);
+    CHECK(strcmp(c.u.face.name, "pdc_dashboard") == 0);
+    CHECK_EQ(parse(frame(">DB1 17 clock.face"), &c), LINK_ERR_ARGS);
+    CHECK_EQ(c.seq, 17);
+    CHECK_EQ(parse(frame(">DB1 17 clock.face name=Skeleton"), &c), LINK_ERR_ARGS);
+    CHECK_EQ(parse(frame(">DB1 17 clock.face name=abcdefghijklmnop"), &c), LINK_ERR_ARGS);
 }
 
 // log.since: the boot is 16 hex digits (64 bits), optional; seq is required and 32-bit.

@@ -8,6 +8,7 @@
 #include "marquee.h"
 #include "menu.h"
 #include "menu_view.h"
+#include "office_faces.h"
 #include "test.h"
 
 enum { W = 1024, H = 600, ALIGN = 32 };
@@ -273,6 +274,49 @@ void test_menu_activities_and_availability(void)
     const int coffee = slot_of(&m, &k_idle, "food.coffee");
     CHECK_EQ(tap(&m, coffee, &k_idle, t += 500).action, MENU_DO_NOTHING);
     CHECK_EQ(m.nope, coffee);
+}
+
+// CLOCK FACES: under Activities, next to the CLOCK shortcut; offered only when there is a choice; one tile per face
+// this firmware has (its id is the face's wire name), the selected one marked; a tap selects, Back goes to
+// Activities.
+void test_menu_clock_faces_page(void)
+{
+    static menu_t m;
+    CHECK(menu_init(&m, &menu_default, panel_area(), 0));
+    menu_status_t st = k_idle;
+    st.faces = (1u << OFFICE_FACE_COUNT) - 1;
+    st.face = OFFICE_FACE_SKELETON;
+    menu_open(&m, MENU_ACTIVITIES, 0);
+    CHECK_EQ(slot_of(&m, &st, "activity.clockfaces"), slot_of(&m, &st, "activity.clock") + 1);
+    menu_status_t one = st;
+    one.faces = 1u << OFFICE_FACE_CLASSIC; // nothing to choose
+    CHECK_EQ(slot_of(&m, &one, "activity.clockfaces"), -1);
+    menu_status_t no_office = st;
+    no_office.office = false;
+    CHECK_EQ(slot_of(&m, &no_office, "activity.clockfaces"), -1);
+
+    uint32_t t = 1000;
+    menu_result_t r = tap(&m, slot_of(&m, &st, "activity.clockfaces"), &st, t);
+    CHECK_EQ(m.category, MENU_CLOCKFACES);
+    const menu_item_t *items[MENU_SLOTS];
+    CHECK_EQ(menu_page_items(&m, &st, items, NULL), OFFICE_FACE_COUNT);
+    for (int i = 0; i < OFFICE_FACE_COUNT; i++) {
+        office_face_t face;
+        CHECK(strncmp(items[i]->id, "face.", 5) == 0 && office_face_parse(items[i]->id + 5, &face));
+        CHECK_EQ(items[i]->action, MENU_DO_FACE);
+        CHECK_EQ(items[i]->arg, face);
+        CHECK_EQ(menu_item_active(items[i], &st), face == OFFICE_FACE_SKELETON);
+    }
+    t += 1000;
+    r = tap(&m, slot_of(&m, &st, "face.classic"), &st, t);
+    CHECK_EQ(r.action, MENU_DO_FACE);
+    CHECK_EQ(r.arg, OFFICE_FACE_CLASSIC);
+    one.faces = 1u << OFFICE_FACE_CLASSIC; // a face this device could not set up: not offered
+    CHECK_EQ(slot_of(&m, &one, "face.skeleton"), -1);
+    int x, y;
+    back_center(&m, &x, &y);
+    tap_at(&m, x, y, &st, t += 500);
+    CHECK_EQ(m.category, MENU_ACTIVITIES);
 }
 
 void test_menu_touch_needs_a_clean_tap(void)

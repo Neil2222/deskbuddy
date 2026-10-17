@@ -23,7 +23,7 @@
 #include "menu_ask.h"
 #include "menu_thought.h"
 #include "menu_view.h"
-#include "office_clock.h"
+#include "office_faces.h"
 #include "office_switch.h"
 #include "office_zoom.h"
 #include "pdc.h"
@@ -112,6 +112,11 @@ static void verify_frame(const gfx_surface_t *frame, perf_t *perf)
 // Buddy's zoom into Office Mode and back (office_zoom.h); all Office Mode requests go here.
 static office_zoom_t s_zoom;
 
+// Clock Mode's faces (Classic, Mechanical Skeleton) and which one is selected: by touch (CLOCK FACES) or command
+// (clock.face). In RAM only: Classic after a restart.
+static office_faces_t s_faces;
+static void select_face(office_face_t face, const char *src);
+
 // Buddy's questions on the stage ("PEUKIE ROKEN?", the ZDMW confirmation), shown while the brain asks one.
 static menu_ask_t s_ask;
 static const char k_ask_peukie[] = MENU_QUESTION_PEUKIE;
@@ -169,9 +174,13 @@ static pdc_t s_pdc;
 static menu_status_t menu_status(buddy_brain_t *brain, bool has_office, uint32_t now)
 {
     const bool busy = buddy_brain_busy(brain, now);
+    uint8_t faces = 0;
+    for (int i = 0; i < OFFICE_FACE_COUNT; i++) {
+        faces |= (uint8_t)(s_faces.has[i] ? 1u << i : 0);
+    }
     return (menu_status_t){buddy_brain_mood(brain, now), brain->state == BUDDY_STATE_MONSTER, busy,
                            busy ? buddy_activity_doing(brain->state) : NULL, has_office, pdc_available(&s_pdc, now),
-                           pdc_ready(&s_pdc, now), s_pdc.count};
+                           pdc_ready(&s_pdc, now), s_pdc.count, faces, (uint8_t)s_faces.face};
 }
 
 // ---- Interactions: the activities the companion hears about (evt act), started by `act` or on the touchscreen ----
@@ -309,6 +318,9 @@ static void run_menu_action(const menu_result_t *r, buddy_brain_t *brain, uint32
     case MENU_DO_OFFICE:
         office_zoom_request(&s_zoom, true); // he zooms into the clock
         APP_LOGI(TAG, "Clock Mode on");
+        break;
+    case MENU_DO_FACE:
+        select_face((office_face_t)r->arg, "touch");
         break;
     case MENU_DO_PDC: // first the confirmation: every click is a real Teams message
         if (pdc_ready(&s_pdc, now) && buddy_brain_event(brain, BUDDY_EVENT_ASK_ZDMW, now)) {
@@ -457,11 +469,14 @@ static void run_command(const link_command_t *c, buddy_brain_t *brain, office_sw
         // The last interaction (evt act), so a companion that missed its events can still learn how it ended.
         if (n > 0 && (size_t)n < sizeof(body)) {
             if (s_ia.state == IA_NONE) {
-                snprintf(body + n, sizeof(body) - (size_t)n, " act=none");
+                n += snprintf(body + n, sizeof(body) - (size_t)n, " act=none");
             } else {
-                snprintf(body + n, sizeof(body) - (size_t)n, " act=%" PRIu32 ":%s%s%s", s_ia.iid,
-                         ia_state_name(s_ia.state), s_ia.result ? ":" : "", s_ia.result ? s_ia.result : "");
+                n += snprintf(body + n, sizeof(body) - (size_t)n, " act=%" PRIu32 ":%s%s%s", s_ia.iid,
+                              ia_state_name(s_ia.state), s_ia.result ? ":" : "", s_ia.result ? s_ia.result : "");
             }
+        }
+        if (n > 0 && (size_t)n < sizeof(body)) {
+            snprintf(body + n, sizeof(body) - (size_t)n, " face=%s", office_face_name(s_faces.face));
         }
         break;
     }
@@ -499,6 +514,19 @@ static void run_command(const link_command_t *c, buddy_brain_t *brain, office_sw
             APP_LOGI(TAG, "Clock Mode %s (companion)", c->u.office ? "on" : "off");
         }
         break;
+    case LINK_CMD_CLOCK_FACE: {
+        office_face_t face;
+        if (!has_office) {
+            strcpy(body, "err unavailable");
+        } else if (!office_face_parse(c->u.face.name, &face) || !s_faces.has[face]) {
+            strcpy(body, "err unsupported"); // a face this firmware does not have
+        } else {
+            app_link_send(c->seq, "ok"); // the reply first, then evt face (if it changed)
+            select_face(face, "cmd");
+            return;
+        }
+        break;
+    }
     case LINK_CMD_TIME_SET: {
         app_port_wall_set(c->u.time.utc, c->u.time.ms * 1000u);
         s_tz = c->u.time.tz;
@@ -601,9 +629,9 @@ static struct {
     buddy_view_t view;
     menu_t menu;
     menu_view_t menu_view;
-    office_clock_t clock;
     office_switch_t screen;
     bool has_menu, has_office;
+    bool face_redraw; // the redraw under way is for a new clock face, not a switch
 
     perf_t perf;
     int64_t perf_since;
@@ -616,6 +644,24 @@ static struct {
     uint32_t next_demo, next_monster, next_activity, next_office;
     int demo_activity;
 } s;
+
+// A face chosen on the touchscreen or by the companion: shown at once if the clock is up (a full redraw of both
+// buffers, like the switch), and reported (evt face) if it changed.
+static void select_face(office_face_t face, const char *src)
+{
+    if (face == s_faces.face || !office_faces_select(&s_faces, face)) {
+        return;
+    }
+    if (s_faces.visible) {
+        s_scene.background = office_faces_background(&s_faces, &s_scene.background_ctx);
+        office_switch_redraw(&s.screen);
+        s.face_redraw = true;
+    }
+    char body[48];
+    snprintf(body, sizeof(body), "evt face name=%s src=%s", office_face_name(face), src);
+    app_link_send(0, body);
+    APP_LOGI(TAG, "clock face %s (%s)", office_face_name(face), src);
+}
 
 bool app_init(const app_config_t *config)
 {
@@ -666,11 +712,18 @@ bool app_init(const app_config_t *config)
     if (!menu_thought_init(&s_thought, &s_scene, s_layout.stage, head_cx, thought_mem, MENU_THOUGHT_MEMORY, 5)) {
         APP_LOGW(TAG, "Buddy's thoughts cannot be shown (no memory, or they do not fit the stage)");
     }
-    // The glyph cache is only read when the clock redraws (rarely): PSRAM.
+    // The faces' pixels are only read when the clock redraws: PSRAM. Classic is Clock Mode itself; Mechanical
+    // Skeleton is left out if its memory is missing.
     uint8_t *clock_mem = app_port_alloc(OFFICE_CLOCK_MEMORY, APP_MEM_LARGE);
-    s.has_office = office_clock_init(&s.clock, &s_scene, s_layout.screen, clock_mem, OFFICE_CLOCK_MEMORY, 20);
+    uint8_t *skeleton_mem = app_port_alloc(OFFICE_SKELETON_MEMORY, APP_MEM_LARGE);
+    const int64_t faces_t0 = app_port_time_us();
+    s.has_office = clock_mem && office_faces_init(&s_faces, &s_scene, s_layout.screen, clock_mem, skeleton_mem, 20);
     if (!s.has_office) {
         APP_LOGW(TAG, "Clock Mode unavailable (no memory for the clock)");
+    } else {
+        APP_LOGI(TAG, "clock faces ready in %.0f ms: classic%s (skeleton %u KB of %u KB)",
+                 (app_port_time_us() - faces_t0) / 1000.0, s_faces.has[OFFICE_FACE_SKELETON] ? ", skeleton" : "",
+                 (unsigned)(s_faces.skeleton.mem_used / 1024), (unsigned)(OFFICE_SKELETON_MEMORY / 1024));
     }
     office_switch_init(&s.screen);
     office_zoom_init(&s_zoom);
@@ -861,11 +914,10 @@ uint32_t app_frame(void)
             buddy_view_hide(&s.view); // the character pauses; a running Monster sequence is dropped on return
             menu_cancel(&s.menu);
             menu_view_show(&s.menu_view, false);
-            office_clock_show(&s.clock, true);
-            s_scene.background = office_background;
-            s_scene.background_ctx = NULL;
+            office_faces_show(&s_faces, true);
+            s_scene.background = office_faces_background(&s_faces, &s_scene.background_ctx);
         } else { // his dark face first (the zoom draws it); the menu comes back as he steps back
-            office_clock_show(&s.clock, false);
+            office_faces_show(&s_faces, false);
             s_scene.background = layout_background;
             s_scene.background_ctx = &s_layout;
             brain_rest(&s.brain, now); // a paused Monster sequence is dropped (the mode is normal again)
@@ -879,7 +931,13 @@ uint32_t app_frame(void)
     if (step.redrawn) {
         // Like at boot: report the full redraws separately, so the performance windows cover normal frames.
         // Into the clock, the window started with the zoom: the line covers the whole way in.
-        if (s.screen.office) {
+        if (s.face_redraw) {
+            app_scanout_stats_t sw;
+            app_port_scanout_stats(&sw);
+            APP_LOGI(TAG, "clock face drawn (%" PRIu32 " scanout resyncs, fill max %" PRIu32 " us)", sw.resyncs,
+                     sw.fill_us_max);
+            s.face_redraw = false;
+        } else if (s.screen.office) {
             zoom_log("in", &s.perf, app_port_time_us() - s.perf_since);
         } else {
             app_scanout_stats_t sw;
@@ -916,7 +974,7 @@ uint32_t app_frame(void)
         struct tm tm;
         uint32_t ms = 0;
         const bool known = wall_clock(&tm, &ms);
-        next = office_clock_apply(&s.clock, known ? &tm : NULL, ms);
+        next = office_faces_apply(&s_faces, known ? &tm : NULL, ms);
         menu_thought_apply(&s_thought, NULL);
     } else {
         buddy_pose_t pose;

@@ -173,6 +173,27 @@ Looping animations (`components/buddy/src/buddy_mood.c`). They use the same path
 
 Slow swaps stayed at 0 throughout. The one large redraw (284 k px, 30.7 ms to render) came when a message arrived during Sleepy: the sign appearing, Buddy jumping and three Zs vanishing in one frame, plus the previous frame's rectangles, probably overflowed the 16-entry dirty list, which then merges into larger boxes [INFERENCE]. It costs one late frame, not a glitch, and is not chased further. Host test `mood_redraws_match_full_redraw`: 2,338 frames over every mood with rapid switching, taps and a Monster sequence, all equal to a full redraw, largest redraw 107,520 px (17 % of the screen).
 
+### Clock faces: Mechanical Skeleton (2026-10-17; host and simulator only, not yet on the device)
+A second Clock Mode face (`components/office/src/office_skeleton.c`): procedural pixel art at scale 2, rendered once at start into PSRAM. Each wheel has 4 images (quarter-tooth steps; meshing wheels share the tooth movement, so 4 steps bring every wheel back to the same picture). Moving parts change sprite images only; the background is the clock's near-black with the wheels' shadows, computed per row.
+
+| | Value |
+|---|---|
+| Scene sprites | 50 before + 16 for the Skeleton (frame, 7 wheels, anchor, cock, timeplate, 4 digits, date) = 66; the limit went from 56 to 72 (Classic keeps its own 6) |
+| PSRAM | 539 KB of the face's 560 KB block (all its images, including a full-screen frame and double-buffered roll and date images), plus Classic's 96 KB as before |
+| Internal RAM (static) | DIRAM 152,095 B used vs 148,515 B on `master` (+3.6 KB, mostly `.bss`: the face's sprites and images); image +17 KB |
+| Render task stack (static, `-fstack-usage`, xtensa GCC) | `render_rect` 1,600 B (1,280 B at 56 sprites), `app_frame` 464, `render_task` 352: about 2.5 KB deepest on the frame path; the Skeleton's start-up rendering about 2.3 KB (`office_skeleton_init` 784, `works_row` 560, `render_image` 176); stack 6,144 B. The board now logs the real high-water mark (`render task stack: … never used`) whenever it reaches a new depth |
+| Start-up rendering | 35 ms on this PC (simulator, Release). On the board: not measured; logged as `clock faces ready in … ms`. Expected well under the 5 s task watchdog, but noticeable before the backlight comes on [INFERENCE: roughly 1–2 s from the float work per sample] |
+
+Host test `office_skeleton_redraws_match_full_redraw` (19:59:44 → 20:00:04: both trains, a minute roll, the hour's whir), all frames equal to a full redraw, none full-screen:
+
+| Event | Largest redraw |
+|---|---|
+| Escapement tick (every second) | 36,672 px |
+| A train step (left every 5 s, right every 15 s, never in the same second) | 169,728 px |
+| The hour: whir (12.5 steps a second for 1.6 s) with all four digits rolling | 529,728 px (the rectangles of the wheels, the plate's digits and the trains merge) |
+
+Simulator (`--port 47802`, a script as the companion): 1.0 frames/s in the Skeleton (avg 80–140 k px), 4.5 frames/s over the 6 s window with the hour's whir (avg 300 k px, max 469 k px), zoom in 42 frames / out 43 frames as with Classic, live face changes `clock face drawn` (two full frames, like the switch), a mouse tap leaves Clock Mode and the mood set meanwhile (happy) shows afterwards. The simulator has no scanout, so bounce fills and resyncs need the board: the whir's frames are the size of the zoom's (which measured 0 resyncs and fills ≤ 430 µs), the rest is smaller than idle Buddy.
+
 ## Touch
 
 Measured over 15 taps on the robot by the user, during a 10-minute run that had 0 resyncs and 0 slow swaps:

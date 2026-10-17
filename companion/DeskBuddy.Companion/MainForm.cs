@@ -52,6 +52,11 @@ public sealed class MainForm : Form
     private readonly Label _simStatus = new() { Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, AutoEllipsis = true, UseMnemonic = false };
     private readonly Label _simHint = new() { Dock = DockStyle.Top, Height = 26, ForeColor = Theme.Faint, TextAlign = ContentAlignment.MiddleLeft, UseMnemonic = false };
 
+    // Clock face: shown with the Buddy page's tiles while the connected firmware has the face cap.
+    private Picker _facePicker = null!;
+    private Card _faceCard = null!;
+    private Panel _faceGap = null!;
+
     // Activity tiles: one card per page, groups of tiles inside that wrap.
     private readonly List<TileCard> _tileCards = [];
     private readonly List<(FlatButton Tile, Activity Activity)> _tiles = [];
@@ -324,7 +329,17 @@ public sealed class MainForm : Form
     private Panel BuildBuddyPage()
     {
         var page = ScrollPage();
-        page.Controls.Add(TileCardFor("Mode and mood", ActivityKind.Mode, ActivityKind.Mood));
+        _facePicker = new Picker(_theme) { Width = 260, Height = 32, Margin = new Padding(0, 0, 10, 0), AccessibleName = "Clock face" };
+        _facePicker.Picked += async (_, _) => await PickFaceAsync();
+        _tips.SetToolTip(_facePicker, "The face Clock mode shows; it changes live while the clock is on");
+        _faceCard = new Card(_theme) { Title = "Clock face", Dock = DockStyle.Top, Height = 96, Visible = false };
+        var row = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 40, WrapContents = false };
+        row.Controls.Add(Caption("Face", 64));
+        row.Controls.Add(_facePicker);
+        _faceCard.Controls.Add(row);
+        _faceGap = Gap();
+        _faceGap.Visible = false;
+        Stack(page, TileCardFor("Mode and mood", ActivityKind.Mode, ActivityKind.Mood), _faceGap, _faceCard);
         return page;
     }
 
@@ -896,6 +911,48 @@ public sealed class MainForm : Form
         }
     }
 
+    // The face picker shows what the device reports (a pick is only a request: the device answers with the face).
+    private sealed record FaceItem(string Name)
+    {
+        public override string ToString() => ClockFace.DisplayName(Name);
+    }
+
+    private void UpdateFacePicker(bool connected)
+    {
+        var show = connected && _service.Caps.Contains(ClockFace.Cap) && _service.Faces.Count > 0;
+        if (_faceCard.Visible != show)
+        {
+            _faceCard.Visible = _faceGap.Visible = show;
+        }
+        if (!show)
+        {
+            return;
+        }
+        if (!_facePicker.Items.Select(i => ((FaceItem)i).Name).SequenceEqual(_service.Faces))
+        {
+            _facePicker.Items.Clear();
+            _facePicker.Items.AddRange(_service.Faces.Select(f => new FaceItem(f)));
+        }
+        _facePicker.SelectedIndex = _service.Face is { } face ? _facePicker.Items.FindIndex(i => ((FaceItem)i).Name == face) : -1;
+        _facePicker.Enabled = true;
+    }
+
+    private async Task PickFaceAsync()
+    {
+        if (_facePicker.SelectedItem is FaceItem item)
+        {
+            _facePicker.Enabled = false;
+            try
+            {
+                await _service.SetClockFaceAsync(item.Name);
+            }
+            finally
+            {
+                UpdateState(); // back to the face the device reports (also when it refused)
+            }
+        }
+    }
+
     private void React(string face)
     {
         _reaction = face;
@@ -959,6 +1016,7 @@ public sealed class MainForm : Form
             tile.Enabled = connected && Activities.IsAvailable(activity, _service.Caps, _service.Moods, _service.Acts);
             tile.Selected = connected && Activities.IsOn(activity, _service.Mode, _service.Mood);
         }
+        UpdateFacePicker(connected);
 
         var text = MessageText.Clean(_message.Text);
         var problem = MessageText.Problem(text);

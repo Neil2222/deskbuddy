@@ -8,6 +8,7 @@
 #include "gfx_repair.h"
 #include "layout.h"
 #include "office_clock.h"
+#include "office_skeleton.h"
 #include "office_switch.h"
 #include "test.h"
 
@@ -315,4 +316,275 @@ void test_office_switch_redraws_fully_only_while_switching(void)
     CHECK_EQ(bad, 0);
     CHECK_EQ(full_other, 0);
     CHECK(max_other < W * H / 4);
+}
+
+// A new face while the clock shows: both buffers are redrawn as after a switch; on Buddy's scene nothing happens.
+void test_office_switch_redraws_a_new_face(void)
+{
+    office_switch_t s;
+    office_switch_init(&s);
+    office_switch_redraw(&s);
+    CHECK(!office_switch_busy(&s));
+    office_switch_request(&s, true);
+    office_switch_step(&s);
+    office_switch_presented(&s);
+    office_switch_step(&s);
+    office_switch_presented(&s);
+    CHECK(office_switch_step(&s).redrawn);
+    office_switch_redraw(&s);
+    office_step_t st = office_switch_step(&s);
+    CHECK(office_switch_busy(&s) && !st.swap && st.redraw_all);
+    office_switch_request(&s, false); // waits for the redraw
+    office_switch_presented(&s);
+    st = office_switch_step(&s);
+    CHECK(st.redraw_kick && !st.swap);
+    office_switch_presented(&s);
+    st = office_switch_step(&s);
+    CHECK(st.redrawn && s.office);
+    CHECK(office_switch_step(&s).swap && !s.office);
+}
+
+// --- Mechanical Skeleton ----------------------------------------------------------------------------------------
+
+static uint8_t s_sk_mem[OFFICE_SKELETON_MEMORY];
+
+static int z_of(const gfx_scene_t *scene, const gfx_sprite_t *sp)
+{
+    for (int i = 0; i < scene->count; i++) {
+        if (scene->sprite[i] == sp) {
+            return scene->z[i];
+        }
+    }
+    return -1000;
+}
+
+static struct tm sk_time(int h, int m, int s)
+{
+    return (struct tm){.tm_year = 126, .tm_mon = 9, .tm_mday = 17, .tm_wday = 6, .tm_hour = h, .tm_min = m,
+                       .tm_sec = s};
+}
+
+// The time stays on top: every part of the movement lies under the timeplate, which is solid under every digit,
+// so no wheel, at any position, changes a pixel of the time.
+void test_office_skeleton_keeps_the_time_on_top(void)
+{
+    static gfx_scene_t scene;
+    static office_skeleton_t k;
+    CHECK(gfx_scene_init(&scene, W, H, office_skeleton_background, &k, s_strip, 16 * 1024, ALIGN));
+    CHECK(!office_skeleton_init(&k, &scene, (gfx_rect_t){0, 0, W, H}, s_sk_mem, 100 * 1024, 20)); // too little
+    CHECK(gfx_scene_init(&scene, W, H, office_skeleton_background, &k, s_strip, 16 * 1024, ALIGN));
+    CHECK(!office_skeleton_init(&k, &scene, (gfx_rect_t){0, 0, 800, 480}, s_sk_mem, sizeof(s_sk_mem), 20));
+    CHECK(gfx_scene_init(&scene, W, H, office_skeleton_background, &k, s_strip, 16 * 1024, ALIGN));
+    CHECK(office_skeleton_init(&k, &scene, (gfx_rect_t){0, 0, W, H}, s_sk_mem, sizeof(s_sk_mem), 20));
+    CHECK(k.mem_used <= OFFICE_SKELETON_MEMORY);
+    office_skeleton_show(&k, true);
+    struct tm tm = sk_time(14, 37, 21);
+    office_skeleton_apply(&k, &tm, 300);
+
+    gfx_sprite_t *movement[OFFICE_SKELETON_GEARS + 3] = {&k.frame, &k.anchor, &k.cock};
+    for (int g = 0; g < OFFICE_SKELETON_GEARS; g++) {
+        movement[3 + g] = &k.gear[g];
+    }
+    const int plate_z = z_of(&scene, &k.plate);
+    for (unsigned i = 0; i < sizeof(movement) / sizeof(movement[0]); i++) {
+        CHECK(z_of(&scene, movement[i]) < plate_z);
+        CHECK(gfx_rect_contains_rect((gfx_rect_t){0, 0, W, H}, gfx_sprite_bounds(movement[i])));
+    }
+    const gfx_rect_t plate = gfx_sprite_bounds(&k.plate);
+    for (int d = 0; d < 4; d++) {
+        CHECK(z_of(&scene, &k.digit[d]) > plate_z);
+        const gfx_rect_t r = gfx_sprite_bounds(&k.digit[d]);
+        CHECK(gfx_rect_contains_rect(plate, r));
+        for (int y = r.y; y < r.y + r.h; y++) { // the plate is solid under the digit
+            for (int x = r.x; x < r.x + r.w; x++) {
+                CHECK(k.plate_img.px[(y - plate.y) / 2 * k.plate_img.w + (x - plate.x) / 2] != 0);
+            }
+        }
+    }
+    CHECK(z_of(&scene, &k.date) > plate_z && gfx_rect_contains_rect(plate, gfx_sprite_bounds(&k.date)));
+
+    // Rendered: the time looks the same with and without the movement, mid-flourish too.
+    static gfx_dirty_t all;
+    gfx_dirty_init(&all, W, H, ALIGN);
+    gfx_dirty_add(&all, (gfx_rect_t){0, 0, W, H});
+    const gfx_surface_t with = {s_ref, W, H, W}, without = {s_buf[0], W, H, W};
+    for (int pass = 0; pass < 2; pass++) {
+        tm = pass ? sk_time(15, 0, 0) : sk_time(14, 37, 21);
+        office_skeleton_apply(&k, &tm, pass ? 400 : 300);
+        gfx_scene_render(&scene, &all, &with);
+        for (unsigned i = 0; i < sizeof(movement) / sizeof(movement[0]); i++) {
+            movement[i]->flags |= GFX_SPRITE_HIDDEN;
+        }
+        gfx_scene_render(&scene, &all, &without);
+        office_skeleton_show(&k, true);
+        for (int d = 0; d < 4; d++) {
+            const gfx_rect_t r = gfx_sprite_bounds(&k.digit[d]);
+            for (int y = r.y; y < r.y + r.h; y++) {
+                CHECK(memcmp(&s_ref[y * W + r.x], &s_buf[0][y * W + r.x], (size_t)r.w * sizeof(gfx_color_t)) == 0);
+            }
+        }
+    }
+}
+
+// Clockwork: the escapement every second, the left train every 5 s, the right one every 15 s, each wheel back to
+// the same picture after four steps; the minute rolls in two frames; on the hour a quick whir that ends exactly
+// where the movement would be anyway; stopped while the time is unknown.
+void test_office_skeleton_moves_like_clockwork(void)
+{
+    static gfx_scene_t scene;
+    static office_skeleton_t k;
+    CHECK(gfx_scene_init(&scene, W, H, office_skeleton_background, &k, s_strip, 16 * 1024, ALIGN));
+    CHECK(office_skeleton_init(&k, &scene, (gfx_rect_t){0, 0, W, H}, s_sk_mem, sizeof(s_sk_mem), 20));
+    enum { ESC = OFFICE_SKELETON_GEARS - 1, LEFT = 0, RIGHT = 3 };
+    office_skeleton_show(&k, true);
+    const gfx_image_t *img[3];
+    bool flip;
+#define SAMPLE(h, m, s, ms)                                                                                            \
+    do {                                                                                                               \
+        const struct tm t_ = sk_time(h, m, s);                                                                         \
+        office_skeleton_apply(&k, &t_, ms);                                                                            \
+        img[0] = k.gear[ESC].image;                                                                                    \
+        img[1] = k.gear[LEFT].image;                                                                                   \
+        img[2] = k.gear[RIGHT].image;                                                                                  \
+        flip = (k.anchor.flags & GFX_SPRITE_FLIP_X) != 0;                                                              \
+    } while (0)
+    SAMPLE(14, 37, 20, 300);
+    const gfx_image_t *at20[3] = {img[0], img[1], img[2]};
+    const bool flip20 = flip;
+    SAMPLE(14, 37, 21, 300);
+    CHECK(img[0] != at20[0] && img[1] == at20[1] && img[2] == at20[2] && flip != flip20);
+    SAMPLE(14, 37, 24, 300);
+    CHECK(img[0] == at20[0] && img[1] == at20[1] && flip == flip20); // four quarter teeth: the same picture
+    SAMPLE(14, 37, 25, 300);
+    CHECK(img[1] != at20[1]); // the left train
+    // Over a minute: the left train steps 12 times, the right one 4 times, never in the same second.
+    int left_steps = 0, right_steps = 0;
+    SAMPLE(14, 38, 59, 300);
+    for (int s = 0; s < 60; s++) {
+        const gfx_image_t *l = img[1], *r = img[2];
+        SAMPLE(14, 39, s, 300);
+        left_steps += img[1] != l;
+        right_steps += img[2] != r;
+        CHECK(img[1] == l || img[2] == r);
+    }
+    CHECK_EQ(left_steps, 12);
+    CHECK_EQ(right_steps, 4);
+    for (int g = 0; g + 1 < OFFICE_SKELETON_GEARS - 1; g++) {
+        if (g != 2) { // meshing neighbours turn opposite ways
+            CHECK_EQ(k.dir[g] + k.dir[g + 1], 0);
+        }
+    }
+    const struct tm t20 = sk_time(14, 37, 20);
+    CHECK_EQ(office_skeleton_apply(&k, &t20, 300), 700);
+
+    // 14:37:59 -> 14:38:00: the last digit rolls (two frames), the others stay.
+    const struct tm t38 = sk_time(14, 38, 0);
+    CHECK_EQ(office_skeleton_apply(&k, &t38, 20), OFFICE_SKELETON_TICK_FRAME_MS - 20);
+    CHECK(k.digit[0].image == &k.glyph[1] && k.digit[1].image == &k.glyph[4] && k.digit[2].image == &k.glyph[3]);
+    const gfx_image_t *roll1 = k.digit[3].image;
+    CHECK(roll1 != &k.glyph[8] && roll1 != &k.glyph[7]);
+    static gfx_dirty_t seen;
+    gfx_dirty_init(&seen, W, H, ALIGN);
+    gfx_scene_collect(&scene, &seen); // as the render loop does between frames
+    office_skeleton_apply(&k, &t38, OFFICE_SKELETON_TICK_FRAME_MS + 10);
+    CHECK(k.digit[3].image != roll1 && k.digit[3].image != &k.glyph[8]);
+    office_skeleton_apply(&k, &t38, 2 * OFFICE_SKELETON_TICK_FRAME_MS);
+    CHECK(k.digit[3].image == &k.glyph[8]);
+
+    // 23:59 -> 00:00: every digit rolls.
+    const struct tm midnight = sk_time(0, 0, 0);
+    office_skeleton_apply(&k, &midnight, 10);
+    for (int d = 0; d < 4; d++) {
+        CHECK(k.digit[d].image != &k.glyph[0]);
+    }
+
+    // On the hour: quick steps, then exactly where it would have been.
+    const uint32_t steps_ms = OFFICE_SKELETON_FLOURISH_STEPS * OFFICE_SKELETON_FLOURISH_MS;
+    const struct tm hour = sk_time(20, 0, 0);
+    CHECK(office_skeleton_apply(&k, &hour, 100) <= OFFICE_SKELETON_FLOURISH_MS);
+    const gfx_image_t *a = k.gear[LEFT].image;
+    office_skeleton_apply(&k, &hour, 100 + OFFICE_SKELETON_FLOURISH_MS);
+    CHECK(k.gear[LEFT].image != a);
+    const struct tm end = sk_time(20, 0, (int)(steps_ms / 1000));
+    office_skeleton_apply(&k, &end, steps_ms % 1000 - 1);
+    const gfx_image_t *last[OFFICE_SKELETON_GEARS];
+    for (int g = 0; g < OFFICE_SKELETON_GEARS; g++) {
+        last[g] = k.gear[g].image;
+    }
+    office_skeleton_apply(&k, &end, steps_ms % 1000 + 1);
+    for (int g = 0; g < OFFICE_SKELETON_GEARS; g++) {
+        CHECK(k.gear[g].image == last[g]); // no jump when the flourish ends
+    }
+
+    // Unknown time: stopped, and it says so.
+    CHECK_EQ(office_skeleton_apply(&k, NULL, 0), 1000);
+    for (int d = 0; d < 4; d++) {
+        CHECK(k.digit[d].image == &k.glyph[10]);
+    }
+    CHECK(strcmp(k.date_text, "CLOCK NOT SET") == 0);
+#undef SAMPLE
+}
+
+// The face over a minute and an hour, as the render loop draws it: every presented buffer equals a full redraw, no
+// frame redraws the whole screen, and the ticks stay small.
+void test_office_skeleton_redraws_match_full_redraw(void)
+{
+    static gfx_scene_t scene;
+    static office_skeleton_t k;
+    static gfx_dirty_t changes, redraw, all;
+    static gfx_repair_t repair;
+    CHECK(gfx_scene_init(&scene, W, H, office_skeleton_background, &k, s_strip, 16 * 1024, ALIGN));
+    CHECK(office_skeleton_init(&k, &scene, (gfx_rect_t){0, 0, W, H}, s_sk_mem, sizeof(s_sk_mem), 20));
+    office_skeleton_show(&k, true);
+    gfx_dirty_init(&changes, W, H, ALIGN);
+    gfx_dirty_init(&redraw, W, H, ALIGN);
+    gfx_dirty_init(&all, W, H, ALIGN);
+    gfx_dirty_add(&all, (gfx_rect_t){0, 0, W, H});
+    gfx_repair_init(&repair, W, H, ALIGN);
+    gfx_scene_invalidate(&scene, (gfx_rect_t){0, 0, W, H});
+    memset(s_buf, 0, sizeof(s_buf));
+    const gfx_surface_t ref = {s_ref, W, H, W};
+
+    // 19:59:44 to 20:00:04 (both trains step, a minute roll, the hour's flourish), frame by frame as woken.
+    const int start = 19 * 3600 + 59 * 60 + 44;
+    int back = 0, bad = 0, frames = 0, full = 0;
+    int max_second = 0, max_train = 0, max_flourish = 0;
+    uint32_t t = 0;
+    while (t < 20000) {
+        const int secs = start + (int)(t / 1000);
+        const struct tm tm = sk_time(secs / 3600 % 24, secs / 60 % 60, secs % 60);
+        const uint32_t ms = t % 1000;
+        const uint32_t next = office_skeleton_apply(&k, &tm, ms);
+        gfx_dirty_clear(&changes);
+        gfx_scene_collect(&scene, &changes);
+        if (changes.count > 0) {
+            gfx_repair_next(&repair, &changes, &redraw);
+            const gfx_surface_t dst = {s_buf[back], W, H, W};
+            gfx_scene_render(&scene, &redraw, &dst);
+            gfx_scene_render(&scene, &all, &ref);
+            bad += memcmp(s_buf[back], s_ref, sizeof(s_ref)) != 0;
+            back ^= 1;
+            const int area = gfx_dirty_area(&redraw);
+            if (frames >= 2) { // after the first full redraw of both buffers
+                full += area == W * H;
+                const bool flourish = tm.tm_min == 0 && tm.tm_sec < 3;
+                const int s5 = tm.tm_sec % 5, s15 = tm.tm_sec % 15; // a step, and the repair of the other buffer
+                const bool train = !flourish && (s5 == 0 || s5 == 1 || s15 == 7 || s15 == 8) && ms < 500;
+                int *max = flourish ? &max_flourish : train ? &max_train : &max_second;
+                *max = area > *max ? area : *max;
+            }
+            frames++;
+        }
+        t += next ? next : 1;
+    }
+    printf("    skeleton: %d frames over 20 s; largest redraw: escapement tick %d px, train step %d px, "
+           "flourish %d px; %u KB of pixels\n", frames, max_second, max_train, max_flourish,
+           (unsigned)(k.mem_used / 1024));
+    CHECK_EQ(bad, 0);
+    CHECK_EQ(full, 0);
+    CHECK(max_second > 0 && max_second < W * H / 12);
+    CHECK(max_train < W * H / 3);
+    // The hour's first frames (all four digits rolling while every wheel turns) are the largest; never the whole
+    // screen, and no larger than the zoom's frames, which the scanout keeps up with.
+    CHECK(max_flourish < W * H * 9 / 10);
 }
