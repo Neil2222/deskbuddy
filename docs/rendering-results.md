@@ -173,6 +173,20 @@ Looping animations (`components/buddy/src/buddy_mood.c`). They use the same path
 
 Slow swaps stayed at 0 throughout. The one large redraw (284 k px, 30.7 ms to render) came when a message arrived during Sleepy: the sign appearing, Buddy jumping and three Zs vanishing in one frame, plus the previous frame's rectangles, probably overflowed the 16-entry dirty list, which then merges into larger boxes [INFERENCE]. It costs one late frame, not a glitch, and is not chased further. Host test `mood_redraws_match_full_redraw`: 2,338 frames over every mood with rapid switching, taps and a Monster sequence, all equal to a full redraw, largest redraw 107,520 px (17 % of the screen).
 
+### KITT (2026-10-17; host and simulator only, not yet on the board)
+
+Buddy turns into a Knight Rider scanner (`components/buddy/src/buddy_kitt.c`): an overlay sprite exactly over his face screen (128 x 64 px at his stage scale), drawn by code each frame at half his art pixels (32 x 16 overlay pixels, 4 x 4 screen pixels each) with its own 9-colour palette, into the Monster rig's two existing pixel buffers (KITT's poses never carry the props the rig draws). In: eyes close (0.3 s), the glow dims, three red traces race across at staggered speeds leaving the screen black (0.6–1.3 s), one flicker, the dark-red housing comes up and the light fades in at the left end (to 2.0 s). Scan: a sinusoidal sweep, one round trip per 1.6 s (easing at both ends), the light's tail from its last 8 positions 28 ms apart, a faint glow on the housing's rim; antenna steady red. Out (1.8 s): the sweep slows to the middle and fades, the housing goes dark, the traces race back and bring his face back, the eyes open.
+
+| | Measured off the board |
+|---|---|
+| Redraw while sweeping | 10,240 px per frame (the face screen 8,192 px, widened to 32-px cache-line columns); simulator avg 10.3 k, max 12.9 k px (the menu header with it) |
+| Frame rate while sweeping | 29–30 frames/s (host test: 584 frames in 20 s; simulator 30.4/s) |
+| Every frame vs a full redraw | equal (host test `kitt_redraws_match_full_redraw`, with his peukie hand before and after, since KITT borrows the rig's buffers) |
+| Firmware | image +4,064 B (526,027 B); code +3.9 KB; DIRAM +120 B (the sprite, two image headers, the brain's field, the palette); no heap, no PSRAM, no image assets; scene sprites 65 → 66 of 72 |
+| Long running | the scanner's clock is kept within 30 minutes past the turn (whole sweeps), so it never wraps; nothing accumulates (host test: 3 hours) |
+
+[INFERENCE] On the board: about 2–3 ms render per frame (the Classic clock's 11.4 k px redraws measure 2.3 ms), far below the full-screen frames that come close to the bounce-fill deadline. To be measured with the `STRIPS` lines.
+
 ### Clock faces: Mechanical Skeleton (2026-10-17; failed on the device, repaired, passed the second device test)
 
 **Second device test, `fa4455d` (2026-10-17, about 11:55–12:00): passed.** Flashed over COM6 (`Hash of data verified`, `verify_flash` digests matched for bootloader, partition table and app; `App version: fa4455d`). The user watched every step and saw **no left-edge glitch lines, tearing, flicker or stale pixels**: the stationary Skeleton (clock not yet set, so nothing moved), the Skeleton ticking for over 2 minutes (with a minute roll), the hour's whir (clock set to xx:59:30 over the serial link, then back to the real time), the zoom in, and the tap out (Buddy zoomed out and carried on happy, the menu back). No watchdog warning, crash or allocation failure in the log. `fa4455d` stays on the board. Which of the repairs removed the lines is not known (not tested one at a time).

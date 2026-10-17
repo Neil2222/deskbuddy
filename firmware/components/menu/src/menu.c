@@ -3,6 +3,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "buddy_brain.h" // BUDDY_EVENT_KITT
+
 #define MARGIN 5     // menu pixels around and between the buttons
 #define HEADER_H 38  // the grid and list start below the header
 #define FOOTER_Y 272
@@ -28,6 +30,9 @@ menu_avail_t menu_item_avail(const menu_item_t *it, const menu_status_t *st)
     if (it->soon) {
         return MENU_ITEM_SOON;
     }
+    if (it->action == MENU_DO_EVENT && it->arg == BUDDY_EVENT_KITT && st->kitt) {
+        return MENU_ITEM_READY; // marked as what he is; tapping it again changes nothing
+    }
     if ((it->action == MENU_DO_EVENT || it->action == MENU_DO_PDC) && st->busy) {
         return MENU_ITEM_BUSY;
     }
@@ -39,7 +44,11 @@ menu_avail_t menu_item_avail(const menu_item_t *it, const menu_status_t *st)
 
 bool menu_item_active(const menu_item_t *it, const menu_status_t *st)
 {
-    return (it->action == MENU_DO_MOOD && it->arg == st->mood) || (it->action == MENU_DO_FACE && it->arg == st->face);
+    if (it->action == MENU_DO_EVENT && it->arg == BUDDY_EVENT_KITT) {
+        return st->kitt;
+    }
+    return (it->action == MENU_DO_MOOD && it->arg == st->mood && !st->kitt) ||
+           (it->action == MENU_DO_FACE && it->arg == st->face);
 }
 
 gfx_rect_t menu_slot_rect(menu_layout_t layout, int slot)

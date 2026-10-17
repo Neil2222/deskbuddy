@@ -39,6 +39,10 @@ typedef struct {
     gfx_sprite_t can_shadow, can, port, rig[2], battery, alert, bolt[BUDDY_MAX_BOLTS], fx[BUDDY_FX_COUNT];
     // Mood effects.
     gfx_sprite_t part[BUDDY_PARTICLES];
+    // KITT's scanner over the face screen (buddy_kitt.h). Its two alternating images borrow the rig's pixel
+    // buffers: the rig is drawn only from props, which KITT's poses never have.
+    gfx_sprite_t kitt;
+    gfx_image_t kitt_img[2];
     const buddy_art_t *art;
     int scale;
     int x0, y0; // screen position of the art origin at lift 0

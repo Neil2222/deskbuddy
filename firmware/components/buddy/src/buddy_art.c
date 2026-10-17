@@ -475,6 +475,8 @@ static bool load(void)
     s_antenna_frames[BUDDY_ANTENNA_DIM][0] = (gfx_anim_frame_t){&a->antenna_off, 2600};
     s_antenna_frames[BUDDY_ANTENNA_DIM][1] = (gfx_anim_frame_t){&a->antenna_on, 180};
     a->antenna[BUDDY_ANTENNA_DIM] = (gfx_anim_t){s_antenna_frames[BUDDY_ANTENNA_DIM], 2, true};
+    const gfx_image_t *steady[] = {&a->antenna_on};
+    make_antenna(a, BUDDY_ANTENNA_STEADY, steady, 60000, 1); // KITT: lit red, not blinking
     a->eye_mirror[BUDDY_EYES_ANGRY] = a->eye_mirror[BUDDY_EYES_SQUEEZE] = true;
 
     // Layout in art pixels: antenna ball on top of the stem, face screen at rows 10..17, shadow under the feet.

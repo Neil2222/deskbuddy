@@ -425,6 +425,7 @@ void menu_art_icon_size(menu_icon_t icon, uint8_t arg, int *w, int *h)
     case MENU_ICON_FOCUS:
     case MENU_ICON_PEUKIE:
     case MENU_ICON_ZDMW:
+    case MENU_ICON_KITT:
         *w = MENU_FACE_W;
         *h = MENU_FACE_H;
         return;
@@ -438,6 +439,8 @@ void menu_art_icon_size(menu_icon_t icon, uint8_t arg, int *w, int *h)
         return;
     }
 }
+
+static void draw_face(menu_canvas_t *c, buddy_face_t face, bool blink, bool kitt, int cx, int cy);
 
 void menu_art_icon(menu_canvas_t *c, menu_icon_t icon, uint8_t arg, int cx, int cy)
 {
@@ -469,6 +472,9 @@ void menu_art_icon(menu_canvas_t *c, menu_icon_t icon, uint8_t arg, int cx, int 
     case MENU_ICON_ZDMW: // his reaction to it: exasperated
         menu_art_face(c, (buddy_face_t){BUDDY_EYES_ANGRY, BUDDY_MOUTH_GRIT, true, false}, false, cx, cy);
         return;
+    case MENU_ICON_KITT:
+        draw_face(c, (buddy_face_t){BUDDY_EYES_CLOSED, BUDDY_MOUTH_NEUTRAL, true, false}, false, true, cx, cy);
+        return;
     case MENU_ICON_MONSTER: {
         const gfx_image_t *can = &buddy_art_get()->props.can[BUDDY_CAN_LEVELS - 1];
         blit(c, can, cx - can->w / 2, cy - can->h / 2, false, 0);
@@ -482,7 +488,8 @@ void menu_art_icon(menu_canvas_t *c, menu_icon_t icon, uint8_t arg, int cx, int 
     }
 }
 
-void menu_art_face(menu_canvas_t *c, buddy_face_t face, bool blink, int cx, int cy)
+// Buddy's head as an icon; kitt: KITT's black face screen with the scanner's housing and its light instead of a face.
+static void draw_face(menu_canvas_t *c, buddy_face_t face, bool blink, bool kitt, int cx, int cy)
 {
     const buddy_art_t *a = buddy_art_get();
     // Assembled as the view does (icons.c exports the same heads), in art coordinates, then cut to the head.
@@ -492,10 +499,18 @@ void menu_art_face(menu_canvas_t *c, buddy_face_t face, bool blink, int cx, int 
     const buddy_eyes_t eyes = blink ? BUDDY_EYES_CLOSED : face.eyes;
     blit(&head, face.lit ? &a->antenna_on : &a->antenna_off, a->antenna_at.x, a->antenna_at.y, false, 0);
     blit(&head, &a->head, a->head_at.x, a->head_at.y, false, 0);
-    for (int i = 0; i < 2; i++) {
-        blit(&head, &a->eyes[eyes], a->eye_at[i].x, a->eye_at[i].y, i == 1 && a->eye_mirror[eyes], 0);
+    if (kitt) {
+        const gfx_rect_t f = a->face;
+        const int mid = f.y + f.h / 2 - 1;
+        menu_art_fill(&head, f.x, f.y, f.w, f.h, (uint8_t)(strchr(k_keys, 'D') - k_keys));
+        menu_art_fill(&head, f.x + 1, mid, f.w - 2, 2, (uint8_t)(strchr(k_keys, 'r') - k_keys));
+        menu_art_fill(&head, f.x + 5, mid, 3, 2, (uint8_t)(strchr(k_keys, 'R') - k_keys));
+    } else {
+        for (int i = 0; i < 2; i++) {
+            blit(&head, &a->eyes[eyes], a->eye_at[i].x, a->eye_at[i].y, i == 1 && a->eye_mirror[eyes], 0);
+        }
+        blit(&head, &a->mouth[face.mouth], a->mouth_at.x, a->mouth_at.y, false, 0);
     }
-    blit(&head, &a->mouth[face.mouth], a->mouth_at.x, a->mouth_at.y, false, 0);
     if (face.cig) { // in the corner of his mouth, glowing
         const buddy_point_t m = a->props.hand_mouth;
         blit(&head, &a->props.cig[1][1], m.x - BUDDY_CIG_GRIP, m.y - 1, false, 0);
@@ -521,6 +536,11 @@ void menu_art_face(menu_canvas_t *c, buddy_face_t face, bool blink, int cx, int 
             }
         }
     }
+}
+
+void menu_art_face(menu_canvas_t *c, buddy_face_t face, bool blink, int cx, int cy)
+{
+    draw_face(c, face, blink, false, cx, cy);
 }
 
 int menu_art_text_width(const char *s)

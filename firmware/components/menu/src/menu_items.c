@@ -35,6 +35,8 @@ static const menu_item_t k_items[] = {
     MOOD("sleepy", "SLEEPY", BUDDY_MOOD_SLEEPY),
     MOOD("working", "WORKING", BUDDY_MOOD_WORKING),
     MOOD("happy", "HAPPY", BUDDY_MOOD_HAPPY),
+    // Not a mood but a transformation (an activity without an end): it lasts until a tap on him or another mood.
+    {"mood.kitt", "KITT", MENU_MOODS, MENU_ICON_KITT, MENU_DO_EVENT, BUDDY_EVENT_KITT, false},
 
     {"activity.surprise", "SURPRISE!", MENU_ACTIVITIES, MENU_ICON_SURPRISE, MENU_DO_EVENT, BUDDY_EVENT_POKE, false},
     {"activity.clock", "CLOCK", MENU_ACTIVITIES, MENU_ICON_OFFICE, MENU_DO_OFFICE, 0, false}, // the selected face

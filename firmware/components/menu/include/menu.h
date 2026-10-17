@@ -91,6 +91,7 @@ typedef enum {
     MENU_ICON_WALK,     // a sneaker: stretch your legs
     MENU_ICON_CLOCKFACES, // a small dial: the CLOCK FACES page
     MENU_ICON_GEAR,     // a brass gear: the Mechanical Skeleton face
+    MENU_ICON_KITT,     // his head with KITT's scanner on the face screen
     MENU_ICON_COUNT,
 } menu_icon_t;
 
@@ -126,6 +127,7 @@ typedef struct {
     uint8_t faces;       // Clock Mode faces that can be selected: bit n for office_face_t n (CLOCK FACES shows
                          // with two or more)
     uint8_t face;        // the selected face (office_face_t)
+    bool kitt;           // he is KITT (BUDDY_STATE_KITT): its item stands for what he is, not his mood's
 } menu_status_t;
 
 typedef enum {
@@ -137,7 +139,7 @@ typedef enum {
 
 menu_avail_t menu_item_avail(const menu_item_t *it, const menu_status_t *st);
 
-// The item stands for what Buddy is doing now (his current mood).
+// The item stands for what Buddy is doing now (his current mood, or KITT).
 bool menu_item_active(const menu_item_t *it, const menu_status_t *st);
 
 // What Buddy puts on his sign when a MY DAY item is tapped ("ENJOY YOUR COFFEE!"); NULL for other items.

@@ -185,7 +185,7 @@ void test_buddy_view_fits_stage_and_hits(void)
     CHECK(gfx_scene_init(&scene, 1024, 600, test_background, NULL, strip, 1024 * 4, 32));
     CHECK(buddy_view_init(&v, &scene, stage, 10, 0));
     CHECK_EQ(v.scale, 8);
-    CHECK_EQ(scene.count, 25); // robot 7, Monster props 13, mood particles 5
+    CHECK_EQ(scene.count, 26); // robot 7, Monster props 13, mood particles 5, KITT's scanner
 
     const gfx_rect_t body = gfx_rect_union(gfx_sprite_bounds(&v.head), gfx_sprite_bounds(&v.torso));
     const int cx = body.x + body.w / 2, cy = body.y + body.h / 2;

@@ -31,6 +31,8 @@ static const struct {
     {"focus", BUDDY_EVENT_FOCUS, {BUDDY_EYES_FOCUS, BUDDY_MOUTH_TONGUE, true, false}},    // deep in thought
     // "PEUKIE ROKEN?", the same question as the touchscreen's PEUKIE? (answered there only): the smoking face
     {"ask_peukie", BUDDY_EVENT_ASK_PEUKIE, {BUDDY_EYES_LIDDED, BUDDY_MOUTH_SMIRK, true, true}},
+    // KITT (buddy_kitt.h): until he is turned back; its face is the menu's own picture (menu_art.c)
+    {"kitt", BUDDY_EVENT_KITT, {BUDDY_EYES_CLOSED, BUDDY_MOUTH_NEUTRAL, true, false}},
 };
 
 const char *buddy_act_name(int i)
@@ -753,6 +755,8 @@ const char *buddy_activity_doing(buddy_state_t state)
         return "fuming";
     case BUDDY_STATE_FOCUS:
         return "focusing";
+    case BUDDY_STATE_KITT:
+        return "scanning";
     default:
         return NULL;
     }

@@ -122,6 +122,10 @@ extern int g_test_failed;
     X(pdc_confirmation_and_reaction)                 \
     X(focus_tells_the_comic_in_order)                \
     X(focus_thoughts_redraw_on_the_stage)            \
+    X(kitt_turns_in_sweeps_and_turns_back_to_his_mood) \
+    X(kitt_a_mood_choice_turns_him_back_into_that_mood) \
+    X(kitt_scanner_sweeps_with_a_tail)               \
+    X(kitt_redraws_match_full_redraw)                \
     X(app_hello_offers_tracking_and_the_question)    \
     X(app_question_by_command_reports_yes_no_and_timeout) \
     X(app_an_interrupted_question_is_never_an_answer) \
@@ -130,7 +134,8 @@ extern int g_test_failed;
     X(app_events_carry_identity_and_time)            \
     X(app_events_replay_after_a_reconnect)           \
     X(app_events_replay_reports_what_was_lost)       \
-    X(app_clock_faces_by_touch_and_command)
+    X(app_clock_faces_by_touch_and_command)          \
+    X(app_kitt_until_a_tap_a_mood_or_the_clock)
 
 #define X(name) void test_##name(void);
 TEST_LIST

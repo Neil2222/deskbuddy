@@ -25,6 +25,7 @@ typedef enum {
     BUDDY_STATE_CONFIRM,   // asks to confirm a ZDMW click ("ZE DOEN MAAR WAT?"), waits for buddy_brain_answer
     BUDDY_STATE_ZDMW,      // PDC Manager confirmed the click: exasperated, briefly
     BUDDY_STATE_FOCUS,     // deep in thought, building a plan... until someone asks "do you have 1 sec?"
+    BUDDY_STATE_KITT,      // turned into a Knight Rider scanner, until a tap or a mood brings him back (buddy_kitt.h)
 } buddy_state_t;
 
 typedef enum {
@@ -60,6 +61,7 @@ typedef enum {
     BUDDY_ANTENNA_EXCITED,
     BUDDY_ANTENNA_OVERLOAD, // rapid red/green/white strobe
     BUDDY_ANTENNA_DIM,      // a short faint blink now and then (sleepy)
+    BUDDY_ANTENNA_STEADY,   // lit red, without blinking (KITT)
     BUDDY_ANTENNA_COUNT,
 } buddy_antenna_t;
 
@@ -231,6 +233,13 @@ typedef struct {
     uint8_t drift;  // what is left of the plan floats about him: 0 not, 1.. each step a little further
 } buddy_thought_t;
 
+// KITT's scanner, drawn over the face screen (buddy_kitt.h draws it from these alone).
+typedef struct {
+    bool on;      // drawn at all
+    uint32_t t;   // ms since he began turning into KITT
+    uint32_t out; // t at which he began turning back; 0: not (yet)
+} buddy_kitt_t;
+
 typedef struct {
     buddy_state_t state;
     buddy_eyes_t eyes;
@@ -247,6 +256,7 @@ typedef struct {
     buddy_tint_t tint;
     buddy_props_t props;
     buddy_thought_t thought;
+    buddy_kitt_t kitt;
 } buddy_pose_t;
 
 #ifdef __cplusplus

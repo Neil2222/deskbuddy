@@ -3,6 +3,8 @@
 #include <math.h>
 #include <string.h>
 
+#include "buddy_kitt.h"
+
 static void init_sprite(const buddy_view_t *v, gfx_sprite_t *sp, const gfx_image_t *image)
 {
     memset(sp, 0, sizeof(*sp));
@@ -107,6 +109,7 @@ bool buddy_view_init(buddy_view_t *v, gfx_scene_t *scene, gfx_rect_t stage, int 
     for (int i = 0; i < BUDDY_PARTICLES; i++) {
         init_sprite(v, &v->part[i], NULL);
     }
+    init_sprite(v, &v->kitt, NULL);
     const buddy_pose_t rest = {.eyes = BUDDY_EYES_OPEN, .mouth = BUDDY_MOUTH_NEUTRAL, .antenna = BUDDY_ANTENNA_CALM};
     buddy_view_apply(v, &rest, now_ms);
 
@@ -115,7 +118,8 @@ bool buddy_view_init(buddy_view_t *v, gfx_scene_t *scene, gfx_rect_t stage, int 
               gfx_scene_add(scene, &v->antenna, z + 1) &&
               gfx_scene_add(scene, &v->can, z + 1) && gfx_scene_add(scene, &v->port, z + 1) &&
               gfx_scene_add(scene, &v->eye[0], z + 2) && gfx_scene_add(scene, &v->eye[1], z + 2) &&
-              gfx_scene_add(scene, &v->mouth, z + 2) && gfx_scene_add(scene, &v->rig[0], z + 3) &&
+              gfx_scene_add(scene, &v->mouth, z + 2) && gfx_scene_add(scene, &v->kitt, z + 2) &&
+              gfx_scene_add(scene, &v->rig[0], z + 3) &&
               gfx_scene_add(scene, &v->rig[1], z + 3) && gfx_scene_add(scene, &v->battery, z + 3) &&
               gfx_scene_add(scene, &v->alert, z + 3);
     for (int i = 0; ok && i < BUDDY_MAX_BOLTS; i++) {
@@ -550,6 +554,35 @@ static void apply_props(buddy_view_t *v, const buddy_props_t *pr, int bx, int by
     apply_particles(v, pr, bx, by, hx, hy);
 }
 
+// KITT's scanner over the face screen, at half his art pixels where the scale is even (finer), else at his art
+// pixels. Only at his place on the stage: a camera (Clock Mode's zoom, a close-up) shows his own face.
+static void apply_kitt(buddy_view_t *v, const buddy_kitt_t *k, int head_dx, int head_dy)
+{
+    gfx_sprite_t *sp = &v->kitt;
+    const gfx_rect_t face = v->art->face;
+    const int f = v->scale % 2 == 0 ? 2 : 1, w = face.w * f, h = face.h * f;
+    uint8_t *work = v->rig_px.work; // free again: the rig was committed above
+    if (!k->on || v->scale != v->home_scale || v->x0 != v->home_x0 || v->y0 != v->home_y0 ||
+        (size_t)w * h > sizeof(v->rig_px.work)) {
+        hide(sp);
+        return;
+    }
+    buddy_kitt_draw(k, work, w, h);
+    const gfx_image_t *img = sp->image;
+    const bool same = !(sp->flags & GFX_SPRITE_HIDDEN) && (img == &v->kitt_img[0] || img == &v->kitt_img[1]) &&
+                      img->w == w && img->h == h && memcmp(img->px, work, (size_t)w * h) == 0;
+    if (!same) {
+        // Never rewrite the image the screen was last drawn from: its pointer is how the scene notices a change.
+        const int next = sp->shown.image == &v->kitt_img[0] ? 1 : 0;
+        memcpy(v->rig_px.part[0].px[next], work, (size_t)w * h);
+        v->kitt_img[next] = (gfx_image_t){(uint16_t)w, (uint16_t)h, v->rig_px.part[0].px[next]};
+        show(sp, &v->kitt_img[next]);
+    }
+    sp->palette = buddy_kitt_palette();
+    sp->scale = (uint8_t)(v->scale / f);
+    put(v, sp, face.x, face.y, head_dx, head_dy);
+}
+
 static void set_camera(buddy_view_t *v, int scale, int x0, int y0);
 
 // The close-up: the camera pushes in on his face, `amount` (1..255) of the way from his place to his head filling
@@ -612,6 +645,7 @@ uint32_t buddy_view_apply(buddy_view_t *v, const buddy_pose_t *pose, uint32_t no
     place(v, &v->mouth, a->mouth_at, head_dx, head_dy);
     place(v, &v->shadow, a->shadow_at, 0, 0);
     apply_props(v, &pose->props, shake, -lift, shake + wobble, nod - lift - pop);
+    apply_kitt(v, &pose->kitt, head_dx, head_dy);
     return next;
 }
 
@@ -620,7 +654,7 @@ void buddy_view_hide(buddy_view_t *v)
     gfx_sprite_t *all[] = {&v->shadow, &v->torso, &v->head, &v->antenna, &v->eye[0], &v->eye[1], &v->mouth,
                            &v->can_shadow, &v->can, &v->port, &v->rig[0], &v->rig[1], &v->battery, &v->alert,
                            &v->bolt[0], &v->bolt[1], &v->bolt[2], &v->bolt[3], &v->fx[0], &v->fx[1],
-                           &v->part[0], &v->part[1], &v->part[2], &v->part[3], &v->part[4]};
+                           &v->part[0], &v->part[1], &v->part[2], &v->part[3], &v->part[4], &v->kitt};
     _Static_assert(BUDDY_MAX_BOLTS == 4 && BUDDY_FX_COUNT == 2 && BUDDY_PARTICLES == 5,
                    "list every bolt, effect and particle sprite above");
     for (unsigned i = 0; i < sizeof(all) / sizeof(all[0]); i++) {

@@ -163,7 +163,7 @@ void test_menu_navigates_and_goes_back(void)
     CHECK_EQ(m.category, MENU_MOODS);
     int pages;
     const menu_item_t *items[MENU_SLOTS];
-    CHECK_EQ(menu_page_items(&m, &k_idle, items, &pages), BUDDY_MOOD_COUNT); // all seven on one page
+    CHECK_EQ(menu_page_items(&m, &k_idle, items, &pages), BUDDY_MOOD_COUNT + 1); // all seven and KITT, one page
     CHECK_EQ(pages, 1);
 
     // Back, from anywhere in the header's left corner.

@@ -13,6 +13,7 @@
 #include "app_link.h"
 #include "app_port.h"
 #include "buddy_activity.h"
+#include "buddy_kitt.h"
 #include "buddy_view.h"
 #include "layout.h"
 #include "menu.h"
@@ -216,7 +217,7 @@ void test_app_hello_offers_tracking_and_the_question(void)
     clear_out();
     command(1, "hello");
     CHECK(sent("caps=poke,monster,mode,time,status,msg,mood,act,pdc,track,did,log,face "));
-    CHECK(sent("acts=water,sneeze,stare,meditate,focus,ask_peukie faces=classic,skeleton dev="));
+    CHECK(sent("acts=water,sneeze,stare,meditate,focus,ask_peukie,kitt faces=classic,skeleton dev="));
     clear_out();
     command(2, "status");
     CHECK(sent(" act=none"));
@@ -553,6 +554,57 @@ void test_app_clock_faces_by_touch_and_command(void)
     CHECK(sent(" mode=normal mood=happy "));
     CHECK(sent(" face=skeleton #"));
     command(80, "mood.set name=idle");
+    tap_back(); // Home, for whatever runs next
+    run(600);
+}
+
+// KITT, from the Moods page's eighth button: he stays KITT (busy for other shows) until a tap on him turns him back
+// into his mood (done), a mood choice turns him back into that one (done), or Clock Mode cuts it (interrupted).
+void test_app_kitt_until_a_tap_a_mood_or_the_clock(void)
+{
+    CHECK(start());
+    command(90, "mood.set name=working");
+    run(100);
+    clear_out();
+    tap_slot(MENU_LIST, 0); // MOODS
+    run(600);
+    tap_slot(MENU_GRID, 7); // KITT
+    run(100);
+    CHECK(sent(" name=kitt state=shown src=touch"));
+    run(BUDDY_KITT_IN_MS + 60000); // a minute of sweeping: nothing ends it
+    CHECK(!sent("state=done"));
+    command(91, "act name=sneeze iid=91");
+    CHECK(sent("<DB1 91 err busy"));
+    command(92, "status");
+    CHECK(sent(" mood=working "));
+
+    const int bx = s_layout.stage.x + s_layout.stage.w / 2, by = s_layout.stage.y + s_layout.stage.h / 2;
+    touch(bx, by); // on him
+    run(BUDDY_KITT_OUT_MS + 200);
+    CHECK_EQ(count("state=done result=done"), 1);
+    command(93, "status");
+    CHECK(sent(" mode=normal mood=working "));
+
+    clear_out();
+    command(94, "act name=kitt iid=94");
+    run(BUDDY_KITT_IN_MS + 1000);
+    command(95, "mood.set name=happy");
+    run(BUDDY_KITT_OUT_MS + 200);
+    CHECK(sent("evt mood mood=happy src=cmd"));
+    CHECK_EQ(count("evt act iid=94 state=done result=done"), 1);
+
+    clear_out();
+    command(96, "act name=kitt iid=96");
+    run(BUDDY_KITT_IN_MS + 1000);
+    command(97, "mode.set mode=clock");
+    run(4000);
+    CHECK(sent("evt mode mode=office"));
+    command(98, "mode.set mode=normal");
+    run(4000);
+    CHECK_EQ(count("evt act iid=96 state=done result=interrupted"), 1);
+    command(99, "status");
+    CHECK(sent(" mode=normal mood=happy "));
+    command(100, "mood.set name=idle");
     tap_back(); // Home, for whatever runs next
     run(600);
 }

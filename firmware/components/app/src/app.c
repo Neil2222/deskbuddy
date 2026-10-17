@@ -203,7 +203,8 @@ static menu_status_t menu_status(buddy_brain_t *brain, bool has_office, uint32_t
     }
     return (menu_status_t){buddy_brain_mood(brain, now), brain->state == BUDDY_STATE_MONSTER, busy,
                            busy ? buddy_activity_doing(brain->state) : NULL, has_office, pdc_available(&s_pdc, now),
-                           pdc_ready(&s_pdc, now), s_pdc.count, faces, (uint8_t)s_faces.face};
+                           pdc_ready(&s_pdc, now), s_pdc.count, faces, (uint8_t)s_faces.face,
+                           brain->state == BUDDY_STATE_KITT};
 }
 
 // ---- Interactions: the activities the companion hears about (evt act), started by `act` or on the touchscreen ----
@@ -857,9 +858,15 @@ void app_event(const app_event_t *ev)
             return;
         }
     }
-    if (ev->type == APP_TOUCH_DOWN && buddy_view_hit(&s.view, ev->x, ev->y) &&
-        buddy_brain_event(&s.brain, BUDDY_EVENT_POKE, t) && !s.pending_touch_us) {
-        s.pending_touch_us = ev->at_us;
+    // A touch-down on the robot pokes him; KITT, fully turned, turns back instead.
+    if (ev->type == APP_TOUCH_DOWN && buddy_view_hit(&s.view, ev->x, ev->y)) {
+        const bool kitt = buddy_brain_kitt_leave(&s.brain, t);
+        if (kitt) {
+            APP_LOGI(TAG, "KITT: turning back (touch)");
+        }
+        if ((kitt || buddy_brain_event(&s.brain, BUDDY_EVENT_POKE, t)) && !s.pending_touch_us) {
+            s.pending_touch_us = ev->at_us;
+        }
     }
 }
 

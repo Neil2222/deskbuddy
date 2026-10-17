@@ -16,6 +16,7 @@
 #include "buddy_activity.h"
 #include "buddy_brain.h"
 #include "buddy_monster.h"
+#include "buddy_kitt.h"
 #include "buddy_view.h"
 #include "layout.h"
 #include "marquee.h"
@@ -543,6 +544,96 @@ static bool skeleton_screens(office_faces_t *faces, marquee_t *marquee)
     return shot("skeleton_zoom_arrived");
 }
 
+// KITT: the turn in, one round trip of the sweep and the turn back, as stage tiles (kitt_sheet.png) and as his head
+// at full size (kitt_face_sheet.png); full screens at key moments, and the Moods page while he is KITT.
+enum { KITT_COLS = 16, KITT_ROWS = 3, KITT_HEAD_X = 216, KITT_HEAD_Y = 188, KITT_HEAD_W = 240, KITT_HEAD_H = 152 };
+static gfx_color_t s_kitt_face_sheet[KITT_COLS * KITT_HEAD_W * KITT_ROWS * KITT_HEAD_H];
+
+// The phase's frame `col` of KITT_COLS: row 0 the turn in, row 1 a round trip, row 2 the turn back.
+static void kitt_pose_at(int row, int col, buddy_pose_t *pose, uint32_t *t)
+{
+    const uint32_t out = BUDDY_KITT_IN_MS + 10u * BUDDY_KITT_SWEEP_MS;
+    *t = row == 0   ? BUDDY_KITT_IN_MS * (uint32_t)col / (KITT_COLS - 1)
+         : row == 1 ? BUDDY_KITT_IN_MS + BUDDY_KITT_SWEEP_MS * (uint32_t)col / KITT_COLS
+                    : out + BUDDY_KITT_OUT_MS * (uint32_t)col / (KITT_COLS - 1);
+    buddy_kitt_pose(*t, row == 2 ? out : 0, pose);
+}
+
+static const menu_status_t k_kitt_status = {.mood = BUDDY_MOOD_IDLE, .busy = true, .doing = "scanning",
+                                            .office = true, .kitt = true};
+
+static bool kitt_screens(const menu_status_t *idle)
+{
+    const menu_status_t kitt = k_kitt_status;
+    const int act_w = KITT_COLS * TILE_W, face_w = KITT_COLS * KITT_HEAD_W;
+    const gfx_surface_t dst = {s_px, W, H, W};
+    for (int row = 0; row < KITT_ROWS; row++) {
+        for (int col = 0; col < KITT_COLS; col++) {
+            buddy_pose_t pose;
+            uint32_t t;
+            kitt_pose_at(row, col, &pose, &t);
+            buddy_view_apply(&s_view, &pose, t);
+            gfx_scene_render(&s_scene, &s_all, &dst);
+            tile(s_act_sheet, act_w, col, row);
+            for (int y = 0; y < KITT_HEAD_H; y++) {
+                for (int x = 0; x < KITT_HEAD_W; x++) {
+                    const bool border = x == 0 || y == 0;
+                    s_kitt_face_sheet[(size_t)(row * KITT_HEAD_H + y) * face_w + col * KITT_HEAD_W + x] =
+                        border ? GFX_RGB(255, 255, 255) : s_px[(size_t)(KITT_HEAD_Y + y) * W + KITT_HEAD_X + x];
+                }
+            }
+        }
+    }
+    const gfx_surface_t sheet = {s_act_sheet, act_w, KITT_ROWS * TILE_H, act_w};
+    const gfx_surface_t faces = {s_kitt_face_sheet, face_w, KITT_ROWS * KITT_HEAD_H, face_w};
+    if (!write("kitt_sheet", &sheet) || !write("kitt_face_sheet", &faces)) {
+        return false;
+    }
+
+    static const struct {
+        uint32_t t;
+        bool out;
+        const char *name;
+    } k_keys[] = {
+        {300, false, "kitt_in_0300"},  {950, false, "kitt_in_0950"},  {1450, false, "kitt_in_1450"},
+        {1800, false, "kitt_in_1800"}, {2000, false, "kitt_scan_middle"},
+        {2000 + 400, false, "kitt_scan_right"}, {2000 + 1200, false, "kitt_scan_left"},
+        {400, true, "kitt_out_0400"},  {1000, true, "kitt_out_1000"}, {1600, true, "kitt_out_1600"},
+    };
+    const uint32_t out = BUDDY_KITT_IN_MS + 10u * BUDDY_KITT_SWEEP_MS;
+    menu_view_apply(&s_menu_view, &s_menu, &kitt, 60000);
+    for (unsigned i = 0; i < sizeof(k_keys) / sizeof(k_keys[0]); i++) {
+        buddy_pose_t pose;
+        const uint32_t t = k_keys[i].out ? out + k_keys[i].t : k_keys[i].t;
+        buddy_kitt_pose(t, k_keys[i].out ? out : 0, &pose);
+        buddy_view_apply(&s_view, &pose, t);
+        if (!shot(k_keys[i].name)) {
+            return false;
+        }
+    }
+    menu_view_apply(&s_menu_view, &s_menu, idle, 60000);
+    const buddy_pose_t rest = {.eyes = BUDDY_EYES_OPEN};
+    buddy_view_apply(&s_view, &rest, 0);
+    return true;
+}
+
+// The Moods page while he is KITT (its button marked), after everything else: opening the page moves the menu on.
+static bool kitt_menu_screen(office_faces_t *faces)
+{
+    office_faces_show(faces, false);
+    s_scene.background = layout_background;
+    s_scene.background_ctx = &s_layout;
+    buddy_view_camera_home(&s_view);
+    menu_view_show(&s_menu_view, true);
+    const uint32_t t0 = 10000000, out = BUDDY_KITT_IN_MS + 10u * BUDDY_KITT_SWEEP_MS;
+    buddy_pose_t pose;
+    buddy_kitt_pose(out - 300, 0, &pose);
+    buddy_view_apply(&s_view, &pose, out - 300);
+    menu_open(&s_menu, MENU_MOODS, t0);
+    menu_view_apply(&s_menu_view, &s_menu, &k_kitt_status, t0 + 2000);
+    return shot("kitt_menu_moods");
+}
+
 int main(int argc, char **argv)
 {
     s_dir = argc > 1 ? argv[1] : ".";
@@ -753,6 +844,10 @@ int main(int argc, char **argv)
     const buddy_pose_t rest = {.eyes = BUDDY_EYES_OPEN};
     buddy_view_apply(&s_view, &rest, 0);
 
+    if (!kitt_screens(&idle)) {
+        return 1;
+    }
+
     if (!menu_screens()) {
         return 1;
     }
@@ -791,5 +886,5 @@ int main(int argc, char **argv)
         return 1;
     }
     office_faces_apply(&faces, &tm, 100);
-    return zoom_screens(&faces) && skeleton_screens(&faces, &marquee) ? 0 : 1;
+    return zoom_screens(&faces) && skeleton_screens(&faces, &marquee) && kitt_menu_screen(&faces) ? 0 : 1;
 }

@@ -179,15 +179,20 @@ static void draw_title(menu_view_t *v, const char *title)
     redrawn(v, &v->title);
 }
 
+// The header's face: his mood's, or (face_id BUDDY_MOOD_COUNT) charging, or (BUDDY_MOOD_COUNT + 1) KITT's scanner.
 static void draw_face(menu_view_t *v, int face_id)
 {
     const buddy_face_t face = face_id == BUDDY_MOOD_COUNT
                                   ? (buddy_face_t){BUDDY_EYES_BOLT, BUDDY_MOUTH_GRIN, true, false} // charging
-                                  : buddy_mood_face((buddy_mood_t)face_id);
+                                  : buddy_mood_face((buddy_mood_t)(face_id % BUDDY_MOOD_COUNT));
     for (int blink = 0; blink < 2; blink++) {
         menu_canvas_t c = {v->face_px[blink], MENU_FACE_W, MENU_FACE_H};
         menu_art_clear(&c);
-        menu_art_face(&c, face, blink, MENU_FACE_W / 2, MENU_FACE_H / 2);
+        if (face_id == BUDDY_MOOD_COUNT + 1) {
+            menu_art_icon(&c, MENU_ICON_KITT, 0, MENU_FACE_W / 2, MENU_FACE_H / 2); // KITT does not blink
+        } else {
+            menu_art_face(&c, face, blink, MENU_FACE_W / 2, MENU_FACE_H / 2);
+        }
     }
     redrawn(v, &v->face);
 }
@@ -408,7 +413,7 @@ uint32_t menu_view_apply(menu_view_t *v, const menu_t *m, const menu_status_t *s
         v->title_shown = m->category;
         draw_title(v, m->def->categories[m->category].title);
     }
-    const int face = st->monster ? BUDDY_MOOD_COUNT : (int)st->mood;
+    const int face = st->monster ? BUDDY_MOOD_COUNT : st->kitt ? BUDDY_MOOD_COUNT + 1 : (int)st->mood;
     if (face != v->face_shown) {
         v->face_shown = face;
         draw_face(v, face);

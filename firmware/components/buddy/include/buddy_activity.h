@@ -22,6 +22,8 @@
 //             above him, tongue out. "HEY! DO YOU HAVE 1 SEC?" from off-stage; he glares... POOF, the plan goes up
 //             in smoke. "NEVERMIND". Then he floats, blank, among the pieces: "WHAT WAS I DOING?" (pose.thought;
 //             menu_thought.h draws it). About 9 s
+//   kitt      turns into a Knight Rider scanner and stays one until a tap on him or a mood choice turns him back
+//             (buddy_kitt.h): no fixed length (buddy_activity_ms is 0; buddy_brain.c plays it)
 //
 // Pure logic: no rendering, no clock of its own. Adding one: a buddy_state_t, a buddy_event_t, its length and pose
 // function here, and an item in the touchscreen menu (menu_items.c).
@@ -60,7 +62,8 @@ typedef enum {
 
 const char *buddy_say_text(buddy_say_t say);
 
-// How long the activity played in `state` lasts (the Monster sequence included); 0 for a state that is not one.
+// How long the activity played in `state` lasts (the Monster sequence included); 0 for a state that is not one, and
+// for KITT (it lasts until he is turned back).
 uint32_t buddy_activity_ms(buddy_state_t state);
 
 // Writes the pose t ms into the activity (t < buddy_activity_ms(state)) over the zeroed *pose (its state set).
@@ -73,7 +76,7 @@ const char *buddy_activity_doing(buddy_state_t state);
 // The activities by the names the protocol uses (act name=, hello acts=, evt act name=), in display order: the shows
 // and "ask_peukie" (the question). The Monster sequence and the tap reaction have their own commands (monster, poke)
 // and are not listed.
-#define BUDDY_ACTS 6
+#define BUDDY_ACTS 7
 const char *buddy_act_name(int i);                       // i < BUDDY_ACTS
 bool buddy_act_parse(const char *name, buddy_event_t *out); // false (and *out untouched) for an unknown name
 const char *buddy_act_event_name(buddy_event_t ev);      // the name of an event that is one of them; NULL otherwise

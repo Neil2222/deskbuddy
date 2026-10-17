@@ -37,6 +37,7 @@ typedef enum {
     BUDDY_EVENT_ASK_ZDMW = 8,      // "ZE DOEN MAAR WAT?": confirm a ZDMW click; buddy_brain_answer() ends it
     BUDDY_EVENT_ZDMW = 9,          // PDC Manager confirmed the click: his reaction
     BUDDY_EVENT_FOCUS = 10,
+    BUDDY_EVENT_KITT = 11,         // turns into KITT until buddy_brain_kitt_leave() or a mood change (buddy_kitt.h)
 } buddy_event_t;
 
 // How the last "PEUKIE ROKEN?" ended. NO and TIMEOUT look the same on screen (he is sad either way), but they are
@@ -60,6 +61,7 @@ typedef struct {
     buddy_mood_t mood_back; // ...and the mood that follows it (idle, or what he was in before a smoke break)
     uint32_t cycle_start, cycle_len, cycle_n, cycle_seed; // where the mood's loop is
     buddy_answer_t answer; // how the last peukie question ended
+    uint32_t kitt_out;     // KITT: ms after its start at which he turns back; 0: he stays KITT
 } buddy_brain_t;
 
 void buddy_brain_init(buddy_brain_t *b, uint32_t now_ms, uint32_t seed);
@@ -69,8 +71,12 @@ void buddy_brain_init(buddy_brain_t *b, uint32_t now_ms, uint32_t seed);
 // Unknown events are ignored.
 bool buddy_brain_event(buddy_brain_t *b, buddy_event_t ev, uint32_t now_ms);
 
-// True while an activity plays (events are ignored then).
+// True while an activity plays (events are ignored then). KITT counts as one for as long as he is KITT.
 bool buddy_brain_busy(const buddy_brain_t *b, uint32_t now_ms);
+
+// A tap on him while he is KITT: once fully turned (the scanner sweeping), he turns back, and his mood carries on.
+// Returns false (nothing happens) otherwise, so the caller can treat the tap as usual.
+bool buddy_brain_kitt_leave(buddy_brain_t *b, uint32_t now_ms);
 
 // While he asks (BUDDY_STATE_ASK or BUDDY_STATE_CONFIRM): ms until he gives up waiting (as if the answer were no);
 // 0 when not asking. The question's full length is buddy_activity_ms(b->state).
@@ -87,7 +93,8 @@ void buddy_brain_rest(buddy_brain_t *b, uint32_t now_ms);
 
 // Sets the mood. duration_ms > 0: back to idle after that long; 0: until changed. Choosing a different mood
 // starts its animation from the beginning; choosing the current one only changes its duration. A reaction that is
-// playing finishes first (the new mood shows right after it).
+// playing finishes first (the new mood shows right after it); KITT turns back first (any mood choice ends it, once
+// he has finished turning into it).
 void buddy_brain_set_mood(buddy_brain_t *b, buddy_mood_t mood, uint32_t duration_ms, uint32_t now_ms);
 
 // The current mood at now_ms (a timed mood that has run out is idle again).

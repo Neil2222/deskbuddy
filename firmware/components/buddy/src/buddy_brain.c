@@ -1,6 +1,7 @@
 #include "buddy_brain.h"
 
 #include "buddy_activity.h"
+#include "buddy_kitt.h"
 #include "buddy_motion.h"
 
 static const struct {
@@ -14,6 +15,9 @@ static const struct {
 #define BLINK_MS 180u
 #define HAPPY_MS ((uint32_t)BUDDY_HAPPY_HOPS * BUDDY_HAPPY_HOP_MS)
 #define SURPRISE_HEIGHT 3u
+// KITT may sweep for days: its clock is kept within this many ms past the turn (whole sweeps, so nothing jumps), so
+// the time since its start never wraps around and replays the turn.
+#define KITT_SPAN_MS (BUDDY_KITT_SWEEP_MS * 1125u) // 30 minutes
 
 static uint32_t rng_next(buddy_brain_t *b)
 {
@@ -57,12 +61,36 @@ static void enter(buddy_brain_t *b, buddy_state_t state, uint32_t now_ms)
 {
     b->state = state;
     b->state_start = now_ms;
+    b->kitt_out = 0;
 }
 
 bool buddy_brain_busy(const buddy_brain_t *b, uint32_t now_ms)
 {
+    if (b->state == BUDDY_STATE_KITT) {
+        return true; // until he has turned back
+    }
     const uint32_t ms = buddy_activity_ms(b->state);
     return ms && now_ms - b->state_start < ms;
+}
+
+// KITT: he starts turning back at now_ms, or right after he has finished turning into KITT (defer); false when he
+// is not KITT, already turning back, or still turning into it (and not defer).
+static bool kitt_leave(buddy_brain_t *b, uint32_t now_ms, bool defer)
+{
+    if (b->state != BUDDY_STATE_KITT || b->kitt_out) {
+        return false;
+    }
+    const uint32_t t = now_ms - b->state_start;
+    if (t < BUDDY_KITT_IN_MS && !defer) {
+        return false;
+    }
+    b->kitt_out = t < BUDDY_KITT_IN_MS ? BUDDY_KITT_IN_MS : t;
+    return true;
+}
+
+bool buddy_brain_kitt_leave(buddy_brain_t *b, uint32_t now_ms)
+{
+    return kitt_leave(b, now_ms, false);
 }
 
 bool buddy_brain_event(buddy_brain_t *b, buddy_event_t ev, uint32_t now_ms)
@@ -102,6 +130,9 @@ bool buddy_brain_event(buddy_brain_t *b, buddy_event_t ev, uint32_t now_ms)
     case BUDDY_EVENT_FOCUS:
         enter(b, BUDDY_STATE_FOCUS, now_ms);
         return true;
+    case BUDDY_EVENT_KITT:
+        enter(b, BUDDY_STATE_KITT, now_ms);
+        return true;
     default:
         return false;
     }
@@ -125,6 +156,7 @@ void buddy_brain_set_mood(buddy_brain_t *b, buddy_mood_t mood, uint32_t duration
     if (mood >= BUDDY_MOOD_COUNT) {
         return;
     }
+    kitt_leave(b, now_ms, true); // he turns back into himself, then the mood shows
     if (mood != buddy_brain_mood(b, now_ms)) {
         b->mood = mood;
         b->mood_start = now_ms;
@@ -207,6 +239,17 @@ static uint32_t mood_tick(buddy_brain_t *b, uint32_t now_ms, buddy_pose_t *pose)
 uint32_t buddy_brain_tick(buddy_brain_t *b, uint32_t now_ms, buddy_pose_t *pose)
 {
     uint32_t t = now_ms - b->state_start;
+    if (b->state == BUDDY_STATE_KITT && !b->kitt_out && t >= BUDDY_KITT_IN_MS + KITT_SPAN_MS) {
+        const uint32_t skip = (t - BUDDY_KITT_IN_MS) / KITT_SPAN_MS * KITT_SPAN_MS;
+        b->state_start += skip;
+        t -= skip;
+    }
+    if (b->state == BUDDY_STATE_KITT && b->kitt_out && t >= b->kitt_out + BUDDY_KITT_OUT_MS) { // he is himself again
+        const uint32_t ms = b->kitt_out + BUDDY_KITT_OUT_MS;
+        enter(b, BUDDY_STATE_IDLE, b->state_start + ms);
+        t -= ms;
+        resume_mood(b, now_ms);
+    }
     if (b->state == BUDDY_STATE_SURPRISED && t >= BUDDY_SURPRISE_MS) {
         b->state = BUDDY_STATE_HAPPY;
         b->state_start += BUDDY_SURPRISE_MS;
@@ -245,6 +288,8 @@ uint32_t buddy_brain_tick(buddy_brain_t *b, uint32_t now_ms, buddy_pose_t *pose)
 
     case BUDDY_STATE_IDLE:
         break;
+    case BUDDY_STATE_KITT:
+        return buddy_kitt_pose(t, b->kitt_out, pose);
     default: // an activity
         return buddy_activity_pose(b->state, t, pose);
     }
