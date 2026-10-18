@@ -17,9 +17,15 @@ public sealed record BoardProfile(
     string FlashFreq,
     IReadOnlyList<ImageSlot> Images,
     IReadOnlyList<Partition> Partitions,
-    IReadOnlyList<Partition> Preserved)
+    IReadOnlyList<Partition> Preserved,
+    string DisplayName,
+    string EsptoolChipPrefix,
+    string PsramFeature,
+    string CrystalMHz)
 {
     public const uint SectorSize = 0x1000;
+    /// <summary>The whole flash, for a full backup.</summary>
+    public uint FlashBytes => uint.Parse(FlashSize.TrimEnd('M', 'B'), System.Globalization.CultureInfo.InvariantCulture) * 1024 * 1024;
 
     /// <summary>
     /// The Waveshare ESP32-S3-Touch-LCD-7B (docs/hardware.md) with firmware/deskbuddy/partitions.csv. The factory
@@ -28,6 +34,10 @@ public sealed record BoardProfile(
     public static BoardProfile WaveshareS3Lcd7B { get; } = new(
         Board: "waveshare-esp32-s3-touch-lcd-7b",
         Chip: "esp32s3",
+        DisplayName: "Waveshare ESP32-S3-Touch-LCD-7B (7-inch, 1024×600)",
+        EsptoolChipPrefix: "ESP32-S3 ",
+        PsramFeature: "Embedded PSRAM 8MB",
+        CrystalMHz: "40",
         ChipId: EspImage.ChipIdEsp32S3,
         FlashSize: "16MB",
         FlashMode: "dio",

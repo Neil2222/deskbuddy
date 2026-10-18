@@ -224,6 +224,15 @@ public sealed partial class MainForm
             }
             return;
         }
+        if (_firmware.Running && e.CloseReason == CloseReason.UserClosing)
+        {
+            // Quitting now would stop the flashing tool halfway (its process tree ends with the Companion).
+            e.Cancel = true;
+            _quitting = false;
+            MessageBox.Show(this, "DeskBuddy's firmware is being installed. Wait until it has finished, or cancel it on the Device page first.",
+                "DeskBuddy", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
         base.OnFormClosing(e);
     }
 

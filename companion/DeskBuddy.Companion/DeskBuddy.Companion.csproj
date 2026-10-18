@@ -36,4 +36,21 @@
     <EmbeddedResource Include="Pdc\PDCManager.cer" LogicalName="DeskBuddy.Pdc.PDCManager.cer" />
   </ItemGroup>
 
+  <!-- The Firmware Manager's flashing tool: esptool v4.12.0, fetched and checked by tools/fetch-esptool.ps1 (not in
+       Git; licence and sources in companion/third_party/esptool). Without it the Companion builds, and the Firmware
+       Manager says the tool is missing. -->
+  <ItemGroup Condition="Exists('..\third_party\esptool\esptool.exe')">
+    <EmbeddedResource Include="..\third_party\esptool\esptool.exe" LogicalName="DeskBuddy.Tools.esptool.exe" />
+  </ItemGroup>
+
+  <!-- Public keys firmware packages may be signed with (Firmware/TrustedKeys/README.md). A private key there fails the build. -->
+  <ItemGroup>
+    <TrustedFirmwareKey Include="Firmware\TrustedKeys\*.pem" />
+    <EmbeddedResource Include="@(TrustedFirmwareKey)" LogicalName="DeskBuddy.Firmware.TrustedKeys.%(Filename)%(Extension)" />
+  </ItemGroup>
+  <Target Name="RefusePrivateFirmwareKeys" BeforeTargets="BeforeBuild" Condition="'@(TrustedFirmwareKey)' != ''">
+    <Error Condition="'%(TrustedFirmwareKey.FullPath)' != '' And $([System.IO.File]::ReadAllText('%(TrustedFirmwareKey.FullPath)').Contains('PRIVATE KEY'))"
+           Text="%(TrustedFirmwareKey.Identity) is a private key: only public keys may be built into the Companion." />
+  </Target>
+
 </Project>

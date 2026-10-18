@@ -14,6 +14,7 @@ public sealed class EspImage
     public const byte Magic = 0xE9;
     public const ushort ChipIdEsp32S3 = 9;
     private const uint AppDescMagic = 0xABCD5432;
+    private const byte BootloaderDescMagic = 0x50;
     private const int HeaderSize = 24;
     private const int SegmentHeaderSize = 8;
 
@@ -27,8 +28,11 @@ public sealed class EspImage
     public int SegmentCount { get; }
     /// <summary>The application description (null for a bootloader, which has none).</summary>
     public AppDescription? App { get; }
+    /// <summary>A bootloader's description (esp_bootloader_desc_t), when it has one.</summary>
+    public BootloaderDescription? Bootloader { get; }
 
-    private EspImage(byte mode, byte sizeFreq, ushort chip, int segments, AppDescription? app)
+    private EspImage(byte mode, byte sizeFreq, ushort chip, int segments, AppDescription? app,
+        BootloaderDescription? bootloader)
     {
         FlashMode = mode;
         FlashSizeCode = (byte)(sizeFreq >> 4);
@@ -36,6 +40,7 @@ public sealed class EspImage
         ChipId = chip;
         SegmentCount = segments;
         App = app;
+        Bootloader = bootloader;
     }
 
     public string FlashModeName => FlashMode switch { 0 => "qio", 1 => "qout", 2 => "dio", 3 => "dout", _ => "unknown" };
@@ -47,6 +52,20 @@ public sealed class EspImage
     /// application description (an app image), otherwise it must not (a bootloader).
     /// </summary>
     public static EspImage Parse(ReadOnlySpan<byte> data, bool expectApp)
+    {
+        var (image, length) = ParsePrefix(data, expectApp);
+        if (length != data.Length)
+        {
+            throw new FormatException($"{data.Length - length} unexpected bytes after the image");
+        }
+        return image;
+    }
+
+    /// <summary>
+    /// An image at the start of <paramref name="data"/> followed by anything (flash read back from a board: the rest
+    /// of its region), checked the same way; also returns the image's own length.
+    /// </summary>
+    public static (EspImage Image, int Length) ParsePrefix(ReadOnlySpan<byte> data, bool expectApp)
     {
         if (data.Length < HeaderSize + SegmentHeaderSize || data[0] != Magic)
         {
@@ -63,6 +82,7 @@ public sealed class EspImage
         var pos = HeaderSize;
         byte checksum = 0xEF;
         AppDescription? app = null;
+        BootloaderDescription? bootloader = null;
         for (var i = 0; i < segments; i++)
         {
             if (pos + SegmentHeaderSize > data.Length)
@@ -79,6 +99,10 @@ public sealed class EspImage
             if (i == 0 && segment.Length >= 256 && BinaryPrimitives.ReadUInt32LittleEndian(segment) == AppDescMagic)
             {
                 app = AppDescription.Parse(segment);
+            }
+            if (i == 0 && segment.Length >= 64 && segment[0] == BootloaderDescMagic)
+            {
+                bootloader = BootloaderDescription.Parse(segment);
             }
             foreach (var b in segment)
             {
@@ -104,15 +128,11 @@ public sealed class EspImage
             }
             pos += 32;
         }
-        if (pos != data.Length)
-        {
-            throw new FormatException($"{data.Length - pos} unexpected bytes after the image");
-        }
         if (expectApp != app is not null)
         {
             throw new FormatException(expectApp ? "no application description" : "unexpected application description");
         }
-        return new EspImage(data[2], data[3], chip, segments, app);
+        return (new EspImage(data[2], data[3], chip, segments, app, expectApp ? null : bootloader), pos);
     }
 }
 
@@ -126,5 +146,19 @@ public sealed record AppDescription(string Version, string ProjectName, string T
     {
         var end = field.IndexOf((byte)0);
         return Encoding.ASCII.GetString(end < 0 ? field : field[..end]);
+    }
+}
+
+/// <summary>esp_bootloader_desc_t: the ESP-IDF version a bootloader was built with, and (unless reproducible) when.</summary>
+public sealed record BootloaderDescription(string IdfVersion, string DateTime)
+{
+    internal static BootloaderDescription Parse(ReadOnlySpan<byte> d)
+    {
+        static string Text(ReadOnlySpan<byte> field)
+        {
+            var end = field.IndexOf((byte)0);
+            return Encoding.ASCII.GetString(end < 0 ? field : field[..end]);
+        }
+        return new(Text(d.Slice(8, 32)), Text(d.Slice(40, 24)));
     }
 }

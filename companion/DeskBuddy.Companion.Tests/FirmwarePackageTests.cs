@@ -174,7 +174,7 @@ public class FirmwarePackageTests
                 BoardProfile.WaveshareS3Lcd7B.Board, "esp32s3", "16MB", "dio", "80m", 1, FirmwareVersion.Parse("1.1.0"), "v5.5.5",
                 BoardProfile.WaveshareS3Lcd7B.Images.Select(s => new ManifestImage(s.Name, s.Offset, s.File,
                     images[s.File].Length, Convert.ToHexStringLower(SHA256.HashData(images[s.File])))).ToList(),
-                BoardProfile.WaveshareS3Lcd7B.Preserved);
+                BoardProfile.WaveshareS3Lcd7B.Preserved, []);
             Assert.Equal(PackageError.LayoutMismatch, Refused(Signed(manifest.ToJson(), images, Trusted.PrivatePem)));
         }
     }
@@ -258,7 +258,7 @@ public class FirmwarePackageTests
             "16MB", "dio", "80m", 1, FirmwareVersion.Parse("1.1.0"), "v5.5.5",
             profile.Images.Select(s => new ManifestImage(s.Name, s.Offset, s.File, images[s.File].Length,
                 Convert.ToHexStringLower(SHA256.HashData(images[s.File])))).ToList(),
-            profile.Preserved);
+            profile.Preserved, []);
         return Signed(manifest.ToJson(), images, Trusted.PrivatePem);
     }
 

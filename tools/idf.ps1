@@ -16,8 +16,17 @@ if ($needsPort -and -not $hasPort) {
     Write-Host "Using port $env:ESPPORT"
 }
 
-# While this mutex exists, the Windows companion lets go of the board's port and does not reconnect.
-$portHold = if ($needsPort) { New-Object System.Threading.Mutex($true, 'Local\DeskBuddy.PortHold') }
+# While this mutex exists, the Windows companion lets go of the board's port and does not reconnect. If it already
+# exists, another DeskBuddy tool (the Companion's Firmware Manager, a backup) has the port: refuse.
+$portHold = $null
+if ($needsPort) {
+    $created = $false
+    $portHold = New-Object System.Threading.Mutex($true, 'Local\DeskBuddy.PortHold', [ref] $created)
+    if (-not $created) {
+        $portHold.Dispose()
+        throw 'Another DeskBuddy tool (the Companion''s Firmware Manager, a flash backup) is using the board''s port.'
+    }
+}
 try {
     idf.py @args
 } finally {

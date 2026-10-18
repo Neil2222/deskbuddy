@@ -1,12 +1,14 @@
 # Firmware packages
 
 How DeskBuddy firmware is versioned, packaged and signed. The Companion will install a package only after
-checking it completely (`companion/DeskBuddy.Firmware`). This page covers the package format and how it is checked.
-The Firmware Manager that writes a package to a board over USB does not exist yet. Its flashing backend is
-`esptool` v4.12.0, recommended in the [comparison](#flashing-backend-decision) below and still waiting for approval.
+checking it completely (`companion/DeskBuddy.Firmware`). This page covers the package format, how it is checked, and
+how the Firmware Manager writes it to a board over USB ([Installing](#installing-the-firmware-manager)), with
+Espressif's esptool v4.12.0 ([decision](#flashing-backend-decision)).
 
-**Not yet physically validated:** installing on a factory-new board. Only one board exists, and it is the
-working DeskBuddy. Nothing in this page has been written to a board yet.
+**Not yet physically validated:** nothing on this page has been written to a board yet. Install, Update and
+Repair are tested against a simulated board and esptool only. Only one board exists, and it is the working DeskBuddy.
+First-time installation on a factory-new board is not physically validated, and no test may restore the factory
+firmware on the working board.
 
 ## Versions
 
@@ -99,6 +101,9 @@ A zip with exactly these files, and no folders:
   "preserve": [
     { "name": "nvs", "offset": "0x9000", "size": "0x6000" },
     { "name": "phy_init", "offset": "0xf000", "size": "0x1000" }
+  ],
+  "compatibleBootloaders": [
+    { "sha256": "…", "note": "deskbuddy_02c11c8_full_16MB.bin (ESP-IDF v5.5.5, built Oct 15 2026 19:58:21)" }
   ]
 }
 ```
@@ -160,8 +165,13 @@ the same module. This path is not physically validated: there is no factory-new 
 **Tests:** the automated tests make new key pairs at every run (`PackageSignature.CreateKeyPair`). No test key is
 stored in the repository.
 
-**There is no production key yet.** None has been created and the Companion trusts none, so it would refuse
-every package. When the Firmware Manager is released, the production process is as follows:
+**There is no production key yet.** None has been created, and `companion/DeskBuddy.Companion/Firmware/TrustedKeys`
+is empty, so this Companion refuses every package; the Firmware card says so. A key is trusted only by being built
+in. It is never trusted from a file next to the exe, from an environment variable, or because it signed the package
+being opened, and a newly generated key is never trusted automatically. The build fails if that folder holds a
+private key, and so does the Companion when it starts.
+
+Provisioning the production key, before the first real installation:
 
 1. **Create the key offline,** on a machine that is not used for daily work, or on a removable drive:
    ```
@@ -170,8 +180,9 @@ every package. When the Firmware Manager is released, the production process is 
    `openssl ecparam -name prime256v1 -genkey -noout | openssl pkcs8 -topk8 -nocrypt` makes the same kind of key.
 2. **Keep the private key out of Git.** `*.pem` is already ignored. Store it encrypted, with two offline copies
    (for example a password-manager attachment and an encrypted USB stick). Never put it in CI.
-3. **Commit only the public key,** to be embedded in the Companion as its trusted key. Name it after the key so a
-   second one can be added later.
+3. **Commit only the public key** as `companion/DeskBuddy.Companion/Firmware/TrustedKeys/deskbuddy-firmware-<year>.pub.pem`.
+   Record its SHA-256 fingerprint in this file. Rebuild and publish the Companion: from then on it trusts that key
+   and no other.
 4. **Sign each release offline:**
    ```
    tools\package-firmware.ps1                      # on the build machine: the unsigned package
@@ -197,10 +208,89 @@ every package. When the Firmware Manager is released, the production process is 
   - It would then run exactly the same `FirmwarePackage.Open` checks. The download location adds no trust; the
     signature is what counts.
 
+## Installing (the Firmware Manager)
+
+The Device page's **Firmware** card: *Open package…*, the board, what may be done, and the run with its progress and
+result. Nothing happens without a click and the confirmation dialog.
+
+| Operation | Writes | When |
+|---|---|---|
+| **Install** | bootloader 0x0, partition table 0x8000, app 0x10000 | a board where no DeskBuddy answers; the user confirms the exact model |
+| **Update** | the app at 0x10000 only | a connected DeskBuddy whose bootloader and partition table are verified compatible first (below) |
+| **Repair (full reinstall)** | all three again | any DeskBuddy, or a board an interrupted run left without one; the model is confirmed and *REPAIR* typed |
+
+**Compatibility for an app-only Update (`BootloaderCheck`).** A DeskBuddy that answers on the serial link only
+proves the app runs; it says nothing about the bootloader under it. Before an Update the Companion reads 0x0–0x8FFF
+back from the board (read-only). It goes on only if all of these hold:
+- the partition table sector holds exactly the package's partition table;
+- 0x0 holds a valid ESP image (checksum and SHA-256) for the ESP32-S3 with DIO / 80 MHz / 16 MB;
+- that image's SHA-256 is the package's own bootloader, or one the signed manifest lists in `compatibleBootloaders`.
+
+Anything else is refused, with nothing written, and Repair is offered. `tools\package-firmware.ps1
+-CompatibleBootloaderFrom <full backup>` lists a bootloader taken from a board's own backup. Every rollback image of
+the working board holds the same bootloader: SHA-256 `d5848346…208b`, ESP-IDF v5.5.5, built Oct 15 2026 19:58:21.
+The package's own bootloader differs only because reproducible builds drop the date.
+
+**A run, step by step (`FirmwareInstaller`).** Nothing is written before every check has passed.
+1. **Take the port:** the Companion closes its connection and holds `Local\DeskBuddy.PortHold`.
+   - The Firmware Manager refuses to start if another tool already holds it.
+   - `tools\idf.ps1` and `tools\flash-backup.ps1` now refuse when the Companion holds it.
+2. **Identify the board** (`flash_id`). Required: ESP32-S3, *Embedded PSRAM 8MB*, 40 MHz crystal, 16 MB flash.
+   - For an Update or Repair, the MAC must also be the connected DeskBuddy's `dev=`.
+   - This never proves the 7B: the user confirms the model unless DeskBuddy 1.0.0 or newer reported
+     `board=waveshare-esp32-s3-touch-lcd-7b hw=ok`.
+3. **Full backup** (16 MB `read_flash`, then `verify_flash` against the board, then SHA256SUMS.txt and board.txt).
+   - On by default for an existing DeskBuddy; optional for a new board.
+   - A failed backup stops the run, and the user decides explicitly.
+   - Saved in `Documents\DeskBuddy-backups\fw-<old>-before-<new>-<time>` (`<data dir>\firmware-backups` with
+     `DESKBUDDY_DATA_DIR`).
+4. **Update only: the bootloader check** above.
+5. **Write** (`write_flash --flash_mode keep --flash_freq keep --flash_size keep`, the regions above).
+   - The image files come from the verified package and are checked again on disk just before.
+   - esptool erases only the sectors each file covers, and checks each region's MD5.
+6. **Verify** (`verify_flash`), then a hard reset.
+7. **Reconnect:** within 45 s DeskBuddy must answer with the same device, exactly the package's version and build,
+   `board=` the 7B, a new boot, and `hw=ok`.
+
+**Every esptool run is checked as it goes.** The chip and MAC are printed right after connecting, before esptool
+loads its stub. A different chip or MAC stops the run there, so a board swapped mid-way is never written.
+- **Never used:** `erase_flash`, `erase_region`, `--erase-all` and any eFuse tool. The argument builder refuses them.
+- **Child process environment:** `ESPTOOL_*` variables are removed, and esptool runs in an empty folder of its own,
+  so no `esptool.cfg` can change what it does.
+- **Process tree:** esptool runs in a Windows job object, so cancelling (or the Companion exiting) ends the whole
+  PyInstaller process tree, and nothing keeps the COM port open. The window refuses to close while a run is in
+  progress.
+
+**Failures and recovery.** Each failure has its own message and what to do next:
+
+| Failure | Recovery |
+|---|---|
+| Port busy | close the other tool |
+| No serial data | the UART USB-C port, DIP switch #16 on the ESP32 side, another cable |
+| Not in download mode | manual mode: hold BOOT, tap RESET, release BOOT (the card asks before each step) |
+| Wrong chip, wrong MAC | connect only the board meant |
+| Backup failed | retry, or decide explicitly to go without one |
+| Bootloader not compatible | Repair |
+| Interrupted while writing | Repair; the ROM bootloader is never written, so this is always recoverable over the UART port |
+| Verify failed | run the same operation again |
+| No reconnect | press RESET, then Repair or restore the backup |
+| Wrong firmware after | Repair |
+| Hardware check failed | restore the backup |
+
+Cancelling before the write changes nothing; cancelling while writing asks first and then says a Repair is needed.
+
+**The flashing tool.** `esptool.exe` v4.12.0, Espressif's signed Windows build, pinned by SHA-256 (zip
+`42fddc5e…0889`, exe `1cd8386a…d1a3`).
+- `tools\fetch-esptool.ps1` downloads and checks it; it is embedded in the Companion.
+- The Companion writes it to `%LOCALAPPDATA%\DeskBuddy\Tools\esptool-4.12.0` and checks it against the pin before
+  every run. It holds the file open (no writers) while it is used.
+- Licence, notices and the complete corresponding sources travel with it as `third-party\esptool\`:
+  [companion/third_party/esptool/README.md](../companion/third_party/esptool/README.md).
+
 ## Flashing backend decision
 
-Comparison for this board's required operations, done 2026-10-18 from the release archives and source; no serial
-port was touched:
+**Decided (2026-10-18): esptool v4.12.0**, shipping only `esptool.exe`. The comparison below was made for this
+board's required operations, from the release archives and source; no serial port was touched.
 
 | | esptool v4.12.0 | esptool v5.6.0 | espflash v4.6.0 |
 |---|---|---|---|
@@ -212,6 +302,5 @@ port was touched:
 | Verification | MD5 after every write, `verify_flash` | same | MD5 on write, no separate verify |
 | Used on this board | every flash, backup and restore so far (through ESP-IDF 5.5.5) | never | never |
 
-**Recommendation:** esptool v4.12.0, shipping only `esptool.exe`. espflash has the simpler license, but it cannot
-identify the board's PSRAM and flash, and it cannot write the three regions in one session. Its reliability for the
-required operations is therefore not comparable. Implementation waits for approval.
+espflash has the simpler license, but it cannot identify the board's PSRAM and flash, and it cannot write the
+three regions in one session. Its reliability for the required operations is therefore not comparable.

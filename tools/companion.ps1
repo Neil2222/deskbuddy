@@ -21,12 +21,19 @@ if ($Publish) {
     if (Get-Process DeskBuddy.Companion -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $exe }) {
         throw "DeskBuddy Companion is running from ${out}: close it first."
     }
+    # The Firmware Manager's flashing tool is embedded in the exe; its licence and sources travel next to it.
+    & (Join-Path $PSScriptRoot 'fetch-esptool.ps1')
     # Single file with the runtime inside, compressed; English-only framework resources keep it smaller.
     dotnet publish $project -c Release -r win-x64 --self-contained true -o $out --nologo -v quiet `
         -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true `
         -p:DebugType=none -p:SatelliteResourceLanguages=en
     if ($LASTEXITCODE) { exit $LASTEXITCODE }
-    Write-Host ("Published: {0} ({1:N0} MB)" -f $exe, ((Get-Item $exe).Length / 1MB))
+    $thirdParty = Join-Path $out 'third-party\esptool'
+    New-Item -ItemType Directory -Force $thirdParty | Out-Null
+    $src = Join-Path $root 'third_party\esptool'
+    Copy-Item (Join-Path $src 'LICENSE'), (Join-Path $src 'README.md'), (Join-Path $src '*.tar.gz') $thirdParty -Force
+    Copy-Item (Join-Path $src 'licenses') $thirdParty -Recurse -Force
+    Write-Host ("Published: {0} ({1:N0} MB), with third-party\esptool (licence and sources)" -f $exe, ((Get-Item $exe).Length / 1MB))
     exit 0
 }
 dotnet build $project -c Release --nologo -v quiet

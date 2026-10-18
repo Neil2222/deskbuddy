@@ -4,6 +4,9 @@
 #   tools/package-firmware.ps1                                # unsigned package in dist\firmware
 #   tools/package-firmware.ps1 -Key <private key PEM>         # signed (and read back with that key)
 #   tools/package-firmware.ps1 -CheckReproducible             # builds twice in two directories, compares the images
+#   tools/package-firmware.ps1 -CompatibleBootloaderFrom <full flash backup or bootloader.bin>, ...
+#                                                             # bootloaders on boards in the field an app-only Update may
+#                                                             # keep (listed in the signed manifest; see BootloaderCheck)
 #
 # Refuses a working tree with uncommitted changes: a package is always one exact commit. The build uses its own
 # sdkconfig, made fresh from sdkconfig.defaults, so local menuconfig changes never reach a package.
@@ -11,7 +14,8 @@ param(
     [string] $Key,
     [string] $OutDir = (Join-Path $PSScriptRoot '..\dist\firmware'),
     [string] $MinCompanion = '1.1.0', # the first Companion with the Firmware Manager
-    [switch] $CheckReproducible
+    [switch] $CheckReproducible,
+    [string[]] $CompatibleBootloaderFrom = @()
 )
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'common.ps1')
@@ -65,7 +69,8 @@ dotnet build $toolProject -c Release --nologo -v quiet | Out-Host
 if ($LASTEXITCODE) { throw 'building the packaging tool failed' }
 $tool = Join-Path $root 'companion\DeskBuddy.FirmwareTool\bin\Release\net10.0\deskbuddy-firmware-tool.exe'
 
-$packOutput = & $tool pack --build $build --commit $commit --protocol $protocol --min-companion $MinCompanion --out $OutDir
+$compatible = foreach ($f in $CompatibleBootloaderFrom) { '--compatible-bootloader-from'; [IO.Path]::GetFullPath($f) }
+$packOutput = & $tool pack --build $build --commit $commit --protocol $protocol --min-companion $MinCompanion --out $OutDir @compatible
 $packOutput | Out-Host
 if ($LASTEXITCODE) { exit $LASTEXITCODE }
 $package = ($packOutput | Select-Object -First 1) -replace '^packed \(unsigned\): ', ''

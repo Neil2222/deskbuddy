@@ -39,8 +39,10 @@ public static class PackageBuilder
         return profile.Images.ToDictionary(s => s.File, s => File.ReadAllBytes(Path.Combine(buildDir, byOffset[s.Offset])));
     }
 
+    /// <param name="compatibleBootloaders">Bootloaders already on boards that this app may keep (an app-only update),
+    /// besides the package's own: see <see cref="BootloaderCheck"/>.</param>
     public static FirmwareManifest CreateManifest(BoardProfile profile, IReadOnlyDictionary<string, byte[]> images,
-        string build, int protocol, FirmwareVersion minCompanion)
+        string build, int protocol, FirmwareVersion minCompanion, IReadOnlyList<KnownBootloader>? compatibleBootloaders = null)
     {
         var appSlot = profile.Images.Single(s => s.IsApp);
         AppDescription app;
@@ -60,10 +62,24 @@ public static class PackageBuilder
             profile.FlashSize, profile.FlashMode, profile.FlashFreq, protocol, minCompanion, app.IdfVersion,
             profile.Images.Select(s => new ManifestImage(s.Name, s.Offset, s.File, images[s.File].Length,
                 Convert.ToHexStringLower(SHA256.HashData(images[s.File])))).ToList(),
-            profile.Preserved);
+            profile.Preserved,
+            compatibleBootloaders ?? []);
         // Through the parser too: what is written is what a Companion will read.
         var reread = FirmwareManifest.Parse(manifest.ToJson());
         FirmwarePackage.Check(reread, images, extraEntries: []);
         return reread;
+    }
+
+    /// <summary>
+    /// A bootloader to list as compatible, taken from a bootloader.bin or from a full flash backup of a board (the
+    /// image at 0x0). It must be a valid image for the board's chip and flash settings.
+    /// </summary>
+    public static KnownBootloader KnownBootloaderFrom(byte[] file, string source, BoardProfile profile)
+    {
+        var (sha, image) = BootloaderCheck.Bootloader(file, profile);
+        var desc = image.Bootloader is { } d ? $"ESP-IDF {d.IdfVersion}{(d.DateTime.Length > 0 ? $", built {d.DateTime}" : "")}" : "no description";
+        var note = $"{source} ({desc})";
+        note = new string(note.Take(128).Select(c => c is >= ' ' and <= '~' ? c : '?').ToArray()); // the manifest's rule
+        return new KnownBootloader(sha, note);
     }
 }

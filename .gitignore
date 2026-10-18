@@ -48,3 +48,10 @@ desktop.ini
 
 # --- Firmware packages (tools/package-firmware.ps1) ---
 dist/
+
+# --- Bundled esptool and its sources (tools/fetch-esptool.ps1) ---
+companion/third_party/esptool/esptool.exe
+companion/third_party/esptool/*.tar.gz
+
+# Public firmware signing keys are committed (never private ones: the build refuses them)
+!companion/DeskBuddy.Companion/Firmware/TrustedKeys/*.pub.pem

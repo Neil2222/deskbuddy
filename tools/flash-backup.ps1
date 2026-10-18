@@ -23,24 +23,37 @@ Write-Host "Using port $Port"
 $FlashSize = 16MB
 $common = @('--chip', 'esp32s3', '--port', $Port, '--baud', $Baud)
 
-switch ($Action) {
-    'backup' {
-        if (Test-Path $Image) { throw "$Image already exists; refusing to overwrite a backup." }
-        esptool.py @common read_flash 0 $FlashSize $Image
-        if ($LASTEXITCODE) { exit $LASTEXITCODE }
-        esptool.py @common verify_flash 0 $Image
-        if ($LASTEXITCODE) { exit $LASTEXITCODE }
-        (Get-FileHash -Algorithm SHA256 $Image).Hash.ToLower()
+# While this mutex exists, the Companion lets go of the port and does not reconnect (as with tools/idf.ps1); if it
+# already exists, another DeskBuddy tool has the port.
+$created = $false
+$portHold = New-Object System.Threading.Mutex($true, 'Local\DeskBuddy.PortHold', [ref] $created)
+if (-not $created) {
+    $portHold.Dispose()
+    throw 'Another DeskBuddy tool (the Companion''s Firmware Manager, ESP-IDF flash or monitor) is using the board''s port.'
+}
+Start-Sleep -Seconds 2 # the Companion checks the mutex once a second and then closes the port
+try {
+    switch ($Action) {
+        'backup' {
+            if (Test-Path $Image) { throw "$Image already exists; refusing to overwrite a backup." }
+            esptool.py @common read_flash 0 $FlashSize $Image
+            if ($LASTEXITCODE) { exit $LASTEXITCODE }
+            esptool.py @common verify_flash 0 $Image
+            if ($LASTEXITCODE) { exit $LASTEXITCODE }
+            (Get-FileHash -Algorithm SHA256 $Image).Hash.ToLower()
+        }
+        'verify' {
+            esptool.py @common verify_flash 0 $Image
+        }
+        'restore' {
+            if ((Get-Item $Image).Length -ne $FlashSize) { throw "$Image is not a full 16 MB dump." }
+            # Raw image: write byte-for-byte, do not let esptool patch the bootloader header.
+            esptool.py @common write_flash --flash_mode keep --flash_freq keep --flash_size keep 0 $Image
+            if ($LASTEXITCODE) { exit $LASTEXITCODE }
+            esptool.py @common verify_flash 0 $Image
+        }
     }
-    'verify' {
-        esptool.py @common verify_flash 0 $Image
-    }
-    'restore' {
-        if ((Get-Item $Image).Length -ne $FlashSize) { throw "$Image is not a full 16 MB dump." }
-        # Raw image: write byte-for-byte, do not let esptool patch the bootloader header.
-        esptool.py @common write_flash --flash_mode keep --flash_freq keep --flash_size keep 0 $Image
-        if ($LASTEXITCODE) { exit $LASTEXITCODE }
-        esptool.py @common verify_flash 0 $Image
-    }
+} finally {
+    $portHold.ReleaseMutex(); $portHold.Dispose()
 }
 exit $LASTEXITCODE

@@ -3,6 +3,7 @@ using DeskBuddy.Companion.History;
 using DeskBuddy.Companion.Pdc;
 using DeskBuddy.Companion.Protocol;
 using DeskBuddy.Companion.Schedule;
+using DeskBuddy.Firmware.Flashing;
 using Microsoft.Win32;
 
 namespace DeskBuddy.Companion;
@@ -29,6 +30,7 @@ public sealed partial class CompanionService : IDisposable
     private DeviceLink? _link;
     private bool _connecting;
     private bool _paused; // an ESP-IDF tool holds the port
+    private Mutex? _firmwareHold; // the Firmware Manager has the port (and holds PortHoldMutex for other tools)
     private DateTime _nextAttempt = DateTime.MinValue;
     private DateTime _nextPing;
     private DateTime _nextSync;
@@ -56,6 +58,13 @@ public sealed partial class CompanionService : IDisposable
     public string? Build { get; private set; }
     public string? Board { get; private set; }
     public string? Hardware { get; private set; }
+    /// <summary>hello and info have both been answered (or info is not offered): what is known about the device is complete.</summary>
+    public bool IdentityKnown { get; private set; }
+    /// <summary>hello dev= / boot= of the connected device; null when not connected or not reported.</summary>
+    public string? DeviceId => _dev;
+    public string? BootId => _boot;
+    /// <summary>The Firmware Manager has the port: no connection until it lets go.</summary>
+    public bool FirmwareHoldActive => _firmwareHold is not null;
     /// <summary>The port of the current connection; null while not connected.</summary>
     public string? PortName => IsConnected ? _link?.PortName : null;
     public string Mode { get; private set; } = "unknown";
@@ -265,6 +274,10 @@ public sealed partial class CompanionService : IDisposable
         ScheduleTick(); // also while not connected: a due action waits, or is recorded as skipped
         // The hold concerns serial ports only; a simulator connection (TCP) carries on while a tool flashes.
         var simulator = _link?.IsSimulator ?? SelectedPort == DeviceLink.SimulatorName;
+        if (_firmwareHold is not null)
+        {
+            return; // the Firmware Manager has the port; its own mutex must not read as an ESP-IDF tool
+        }
         var held = Mutex.TryOpenExisting(PortHoldMutex, out var hold) && !simulator;
         hold?.Dispose();
         if (held)
@@ -395,6 +408,8 @@ public sealed partial class CompanionService : IDisposable
             SetConnection($"Connected on {port}");
             Write(LogKind.Info, $"Connected to DeskBuddy on {port} (firmware {Firmware}, protocol {hello.Arg("proto")})");
             await RefreshInfoAsync();
+            IdentityKnown = _link == link;
+            Changed?.Invoke();
             await SyncClockAsync("connected");
             await ApplySavedFaceAsync(resendFace);
             await RefreshStatusAsync();
@@ -757,11 +772,61 @@ public sealed partial class CompanionService : IDisposable
         }
     }
 
+    /// <summary>
+    /// Gives the board's serial port to the Firmware Manager (call on the UI thread): the connection is closed and no
+    /// reconnect is tried until the returned hold is disposed; the named mutex tools/idf.ps1 also uses tells other
+    /// DeskBuddy tools that the port is taken. Throws <see cref="PortBusyException"/> when another tool has it.
+    /// </summary>
+    public IDisposable HoldPortForFirmware(string port)
+    {
+        if (_firmwareHold is not null)
+        {
+            throw new PortBusyException("The Firmware Manager is already using the port.");
+        }
+        var mutex = new Mutex(true, PortHoldMutex, out var created);
+        if (!created)
+        {
+            mutex.Dispose();
+            throw new PortBusyException("Another DeskBuddy tool (ESP-IDF flash or monitor) is using the board's port.");
+        }
+        _firmwareHold = mutex;
+        CloseLink($"Paused: the Firmware Manager is using {port}");
+        return new FirmwarePortHold(this, mutex);
+    }
+
+    private sealed class FirmwarePortHold(CompanionService service, Mutex mutex) : IDisposable
+    {
+        private int _released;
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _released, 1) == 0)
+            {
+                service.Post(() => service.ReleaseFirmwareHold(mutex)); // the mutex belongs to the UI thread
+            }
+        }
+    }
+
+    private void ReleaseFirmwareHold(Mutex mutex)
+    {
+        if (_firmwareHold != mutex)
+        {
+            return;
+        }
+        _firmwareHold = null;
+        mutex.ReleaseMutex();
+        mutex.Dispose();
+        AutoConnect = true; // the result is only known once DeskBuddy is back
+        _nextAttempt = DateTime.UtcNow.AddSeconds(2); // let the board start
+        SetConnection("Reconnecting after the firmware update");
+    }
+
     private void CloseLink(string text)
     {
         var link = _link;
         _link = null;
         IsConnected = false;
+        IdentityKnown = false;
         Mode = "unknown";
         Mood = DeviceMood.Idle;
         _dev = _boot = null;

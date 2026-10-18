@@ -1,5 +1,6 @@
 using DeskBuddy.Companion.Desktop;
 using DeskBuddy.Companion.Device;
+using DeskBuddy.Companion.Firmware;
 using DeskBuddy.Companion.Pdc;
 using DeskBuddy.Companion.Protocol;
 using DeskBuddy.Companion.UI;
@@ -52,6 +53,9 @@ public sealed partial class MainForm : Form
     private readonly FlatButton _simStart, _simStop;
     private readonly Label _simStatus = new() { Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, AutoEllipsis = true, UseMnemonic = false };
     private readonly Label _simHint = new() { Dock = DockStyle.Top, Height = 26, ForeColor = Theme.Faint, TextAlign = ContentAlignment.MiddleLeft, UseMnemonic = false };
+
+    // Firmware Manager (Device page): install, update, repair over USB.
+    private readonly FirmwareCard _firmware;
 
     // Clock face: shown with the Buddy page's tiles while the connected firmware has the face cap.
     private Picker _facePicker = null!;
@@ -126,6 +130,10 @@ public sealed partial class MainForm : Form
         AutoScaleMode = AutoScaleMode.Dpi;
         _service = new CompanionService();
         _simulator = new SimulatorLauncher();
+        _firmware = new FirmwareCard(_theme, FirmwareManager.ForCompanion(_service, FirmwareLog), new FirmwareDialogs(this), FirmwareLog)
+        {
+            Dock = DockStyle.Fill,
+        };
         Text = "DeskBuddy";
         Icon = BuddyArt.AppIcon();
         BackColor = Theme.Window;
@@ -192,7 +200,7 @@ public sealed partial class MainForm : Form
         _service.HistoryChanged += _historyPage.HistoryChanged;
         _messagePage = AddPage(nav, "Message", "Text that scrolls across his LED sign", Theme.GlyphMessage, BuildMessagePage());
         _pdcPage = AddPage(nav, "PDC Manager", "The ZDMW Teams button, from here or from Buddy's menu", Theme.GlyphPdc, BuildPdcPage());
-        _devicePage = AddPage(nav, "Device", "Connection, the desktop simulator and the protocol log", Theme.GlyphDevice, BuildDevicePage());
+        _devicePage = AddPage(nav, "Device", "Connection, firmware, the desktop simulator and the protocol log", Theme.GlyphDevice, BuildDevicePage());
 
         Controls.Add(content);
         Controls.Add(sidebar);
@@ -751,8 +759,26 @@ public sealed partial class MainForm : Form
     {
         var page = new Panel();
         page.Controls.Add(BuildDiagnosticsCard()); // first: it fills what the cards above leave
-        Stack(page, BuildConnectionCard(), Gap(), BuildSimulatorCard(), Gap(), BuildWindowsCard(), Gap());
+        Stack(page, BuildConnectionCard(), Gap(), BuildFirmwareCard(), Gap(), BuildSimulatorCard(), Gap(), BuildWindowsCard(), Gap());
         return page;
+    }
+
+    private Card BuildFirmwareCard()
+    {
+        var card = new Card(_theme) { Title = "Firmware", Dock = DockStyle.Top, Height = 340 };
+        card.Controls.Add(_firmware);
+        return card;
+    }
+
+    // The Firmware Manager reports from worker threads: into the Diagnostics log on the UI thread.
+    private void FirmwareLog(string text)
+    {
+        if (InvokeRequired)
+        {
+            BeginInvoke(() => AppendLog(LogKind.Info, text));
+            return;
+        }
+        AppendLog(LogKind.Info, text);
     }
 
     private Card BuildConnectionCard()
@@ -1010,6 +1036,7 @@ public sealed partial class MainForm : Form
         var build = _service.Build is { Length: >= 7 } b ? $" (build {b[..7]}{(b.EndsWith("-dirty", StringComparison.Ordinal) ? "-dirty" : "")})" : "";
         var hardware = _service.Hardware is { } hw && hw != "ok" ? $" · hardware check: {hw}" : "";
         _detailFirmware.Text = connected ? $"firmware {_service.Firmware}{build} · protocol {_service.Protocol}{hardware}" : "–";
+        _firmware.RefreshState();
         _detailClock.Text = _service.ClockText;
         _connect.Enabled = !connected;
         _disconnect.Enabled = connected || _service.AutoConnect;

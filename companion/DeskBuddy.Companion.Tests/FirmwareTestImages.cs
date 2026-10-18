@@ -14,8 +14,11 @@ internal static class FirmwareTestImages
 {
     public const string Build = "0123456789abcdef0123456789abcdef01234567";
 
+    /// <param name="padding">Extra bytes of code (an app the size of a few flash sectors, for the installer tests).</param>
+    /// <param name="variant">Changes a bootloader's code: another build of it, with another SHA-256.</param>
     public static byte[] Image(ushort chipId = EspImage.ChipIdEsp32S3, string? appVersion = null,
-        string project = "deskbuddy", string idf = "v5.5.5", string build = Build, byte mode = 2, byte sizeFreq = 0x4F)
+        string project = "deskbuddy", string idf = "v5.5.5", string build = Build, byte mode = 2, byte sizeFreq = 0x4F,
+        int padding = 0, byte variant = 0)
     {
         var segments = new List<byte[]>();
         if (appVersion is not null)
@@ -30,7 +33,16 @@ internal static class FirmwareTestImages
         }
         else
         {
-            segments.Add(Enumerable.Range(0, 100).Select(i => (byte)i).ToArray()); // bootloader code
+            var desc = new byte[80]; // esp_bootloader_desc_t
+            desc[0] = 0x50;
+            Encoding.ASCII.GetBytes(idf).CopyTo(desc, 8);
+            Encoding.ASCII.GetBytes(variant == 0 ? "" : $"Oct 15 2026 19:58:{variant:00}").CopyTo(desc, 40);
+            segments.Add(desc);
+            segments.Add(Enumerable.Range(0, 100).Select(i => (byte)(i + variant)).ToArray()); // bootloader code
+        }
+        if (padding > 0)
+        {
+            segments.Add(Enumerable.Range(0, padding).Select(i => (byte)(i * 7 + 3)).ToArray());
         }
         using var s = new MemoryStream();
         var header = new byte[24];

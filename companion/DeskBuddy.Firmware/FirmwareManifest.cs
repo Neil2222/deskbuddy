@@ -7,6 +7,13 @@ namespace DeskBuddy.Firmware;
 public sealed record ManifestImage(string Name, uint Offset, string File, int Size, string Sha256);
 
 /// <summary>
+/// A second-stage bootloader already on boards in the field that this package's app runs under, so an app-only
+/// update may keep it: the SHA-256 of the bootloader image (its bytes from 0x0 to the end of its appended hash), and
+/// where it came from. The package's own bootloader always counts; this list names the others.
+/// </summary>
+public sealed record KnownBootloader(string Sha256, string Note);
+
+/// <summary>
 /// manifest.json of a firmware package (docs/firmware-packages.md). Parsed strictly: every field is required, unknown
 /// fields are refused (the manifest is signed; a field this Companion does not understand could change what the
 /// package means), numbers and hashes have one spelling.
@@ -25,7 +32,8 @@ public sealed record FirmwareManifest(
     FirmwareVersion MinCompanion,
     string Idf,
     IReadOnlyList<ManifestImage> Images,
-    IReadOnlyList<Partition> Preserve)
+    IReadOnlyList<Partition> Preserve,
+    IReadOnlyList<KnownBootloader> CompatibleBootloaders)
 {
     public const int CurrentSchema = 1;
     public const string ProductName = "deskbuddy";
@@ -45,7 +53,7 @@ public sealed record FirmwareManifest(
         {
             var root = Object(doc.RootElement, "manifest",
                 "schema", "product", "version", "build", "board", "chip", "flash", "protocol", "minCompanion", "idf",
-                "images", "preserve");
+                "images", "preserve", "compatibleBootloaders");
             var schema = Int(root, "schema");
             if (schema != CurrentSchema)
             {
@@ -61,11 +69,7 @@ public sealed record FirmwareManifest(
             foreach (var e in Array(root, "images"))
             {
                 var o = Object(e, "image", "name", "offset", "file", "size", "sha256");
-                var sha = Str(o, "sha256");
-                if (sha.Length != 64 || !sha.All(c => char.IsAsciiDigit(c) || c is >= 'a' and <= 'f'))
-                {
-                    throw new FormatException("sha256 is not 64 lower-case hex digits");
-                }
+                var sha = Sha256(o, "sha256");
                 images.Add(new ManifestImage(Str(o, "name"), Hex(o, "offset"), Str(o, "file"), Int(o, "size"), sha));
             }
             var preserve = new List<Partition>();
@@ -73,6 +77,12 @@ public sealed record FirmwareManifest(
             {
                 var o = Object(e, "preserve", "name", "offset", "size");
                 preserve.Add(new Partition(Str(o, "name"), 0, 0, Hex(o, "offset"), Hex(o, "size")));
+            }
+            var bootloaders = new List<KnownBootloader>();
+            foreach (var e in Array(root, "compatibleBootloaders"))
+            {
+                var o = Object(e, "compatible bootloader", "sha256", "note");
+                bootloaders.Add(new KnownBootloader(Sha256(o, "sha256"), Str(o, "note")));
             }
             return new FirmwareManifest(
                 schema,
@@ -88,7 +98,8 @@ public sealed record FirmwareManifest(
                 FirmwareVersion.TryParse(Str(root, "minCompanion")) ?? throw new FormatException("minCompanion is not a version"),
                 Str(root, "idf"),
                 images,
-                preserve);
+                preserve,
+                bootloaders);
         }
     }
 
@@ -135,6 +146,15 @@ public sealed record FirmwareManifest(
                 w.WriteEndObject();
             }
             w.WriteEndArray();
+            w.WriteStartArray("compatibleBootloaders");
+            foreach (var b in CompatibleBootloaders)
+            {
+                w.WriteStartObject();
+                w.WriteString("sha256", b.Sha256);
+                w.WriteString("note", b.Note);
+                w.WriteEndObject();
+            }
+            w.WriteEndArray();
             w.WriteEndObject();
         }
         buffer.WriteByte((byte)'\n');
@@ -142,6 +162,16 @@ public sealed record FirmwareManifest(
     }
 
     public static string ToHex(uint value) => "0x" + value.ToString("x", CultureInfo.InvariantCulture);
+
+    private static string Sha256(JsonElement o, string key)
+    {
+        var sha = Str(o, key);
+        if (sha.Length != 64 || !sha.All(c => char.IsAsciiDigit(c) || c is >= 'a' and <= 'f'))
+        {
+            throw new FormatException($"'{key}' is not 64 lower-case hex digits");
+        }
+        return sha;
+    }
 
     private static JsonElement Object(JsonElement e, string what, params string[] keys)
     {
