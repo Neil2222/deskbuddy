@@ -4,7 +4,21 @@ The living handover: where the project stands, the decisions behind it and what 
 
 ## Continue here (18 Oct 2026)
 
-**Firmware Manager, first hardware validation: Phase 1 (prepare) done, nothing done on the board yet** (`feature/firmware-manager`, from `master` `b09db9f`; not merged, not pushed). Milestone A built: firmware 1.0.0 with `info` and a read-only hardware check, reproducible builds, signed packages, the esptool v4.12.0 backend (Install, app-only Update after a bootloader check, Repair, read-only Identify) and the Companion's new **Firmware** page ([docs/firmware-packages.md](docs/firmware-packages.md#installing-the-firmware-manager)). Phase 2 (identification only) and Phase 3 (app-only Update) each wait for the user's approval.
+**Firmware Manager: first physical update done. The board runs DeskBuddy 1.0.0** (build `28c96c5`, app-only Update on 18 Oct 13:31–13:35, from the test Companion 1.1.0 in `%USERPROFILE%\DeskBuddy-test\`; `feature/firmware-manager`, not merged, not pushed). Phase 2 identified the board read-only at 13:26 (ESP32-S3 (QFN56) v0.2, Embedded PSRAM 8MB, 40 MHz, flash 46/4018 16MB, MAC `44:1b:f6:8d:11:78`), and it reconnected 3 s later.
+- **Phase 3:**
+  - A full backup was read in 207.8 s at 921600 baud and verified on-chip.
+  - The bootloader (`d5848346…`, listed as compatible) and the partition table were read back and checked.
+  - Only 0x10000–0x97FFF was erased and written (554,688 B, MD5 verified, then `verify_flash` OK).
+  - DeskBuddy reconnected 3 s after the hard reset: `info fw=1.0.0 build=28c96c5fcbb4… board=waveshare-esp32-s3-touch-lcd-7b chip=esp32s3 rev=0.2 flash=16MB psram=8MB idf=v5.5.5 hw=ok`, `dev=441bf68d1178`.
+  - The user saw normal rendering, touch, menu, and Clock zoom in and out (log: ZOOM in 26 frames / 1420 ms, out 24 / 1500 ms, 0 resyncs; scanout 33.71 Hz, 0 resyncs). Schedule Off and PDC off.
+- **Rollback image of 57eb475:** `Documents\DeskBuddy-backups\fw-57eb475-before-1.0.0-20261018-133137\deskbuddy_441bf68d1178_full_16MB.bin` (SHA-256 `b0bb17e2…42b7`; the original is also in `DeskBuddy-test\data\firmware-backups\`). Its bootloader, partition table and NVS/PHY are identical to the earlier rollback images.
+- **Unchanged:** the published Companion (`companion\publish`, `1.0.0+b09db9f`) and `%APPDATA%\DeskBuddy`. It talks to 1.0.0 as before (protocol 1; it ignores `info`).
+- **Small issues to fix later:**
+  - The sidebar pill says "Paused while flashing" also during a read-only Identify.
+  - `board.txt` in a backup folder is written with a UTF-8 BOM.
+  - Git Bash's `sha256sum -c` reports a false FAILED on the backup's SHA256SUMS (text-mode marker; the hashes do match).
+
+**Firmware Manager, preparation (Phase 1), done before the update**: Milestone A built: firmware 1.0.0 with `info` and a read-only hardware check, reproducible builds, signed packages, the esptool v4.12.0 backend (Install, app-only Update after a bootloader check, Repair, read-only Identify) and the Companion's new **Firmware** page ([docs/firmware-packages.md](docs/firmware-packages.md#installing-the-firmware-manager)).
 - **Signed package:** `dist\firmware\deskbuddy-1.0.0-waveshare-esp32-s3-touch-lcd-7b.zip`, also copied to `%USERPROFILE%\DeskBuddy-test\packages\`.
   - Package SHA-256 `8e912c60…d39f9`; build `28c96c5fcbb4edeaea9bd4f7bb4d146c8f92977f`; app SHA-256 `37fce88f…11d7`.
   - Signed with `deskbuddy-firmware-2026`, fingerprint `00ecd57e…4c44`; the private key is in `%USERPROFILE%\DeskBuddy-signing\`.
