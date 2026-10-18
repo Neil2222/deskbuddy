@@ -4,7 +4,19 @@ The living handover: where the project stands, the decisions behind it and what 
 
 ## Continue here (18 Oct 2026)
 
-**Firmware Manager / Companion 1.1.0: ready to merge, waiting for approval** (`feature/firmware-manager`, local commits only: not merged, not pushed, no tag, no release). **The board runs DeskBuddy 1.0.0** (build `28c96c5`), installed by the first physical app-only Update on 18 Oct 13:31–13:35 from the test Companion 1.1.0 in `%USERPROFILE%\DeskBuddy-test\`.
+**Companion 1.1.0 released locally (18 Oct 2026): the Firmware Manager is in `master`.**
+- **Merge:** `feature/firmware-manager` was fast-forwarded into `master` (`b09db9f` → `5849519`), with this note on top, and pushed. No tag and no GitHub Release: those belong to the distribution milestone.
+- **Tests on `master`:** 318/318 Companion and 157/157 firmware host tests.
+- **Published Companion:** `companion\publish\DeskBuddy.Companion.exe`, version `1.1.0+584951979af7…` (built from `5849519`, the commit before this note; code is identical), SHA-256 `e96936fe6ab228b1b45a500633098d76d2cc7232ce07bb6067509d90d150db96`, with `third-party\esptool\` (licence, notices, sources).
+- **Backup before the switch:** `Documents\DeskBuddy-backups\release-1.1.0-20261018-141136`, holding `%APPDATA%\DeskBuddy` and the previous exe (`1.0.0+b09db9f`, `8d770317…`). Its `SHA256SUMS.txt` (11 files) checks `OK`.
+- **Acceptance on the board:**
+  - Connected on COM6: `fw=1.0.0`, `build=28c96c5…`, `hw=ok`; the Firmware page shows the installed firmware.
+  - The user saw Buddy, touch, the menu and the Clock zoom work (ZOOM in 27 frames / 1401 ms, out 25 / 1500 ms; 0 resyncs in 23 performance windows). The board was not reset or flashed.
+  - Settings kept: Schedule Live, tray mode on, Start with Windows off, PDC off, History as before.
+  - The only writes were those of every connect to a new boot: two appended History records (`boot`, `boot_end` of `6eb2438…`), a checkpoint for boot `2997a51b…`, and `clockFaceBoot`.
+- **The test setup** in `%USERPROFILE%\DeskBuddy-test\` is kept (closed); it is no longer needed.
+
+**Firmware Manager / Companion 1.1.0, before the merge** (`feature/firmware-manager`). **The board runs DeskBuddy 1.0.0** (build `28c96c5`), installed by the first physical app-only Update on 18 Oct 13:31–13:35 from the test Companion 1.1.0 in `%USERPROFILE%\DeskBuddy-test\`.
 - **Validation status** (also in [docs/firmware-packages.md](docs/firmware-packages.md)):
   - **Identify:** physically tested on the working board at 13:26: ESP32-S3 (QFN56) v0.2, Embedded PSRAM 8MB, 40 MHz, flash 46/4018 16MB, MAC `44:1b:f6:8d:11:78`. DeskBuddy reconnected 3 s later.
   - **Update:** physically tested on the working board:
