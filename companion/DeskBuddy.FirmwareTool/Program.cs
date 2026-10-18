@@ -78,7 +78,9 @@ static int Sign(Dictionary<string, List<string>> o)
     var manifestBytes = files[FirmwarePackage.ManifestFile];
     var manifest = FirmwareManifest.Parse(manifestBytes);
     var profile = FirmwarePackage.Check(manifest, files, extraEntries: [FirmwarePackage.ManifestFile]);
-    var keyPem = File.ReadAllText(One(o, "key"));
+    var keyPath = One(o, "key");
+    RefuseInsideGitWorkTree(keyPath, "signing key");
+    var keyPem = File.ReadAllText(keyPath);
     var signature = PackageSignature.Sign(manifestBytes, keyPem);
     var tmp = path + ".signing";
     File.WriteAllBytes(tmp, FirmwarePackage.WriteZip(manifestBytes, signature,
@@ -94,7 +96,7 @@ static int Verify(Dictionary<string, List<string>> o)
 {
     var keys = All(o, "public-key").Select(k => TrustedKey.FromPem(Path.GetFileName(k), File.ReadAllText(k))).ToList();
     var package = FirmwarePackage.Open(One(o, "package"), keys);
-    Console.WriteLine($"verified: signed by {package.SignedBy.Name}");
+    Console.WriteLine($"verified: signed by {package.SignedBy.Name} (SHA-256 {package.SignedBy.Fingerprint})");
     Describe(package.Manifest);
     return 0;
 }
@@ -103,6 +105,7 @@ static int KeyGen(Dictionary<string, List<string>> o)
 {
     var privatePath = One(o, "private");
     var publicPath = One(o, "public");
+    RefuseInsideGitWorkTree(privatePath, "private key");
     foreach (var p in new[] { privatePath, publicPath })
     {
         if (File.Exists(p))
@@ -119,7 +122,21 @@ static int KeyGen(Dictionary<string, List<string>> o)
     }
     Console.WriteLine($"private key: {privatePath} (keep it secret, never commit it)");
     Console.WriteLine($"public key:  {publicPath}");
+    Console.WriteLine($"fingerprint: SHA-256 {TrustedKey.FromPem("new key", publicPem).Fingerprint}");
     return 0;
+}
+
+// A private key never lives in a Git working tree (this repository or any other): a careless "git add -A" could
+// commit it, and a build could pick it up.
+static void RefuseInsideGitWorkTree(string path, string what)
+{
+    for (var dir = Path.GetDirectoryName(Path.GetFullPath(path)); dir is not null; dir = Path.GetDirectoryName(dir))
+    {
+        if (Directory.Exists(Path.Combine(dir, ".git")) || File.Exists(Path.Combine(dir, ".git")))
+        {
+            throw new IOException($"the {what} {path} is inside the Git working tree {dir}; keep it outside any repository");
+        }
+    }
 }
 
 static void Describe(FirmwareManifest m)

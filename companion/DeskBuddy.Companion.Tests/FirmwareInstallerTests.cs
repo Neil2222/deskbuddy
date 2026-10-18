@@ -438,4 +438,56 @@ public sealed class FirmwareInstallerTests : IDisposable
         Assert.Equal(InstallFailure.Cancelled, r.Failure);
         Assert.Equal(before, declined.Board.Flash);
     }
+
+    // ---- Identify (read-only) ----
+
+    [Fact]
+    public async Task Identify_reads_chip_and_MAC_writes_nothing_and_DeskBuddy_comes_back_as_it_was()
+    {
+        var (board, old) = WithDeskBuddy(OldBootloader);
+        var rig = Make(board, Package());
+        var running = Reports(old, board) with { Board = null, Hardware = null, Boot = "abababababababab" }; // like 57eb475: no info
+        rig.Port.Apps.Add((Bytes(old, "app"), running));
+        var before = (byte[])board.Flash.Clone();
+
+        var r = await rig.Installer.IdentifyAsync("COM6", EntryMode.AutoReset, running, CancellationToken.None);
+
+        Assert.True(r.Succeeded, r.Message);
+        Assert.Equal("441bf68d1178", r.Identity!.DeviceId);
+        Assert.False(r.Identity.ModelVerified);
+        Assert.Equal(old.Manifest.Version.ToString(), r.After!.Firmware);
+        var run = Assert.Single(rig.Tool.Runs);
+        Assert.Equal(["--before", "default_reset", "--after", "hard_reset", "flash_id"], run.Skip(6));
+        Assert.Equal(1, board.HardResets);
+        Assert.Equal(before, board.Flash);
+        Assert.Equal((1, 1), (rig.Port.Held, rig.Port.Released));
+    }
+
+    [Fact]
+    public async Task Identify_reports_another_board_a_wrong_chip_and_a_board_that_does_not_come_back()
+    {
+        var (board, old) = WithDeskBuddy();
+        var running = Reports(old, board);
+
+        var rig = Make(board, old);
+        var r = await rig.Installer.IdentifyAsync("COM6", EntryMode.AutoReset, running with { DeviceId = "aabbccddeeff" }, CancellationToken.None);
+        Assert.Equal(InstallFailure.WrongMac, r.Failure);
+
+        rig = Make(board, old);
+        board.Features = "WiFi, BLE";
+        r = await rig.Installer.IdentifyAsync("COM6", EntryMode.AutoReset, running, CancellationToken.None);
+        Assert.Equal(InstallFailure.WrongChip, r.Failure);
+        board.Features = new FakeBoard().Features;
+
+        rig = Make(board, old);
+        rig.Port.NeverAnswers = true;
+        r = await rig.Installer.IdentifyAsync("COM6", EntryMode.AutoReset, running, CancellationToken.None);
+        Assert.Equal(InstallFailure.NoReconnect, r.Failure);
+
+        rig = Make(board, old);
+        rig.Tool.Board = null;
+        r = await rig.Installer.IdentifyAsync("COM6", EntryMode.AutoReset, running, CancellationToken.None);
+        Assert.Equal(InstallFailure.NoSerialData, r.Failure);
+        Assert.Equal(rig.Port.Held, rig.Port.Released);
+    }
 }

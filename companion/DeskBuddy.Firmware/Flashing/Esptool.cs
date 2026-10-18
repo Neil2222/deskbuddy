@@ -28,6 +28,7 @@ public sealed record EsptoolResult(EsptoolFailure Failure, int ExitCode, string 
 public sealed class Esptool(IProcessRunner runner, string exePath, string workingDirectory, BoardProfile profile)
 {
     public const string Version = "4.12.0";
+    public BoardProfile Profile => profile;
     public const int TransferBaud = 921600; // what tools/flash-backup.ps1 uses on the CH343
     public const int IdentifyBaud = 115200;
 

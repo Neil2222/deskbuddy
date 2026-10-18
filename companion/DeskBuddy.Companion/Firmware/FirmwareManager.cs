@@ -104,22 +104,46 @@ public sealed class FirmwareManager : IDevicePort, IFirmwareHost
     public async Task<InstallResult> RunAsync(InstallRequest request, IProgress<InstallProgress> progress,
         Func<string, CancellationToken, Task<bool>> manualBootPrompt, CancellationToken ct)
     {
-        EsptoolLease lease;
+        var lease = await LeaseAsync(ct);
+        if (lease.Lease is null)
+        {
+            return new InstallResult(InstallFailure.ToolMissing, lease.Error!, ToolRecovery, false, null, null, null);
+        }
+        using (lease.Lease)
+        {
+            var esptool = new Esptool(_runner, lease.Lease.Path, Path.Combine(ToolsFolder, "work"), request.Package.Profile);
+            var installer = new FirmwareInstaller(esptool, this, Path.Combine(ToolsFolder, "runs"), manualBootPrompt, _log);
+            return await installer.RunAsync(request, progress, ct);
+        }
+    }
+
+    public async Task<IdentifyResult> IdentifyAsync(string port, EntryMode entry, DeviceReport? before,
+        Func<string, CancellationToken, Task<bool>> manualBootPrompt, CancellationToken ct)
+    {
+        var lease = await LeaseAsync(ct);
+        if (lease.Lease is null)
+        {
+            return new IdentifyResult(InstallFailure.ToolMissing, lease.Error!, ToolRecovery, null, null);
+        }
+        using (lease.Lease)
+        {
+            var esptool = new Esptool(_runner, lease.Lease.Path, Path.Combine(ToolsFolder, "work"), BoardProfile.WaveshareS3Lcd7B);
+            var installer = new FirmwareInstaller(esptool, this, Path.Combine(ToolsFolder, "runs"), manualBootPrompt, _log);
+            return await installer.IdentifyAsync(port, entry, before, ct);
+        }
+    }
+
+    private const string ToolRecovery = "Nothing was changed. Use a Companion build that includes esptool (tools\\fetch-esptool.ps1, then publish).";
+
+    private async Task<(EsptoolLease? Lease, string? Error)> LeaseAsync(CancellationToken ct)
+    {
         try
         {
-            lease = await Task.Run(() => EsptoolBundle.Prepare(ToolsFolder, _esptool), ct);
+            return (await Task.Run(() => EsptoolBundle.Prepare(ToolsFolder, _esptool), ct), null);
         }
         catch (Exception e) when (e is IOException or InvalidDataException or UnauthorizedAccessException)
         {
-            return new InstallResult(InstallFailure.ToolMissing, $"The flashing tool is not available: {e.Message}",
-                "Nothing was changed. Use a Companion build that includes esptool (tools\\fetch-esptool.ps1, then publish).",
-                false, null, null, null);
-        }
-        using (lease)
-        {
-            var esptool = new Esptool(_runner, lease.Path, Path.Combine(ToolsFolder, "work"), request.Package.Profile);
-            var installer = new FirmwareInstaller(esptool, this, Path.Combine(ToolsFolder, "runs"), manualBootPrompt, _log);
-            return await installer.RunAsync(request, progress, ct);
+            return (null, $"The flashing tool is not available: {e.Message}");
         }
     }
 

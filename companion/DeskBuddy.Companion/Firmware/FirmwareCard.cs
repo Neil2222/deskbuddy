@@ -16,6 +16,9 @@ public interface IFirmwareHost
     string NewBackupFolder(DeviceReport? before, FirmwarePackage package);
     Task<InstallResult> RunAsync(InstallRequest request, IProgress<InstallProgress> progress,
         Func<string, CancellationToken, Task<bool>> manualBootPrompt, CancellationToken ct);
+    /// <summary>Read-only: chip, features, MAC and flash chip; the board restarts twice, nothing is written.</summary>
+    Task<IdentifyResult> IdentifyAsync(string port, EntryMode entry, DeviceReport? before,
+        Func<string, CancellationToken, Task<bool>> manualBootPrompt, CancellationToken ct);
 }
 
 /// <summary>The user's answers in the confirmation dialog; null: cancelled.</summary>
@@ -27,6 +30,7 @@ public interface IFirmwareDialogs
     string? PickPackage();
     FirmwareConfirmation? Confirm(FirmwareConfirmRequest request);
     bool ConfirmStop(bool writing);
+    bool ConfirmIdentify(string port, DeviceReport? before);
     Task<bool> ManualBootAsync(string instruction);
 }
 
@@ -54,7 +58,7 @@ public sealed class FirmwareCard : Panel
     private readonly IFirmwareDialogs _dialogs;
     private readonly Action<string> _log;
     private readonly Label _package = Value(), _board = Value(), _offer = Value(), _step = Value(), _result = Value();
-    private readonly FlatButton _open, _install, _update, _repair, _cancel;
+    private readonly FlatButton _open, _install, _update, _repair, _cancel, _identify;
     private readonly CheckBox _backup = Check("Full backup first (16 MB)"), _manual = Check("Manual download mode (BOOT + RESET)");
     private readonly ProgressBar _bar = new() { Dock = DockStyle.Fill, Height = 10, Style = ProgressBarStyle.Continuous };
     private FirmwarePackage? _loaded;
@@ -76,6 +80,7 @@ public sealed class FirmwareCard : Panel
         _install = new FlatButton(theme, ButtonLook.Accent) { Text = "Install DeskBuddy", Width = 170, Height = 34 };
         _update = new FlatButton(theme, ButtonLook.Accent) { Text = "Update firmware", Width = 160, Height = 34 };
         _repair = new FlatButton(theme, ButtonLook.Quiet) { Text = "Repair (full reinstall)…", Width = 200, Height = 34 };
+        _identify = new FlatButton(theme, ButtonLook.Quiet) { Text = "Identify board…", Width = 150, Height = 34 };
         _cancel = new FlatButton(theme, ButtonLook.Quiet) { Text = "Cancel", Width = 100, Height = 34 };
         foreach (var l in new[] { _offer, _step, _result })
         {
@@ -96,7 +101,7 @@ public sealed class FirmwareCard : Panel
         grid.SetColumnSpan(_offer, 2);
 
         var actions = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 44, WrapContents = false, Padding = new Padding(68, 6, 0, 0) };
-        actions.Controls.AddRange([_install, _update, _repair, _cancel]);
+        actions.Controls.AddRange([_identify, _install, _update, _repair, _cancel]);
         var options = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 30, WrapContents = false, Padding = new Padding(58, 0, 0, 0) };
         options.Controls.AddRange([_backup, _manual]);
         _progressRow = new TableLayoutPanel { Dock = DockStyle.Top, Height = 30, ColumnCount = 2, Padding = new Padding(72, 6, 0, 0), Visible = false };
@@ -116,6 +121,7 @@ public sealed class FirmwareCard : Panel
         _install.Click += async (_, _) => await StartAsync(FirmwareOperation.Install);
         _update.Click += async (_, _) => await StartAsync(FirmwareOperation.Update);
         _repair.Click += async (_, _) => await StartAsync(FirmwareOperation.Repair);
+        _identify.Click += async (_, _) => await IdentifyAsync();
         _cancel.Click += (_, _) => Cancel();
         _backup.CheckedChanged += (_, _) => _backupTouched = true;
         RefreshState();
@@ -179,6 +185,7 @@ public sealed class FirmwareCard : Panel
         _install.Enabled = ok && connected is null;
         _update.Enabled = ok && connected is not null && decision!.Offer is InstallOffer.Update or InstallOffer.Reinstall or InstallOffer.Downgrade;
         _repair.Enabled = ok;
+        _identify.Enabled = _host.ToolBundled && port is not null && !running;
         _open.Enabled = !running;
         _cancel.Enabled = running;
         _cancel.Visible = running;
@@ -191,7 +198,7 @@ public sealed class FirmwareCard : Panel
         {
             _offer.Text = "This Companion build does not include the flashing tool (esptool). " + _offer.Text;
         }
-        foreach (var button in new[] { _install, _update, _repair, _cancel, _open })
+        foreach (var button in new[] { _identify, _install, _update, _repair, _cancel, _open })
         {
             button.Invalidate();
         }
@@ -238,6 +245,44 @@ public sealed class FirmwareCard : Panel
             _cts = null;
         }
         ShowResult(result);
+        RefreshState();
+    }
+
+    /// <summary>Identification only (esptool flash_id): never writes; the board restarts and DeskBuddy reconnects.</summary>
+    private async Task IdentifyAsync()
+    {
+        if (_host.TargetPort() is not { } port || Running)
+        {
+            return;
+        }
+        var before = _host.Connected;
+        if (!_dialogs.ConfirmIdentify(port, before))
+        {
+            return;
+        }
+        _cts = new CancellationTokenSource();
+        _result.Text = "";
+        _bar.Value = 0;
+        _progressRow.Visible = true;
+        _step.Text = "Identifying the board (read-only)";
+        RefreshState();
+        _log($"Firmware: identifying the board on {port} (read-only)");
+        IdentifyResult result;
+        try
+        {
+            result = await _host.IdentifyAsync(port, _manual.Checked ? EntryMode.Manual : EntryMode.AutoReset, before,
+                async (text, _) => await _dialogs.ManualBootAsync(text), _cts.Token);
+        }
+        finally
+        {
+            _cts.Dispose();
+            _cts = null;
+        }
+        _bar.Value = 100;
+        _step.Text = result.Succeeded ? "Identified" : "Stopped";
+        _result.ForeColor = result.Succeeded ? Theme.Green : Theme.Amber;
+        _result.Text = result.Succeeded ? result.Message : $"{result.Message}\n{result.Recovery}";
+        _log($"Firmware: identify {(result.Succeeded ? "ok" : result.Failure.ToString())}: {result.Message} {result.Recovery}".Trim());
         RefreshState();
     }
 

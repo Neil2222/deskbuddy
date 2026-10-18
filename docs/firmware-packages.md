@@ -165,24 +165,42 @@ the same module. This path is not physically validated: there is no factory-new 
 **Tests:** the automated tests make new key pairs at every run (`PackageSignature.CreateKeyPair`). No test key is
 stored in the repository.
 
-**There is no production key yet.** None has been created, and `companion/DeskBuddy.Companion/Firmware/TrustedKeys`
-is empty, so this Companion refuses every package; the Firmware card says so. A key is trusted only by being built
-in. It is never trusted from a file next to the exe, from an environment variable, or because it signed the package
-being opened, and a newly generated key is never trusted automatically. The build fails if that folder holds a
-private key, and so does the Companion when it starts.
+**The production key** (provisioned 2026-10-18): `deskbuddy-firmware-2026`, SHA-256 fingerprint
+`00ecd57e1e562ee38a99595b5795f85b92c28281a84cea2987edf40c37e34c44`.
+- **Fingerprint checks:** the tool, a SHA-256 of the PEM's DER, and `openssl pkey -pubin -outform DER | openssl dgst
+  -sha256` all give the same value.
+- **Public half:** the only trusted key, in `companion/DeskBuddy.Companion/Firmware/TrustedKeys/`.
+- **Private half:** in `%USERPROFILE%\DeskBuddy-signing\`, outside any repository. Its permissions are not
+  inherited: only that Windows user and SYSTEM can open the folder.
 
-Provisioning the production key, before the first real installation:
+A key is trusted only by being built in. It is never trusted from a file next to the exe, from an environment
+variable, or because it signed the package being opened, and a newly generated key is never trusted automatically.
+
+The private key cannot end up anywhere it should not:
+- **Git:** it lives outside the working tree, and `*.pem` is ignored besides.
+  `deskbuddy-firmware-tool keygen` and `sign` refuse a key path inside any Git working tree.
+- **Packages:** a package holds only `manifest.json`, `manifest.sig` and the three images; anything else is refused
+  when it is written and when it is opened.
+- **The Companion:** the build fails if `Firmware/TrustedKeys` holds a private key, and so does the Companion when
+  it starts.
+
+The key is not encrypted at rest. Its protection is the folder permissions and the Windows account. Moving it to
+encrypted offline storage (an encrypted USB stick, a password manager), and keeping it only there, is recommended
+once the first release is signed.
+
+The procedure, for this key and any later one:
 
 1. **Create the key offline,** on a machine that is not used for daily work, or on a removable drive:
    ```
    deskbuddy-firmware-tool keygen --private deskbuddy-firmware-2026.pem --public deskbuddy-firmware-2026.pub.pem
    ```
    `openssl ecparam -name prime256v1 -genkey -noout | openssl pkcs8 -topk8 -nocrypt` makes the same kind of key.
-2. **Keep the private key out of Git.** `*.pem` is already ignored. Store it encrypted, with two offline copies
-   (for example a password-manager attachment and an encrypted USB stick). Never put it in CI.
+2. **Keep the private key out of Git.** Keep it outside any repository (the tool refuses otherwise). Store it
+   encrypted, with two offline copies (for example a password-manager attachment and an encrypted USB stick). Never
+   put it in CI.
 3. **Commit only the public key** as `companion/DeskBuddy.Companion/Firmware/TrustedKeys/deskbuddy-firmware-<year>.pub.pem`.
-   Record its SHA-256 fingerprint in this file. Rebuild and publish the Companion: from then on it trusts that key
-   and no other.
+   Record its SHA-256 fingerprint here and in that folder's README. Rebuild and publish the Companion: from then on
+   it trusts that key and no other.
 4. **Sign each release offline:**
    ```
    tools\package-firmware.ps1                      # on the build machine: the unsigned package

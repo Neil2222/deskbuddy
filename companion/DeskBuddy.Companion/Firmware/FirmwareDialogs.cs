@@ -23,6 +23,12 @@ public sealed class FirmwareDialogs(IWin32Window owner) : IFirmwareDialogs
         return form.ShowDialog(owner) == DialogResult.OK ? form.Answer : null;
     }
 
+    public bool ConfirmIdentify(string port, DeviceReport? before) => MessageBox.Show(owner,
+        $"Identify the board on {port}?\n\nThe board restarts into download mode; esptool reads its chip, PSRAM, flash chip " +
+        "and MAC, and restarts it. Nothing is read from the flash and nothing is written or erased." +
+        (before is null ? "" : $"\n\nDeskBuddy {before.Firmware} reconnects afterwards (Buddy's mood and Clock face start fresh)."),
+        "DeskBuddy firmware: identify", MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) == DialogResult.Yes;
+
     public bool ConfirmStop(bool writing) => MessageBox.Show(owner,
         writing
             ? "The firmware is being written. If you stop now, the board will not start DeskBuddy until you install again " +

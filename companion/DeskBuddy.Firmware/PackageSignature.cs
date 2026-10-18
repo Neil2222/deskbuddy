@@ -16,6 +16,13 @@ public sealed class TrustedKey
         _spki = spki;
     }
 
+    /// <summary>
+    /// SHA-256 of the key's SubjectPublicKeyInfo (the DER inside the PEM), lower-case hex: what is recorded in
+    /// docs/firmware-packages.md and checked against the file. The same as
+    /// <c>openssl pkey -pubin -in key.pub.pem -outform DER | openssl dgst -sha256</c>.
+    /// </summary>
+    public string Fingerprint => Convert.ToHexStringLower(SHA256.HashData(_spki));
+
     public static TrustedKey FromPem(string name, string pem)
     {
         using var key = ECDsa.Create();

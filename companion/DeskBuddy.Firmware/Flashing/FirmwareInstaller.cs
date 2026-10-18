@@ -88,6 +88,12 @@ public sealed record InstallResult(
     public bool Succeeded => Failure == InstallFailure.None;
 }
 
+/// <summary>The outcome of an identification (read-only); <see cref="Failure"/> None when the board is what it should be.</summary>
+public sealed record IdentifyResult(InstallFailure Failure, string Message, string Recovery, BoardIdentity? Identity, DeviceReport? After)
+{
+    public bool Succeeded => Failure == InstallFailure.None;
+}
+
 /// <summary>
 /// One install, update or repair, step by step (docs/firmware-packages.md, "Installing"). Nothing is written before
 /// every check has passed: the package (already verified when it was opened), the confirmations, the board's chip and
@@ -99,6 +105,76 @@ public sealed class FirmwareInstaller(Esptool esptool, IDevicePort port, string 
     Func<string, CancellationToken, Task<bool>>? manualBootPrompt = null, Action<string>? log = null)
 {
     public static readonly TimeSpan ReconnectTimeout = TimeSpan.FromSeconds(45);
+
+    /// <summary>
+    /// Identification only: the board restarts into download mode, esptool reads the chip, its features, the MAC and
+    /// the flash chip (flash_id) and restarts it into its app. Nothing is read from the flash and nothing is written.
+    /// With a DeskBuddy connected before, it must come back as the same device with the same firmware.
+    /// </summary>
+    public async Task<IdentifyResult> IdentifyAsync(string portName, EntryMode entry, DeviceReport? before, CancellationToken ct)
+    {
+        IDisposable hold;
+        try
+        {
+            hold = await port.AcquireAsync(portName, ct).ConfigureAwait(false);
+        }
+        catch (PortBusyException e)
+        {
+            return new IdentifyResult(InstallFailure.PortBusy, e.Message, "Close the other tool and try again.", null, null);
+        }
+        catch (OperationCanceledException)
+        {
+            return new IdentifyResult(InstallFailure.Cancelled, "Cancelled.", "", null, null);
+        }
+        EsptoolResult result;
+        BoardIdentity? identity;
+        using (hold)
+        {
+            if (entry == EntryMode.Manual && (manualBootPrompt is null ||
+                !await manualBootPrompt("Hold BOOT, press and release RESET, then release BOOT, to identify the board", ct).ConfigureAwait(false)))
+            {
+                return new IdentifyResult(InstallFailure.Cancelled, "Cancelled.", "Nothing was read.", null, null);
+            }
+            (result, identity) = await esptool.IdentifyAsync(portName, entry, resetAfter: entry == EntryMode.AutoReset, ct).ConfigureAwait(false);
+            Log(result);
+        }
+        if (!result.Ok)
+        {
+            var failed = FromEsptool(result, false, null, identity);
+            return new IdentifyResult(failed.Failure, failed.Message, failed.Recovery, identity, null);
+        }
+        var problems = new List<string>(identity!.Mismatches);
+        var kind = problems.Count > 0 ? InstallFailure.WrongChip : InstallFailure.None;
+        if (before?.DeviceId is { } dev && dev != identity.DeviceId)
+        {
+            problems.Add($"MAC {identity.Mac} is not the connected DeskBuddy's device {dev}");
+            kind = InstallFailure.WrongMac;
+        }
+        if (entry == EntryMode.Manual && manualBootPrompt is not null)
+        {
+            await manualBootPrompt("press RESET (without BOOT) so the board starts again", ct).ConfigureAwait(false);
+        }
+        DeviceReport? after = null;
+        if (before is not null)
+        {
+            after = await port.WaitForDeskBuddyAsync(portName, ReconnectTimeout, ct).ConfigureAwait(false);
+            if (after is null)
+            {
+                return new IdentifyResult(InstallFailure.NoReconnect,
+                    $"Identified ({identity.Summary}), but DeskBuddy did not answer again within {ReconnectTimeout.TotalSeconds:0} s.",
+                    "Nothing was written. Press RESET on the board, or unplug and reconnect it.", identity, null);
+            }
+            if (after.DeviceId != before.DeviceId || after.Firmware != before.Firmware)
+            {
+                problems.Add($"DeskBuddy came back as {after.Firmware} on device {after.DeviceId}");
+                kind = kind == InstallFailure.None ? InstallFailure.WrongFirmwareAfter : kind;
+            }
+        }
+        var summary = $"{identity.Summary}. This does not prove the exact board model.";
+        return kind == InstallFailure.None
+            ? new IdentifyResult(kind, summary + (after is null ? "" : $" DeskBuddy {after.Firmware} reconnected (new boot {after.Boot})."), "", identity, after)
+            : new IdentifyResult(kind, $"{string.Join("; ", problems)}. {summary}", "Nothing was written.", identity, after);
+    }
 
     public async Task<InstallResult> RunAsync(InstallRequest request, IProgress<InstallProgress>? progress, CancellationToken ct)
     {
