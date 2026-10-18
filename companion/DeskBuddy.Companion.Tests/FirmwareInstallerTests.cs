@@ -200,6 +200,28 @@ public sealed class FirmwareInstallerTests : IDisposable
     }
 
     [Fact]
+    public async Task Backup_folder_checksums_follow_the_sha256sum_format_and_board_txt_has_no_bom()
+    {
+        var (board, old) = WithDeskBuddy();
+        var p = Package();
+        var rig = Make(board, p);
+        var backups = Path.Combine(_dir, "backup-sums");
+
+        var r = await rig.Installer.RunAsync(Request(FirmwareOperation.Update, p, Reports(old, board), BackupChoice.To(backups)), null,
+            CancellationToken.None);
+
+        Assert.True(r.Succeeded, r.Message);
+        // Exactly what sha256sum -c reads (checked with Git's sha256sum from Git Bash, PowerShell and cmd): the hash, two
+        // spaces, the bare file name, LF. A BOM, a CR or a path in the name makes the tool fail or miss the file.
+        var sums = await File.ReadAllBytesAsync(Path.Combine(backups, "SHA256SUMS.txt"));
+        var hash = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(await File.ReadAllBytesAsync(r.BackupFile!)));
+        Assert.Equal($"{hash}  {Path.GetFileName(r.BackupFile)}\n", System.Text.Encoding.ASCII.GetString(sums));
+        var boardTxt = await File.ReadAllBytesAsync(Path.Combine(backups, "board.txt"));
+        Assert.False(boardTxt is [0xEF, 0xBB, 0xBF, ..], "board.txt starts with a UTF-8 BOM");
+        Assert.Contains(r.BackupFile!, System.Text.Encoding.UTF8.GetString(boardTxt));
+    }
+
+    [Fact]
     public async Task Update_keeps_an_older_bootloader_that_the_signed_package_lists_as_compatible()
     {
         var (board, old) = WithDeskBuddy(OldBootloader);

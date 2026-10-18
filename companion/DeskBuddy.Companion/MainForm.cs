@@ -139,6 +139,7 @@ public sealed partial class MainForm : Form
         {
             Dock = DockStyle.Fill,
         };
+        _firmware.ActivityChanged += (_, _) => UpdateState(); // the sidebar pill names the step while the port is held
         Text = "DeskBuddy";
         Icon = BuddyArt.AppIcon();
         BackColor = Theme.Window;
@@ -769,10 +770,12 @@ public sealed partial class MainForm : Form
         return page;
     }
 
-    // Its own page: the card needs the room, and its log stays visible while a run is under way.
+    // Its own page: the card needs the room, and its log stays visible while a run is under way. The card is as tall as
+    // its rows (the result and recovery text included); in a small window the page scrolls and the log keeps a few lines.
     private Panel BuildFirmwarePage()
     {
-        var page = new Panel();
+        const int MinLogHeight = 150;
+        var page = new Panel { AutoScroll = true };
         var log = new Card(_theme) { Title = "Firmware log · the Firmware Manager and esptool", Dock = DockStyle.Fill };
         _firmwareLog.Font = _theme.Mono;
         _firmwareLog.ForeColor = Theme.Muted;
@@ -782,7 +785,14 @@ public sealed partial class MainForm : Form
         page.Controls.Add(log); // first: it fills what the card above leaves
         var card = new Card(_theme) { Title = "Firmware", Dock = DockStyle.Top, Height = 360 };
         card.Controls.Add(_firmware);
-        Stack(page, card, Gap());
+        var gap = Gap();
+        Stack(page, card, gap);
+        _firmware.ContentHeightChanged += (_, _) =>
+        {
+            card.Height = card.Padding.Vertical + _firmware.ContentHeight;
+            page.AutoScrollMinSize = new Size(0, card.Height + gap.Height + MinLogHeight);
+        };
+        NativeLook.DarkScrollBars(page);
         return page;
     }
 
@@ -1019,7 +1029,7 @@ public sealed partial class MainForm : Form
         var text = _service.ConnectionText;
         if (text.StartsWith("Paused", StringComparison.Ordinal))
         {
-            return ("Paused while flashing", Theme.Amber);
+            return (_firmware.Activity ?? (text.Contains("ESP-IDF", StringComparison.Ordinal) ? "Paused for ESP-IDF" : "Paused"), Theme.Amber);
         }
         if (text.StartsWith("Connecting", StringComparison.Ordinal) || text.StartsWith("Resuming", StringComparison.Ordinal))
         {

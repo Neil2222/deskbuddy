@@ -65,10 +65,52 @@ public sealed class FirmwareCard : Panel
     private string? _loadError;
     private CancellationTokenSource? _cts;
     private InstallStep _currentStep;
-    private bool _backupTouched;
+    private bool _backupTouched, _settingBackup, _progressShown;
+    private const int ResultIndent = 72;
     private readonly TableLayoutPanel _progressRow;
 
     public bool Running => _cts is not null;
+
+    private string? _activity;
+
+    /// <summary>What the Firmware Manager is doing with the port right now (for the sidebar), or null when idle.</summary>
+    public string? Activity => Running ? _activity : null;
+
+    /// <summary>Raised on the UI thread whenever <see cref="Activity"/> changes.</summary>
+    public event EventHandler? ActivityChanged;
+
+    private void SetActivity(string? text)
+    {
+        if (_activity != text)
+        {
+            _activity = text;
+            ActivityChanged?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    /// <summary>The height all visible rows need at the current width (the page sizes the card to it).</summary>
+    public int ContentHeight { get; private set; }
+
+    /// <summary>Raised when <see cref="ContentHeight"/> changes: a wrapped text, the progress row, a result.</summary>
+    public event EventHandler? ContentHeightChanged;
+
+    protected override void OnLayout(LayoutEventArgs e)
+    {
+        base.OnLayout(e);
+        // Not Visible: that is false for every row while the page is hidden, and the card would shrink to nothing.
+        var height = Padding.Vertical + Controls.Cast<Control>().Where(c => c != _progressRow || _progressShown).Sum(c => c.Height);
+        if (height != ContentHeight)
+        {
+            ContentHeight = height;
+            ContentHeightChanged?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    protected override void OnResize(EventArgs e)
+    {
+        base.OnResize(e);
+        _result.MaximumSize = new Size(Math.Max(120, ClientSize.Width - ResultIndent - 8), 0); // wrap inside the card
+    }
 
     public FirmwareCard(Theme theme, IFirmwareHost host, IFirmwareDialogs dialogs, Action<string> log)
     {
@@ -105,16 +147,18 @@ public sealed class FirmwareCard : Panel
         actions.Controls.AddRange([_identify, _install, _update, _repair]);
         var options = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, WrapContents = true, Padding = new Padding(58, 0, 0, 4) };
         options.Controls.AddRange([_backup, _manual]);
-        _progressRow = new TableLayoutPanel { Dock = DockStyle.Top, Height = 38, ColumnCount = 3, Padding = new Padding(72, 4, 0, 0), Visible = false };
-        _progressRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 240));
-        _progressRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        // AutoSize: a long step text ("Backing up the whole flash (16 MB, a few minutes)") wraps instead of being cut.
+        _progressRow = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, MinimumSize = new Size(0, 38), ColumnCount = 3, Padding = new Padding(72, 4, 0, 0), Visible = false };
+        _progressRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 40)); // the bar; the step text gets the rest, at any width
+        _progressRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 60));
         _progressRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         _bar.Dock = DockStyle.None;
         _bar.Anchor = AnchorStyles.Left | AnchorStyles.Right;
         _progressRow.Controls.Add(_bar, 0, 0);
         _progressRow.Controls.Add(_step, 1, 0);
         _progressRow.Controls.Add(_cancel, 2, 0);
-        var result = new Panel { Dock = DockStyle.Top, AutoSize = true, Padding = new Padding(72, 4, 0, 0) };
+        var result = new Panel { Dock = DockStyle.Top, AutoSize = true, Padding = new Padding(0, 0, 0, 6) };
+        _result.Location = new Point(ResultIndent, 4); // under the progress bar, as the other rows
         result.Controls.Add(_result);
         Controls.Add(result);
         Controls.Add(_progressRow);
@@ -128,7 +172,7 @@ public sealed class FirmwareCard : Panel
         _repair.Click += async (_, _) => await StartAsync(FirmwareOperation.Repair);
         _identify.Click += async (_, _) => await IdentifyAsync();
         _cancel.Click += (_, _) => Cancel();
-        _backup.CheckedChanged += (_, _) => _backupTouched = true;
+        _backup.CheckedChanged += (_, _) => _backupTouched |= !_settingBackup;
         RefreshState();
     }
 
@@ -197,7 +241,9 @@ public sealed class FirmwareCard : Panel
         _backup.Enabled = _manual.Enabled = !running;
         if (!_backupTouched)
         {
+            _settingBackup = true; // the default is not the user's choice
             _backup.Checked = connected is not null; // on by default for an existing DeskBuddy, optional for a new board
+            _settingBackup = false;
         }
         if (!_host.ToolBundled)
         {
@@ -235,7 +281,8 @@ public sealed class FirmwareCard : Panel
         _cts = new CancellationTokenSource();
         _result.Text = "";
         _bar.Value = 0;
-        _progressRow.Visible = true;
+        _progressRow.Visible = _progressShown = true;
+        SetActivity(Activities(InstallStep.Preparing));
         RefreshState();
         _log($"Firmware: {operation} of DeskBuddy {package.Manifest.Version} on {port} started");
         InstallResult result;
@@ -248,6 +295,7 @@ public sealed class FirmwareCard : Panel
         {
             _cts.Dispose();
             _cts = null;
+            SetActivity(null);
         }
         ShowResult(result);
         RefreshState();
@@ -268,8 +316,9 @@ public sealed class FirmwareCard : Panel
         _cts = new CancellationTokenSource();
         _result.Text = "";
         _bar.Value = 0;
-        _progressRow.Visible = true;
+        _progressRow.Visible = _progressShown = true;
         _step.Text = "Identifying the board (read-only)";
+        SetActivity("Identifying the board");
         RefreshState();
         _log($"Firmware: identifying the board on {port} (read-only)");
         IdentifyResult result;
@@ -282,6 +331,7 @@ public sealed class FirmwareCard : Panel
         {
             _cts.Dispose();
             _cts = null;
+            SetActivity(null);
         }
         _bar.Value = 100;
         _step.Text = result.Succeeded ? "Identified" : "Stopped";
@@ -296,6 +346,7 @@ public sealed class FirmwareCard : Panel
         _currentStep = p.Step;
         _bar.Value = Math.Clamp(p.Percent, 0, 100);
         _step.Text = $"{Step(p.Step)}: {p.Text}";
+        SetActivity(Activities(p.Step));
     }
 
     private static string Step(InstallStep s) => s switch
@@ -303,11 +354,25 @@ public sealed class FirmwareCard : Panel
         InstallStep.Preparing => "1/7 Preparing",
         InstallStep.Identifying => "2/7 Identifying",
         InstallStep.BackingUp => "3/7 Backup",
+        InstallStep.CheckingBackup => "3/7 Backup check",
         InstallStep.CheckingBootloader => "4/7 Bootloader check",
         InstallStep.Writing => "5/7 Writing",
         InstallStep.Verifying => "6/7 Verifying",
         InstallStep.Reconnecting => "7/7 Reconnecting",
         _ => "Done",
+    };
+
+    /// <summary>The sidebar's short wording: only <see cref="InstallStep.Writing"/> is flashing.</summary>
+    private static string Activities(InstallStep s) => s switch
+    {
+        InstallStep.Preparing => "Preparing firmware",
+        InstallStep.Identifying => "Identifying the board",
+        InstallStep.BackingUp => "Backing up the flash",
+        InstallStep.CheckingBackup => "Checking the backup",
+        InstallStep.CheckingBootloader => "Checking the bootloader",
+        InstallStep.Writing => "Flashing firmware",
+        InstallStep.Verifying => "Verifying firmware",
+        _ => "Restarting DeskBuddy",
     };
 
     public void ShowResult(InstallResult r)

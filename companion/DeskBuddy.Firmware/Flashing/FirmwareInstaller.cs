@@ -48,7 +48,7 @@ public sealed record InstallRequest(
     BackupChoice Backup,
     bool RepairConfirmed = false);
 
-public enum InstallStep { Preparing, Identifying, BackingUp, CheckingBootloader, Writing, Verifying, Reconnecting, Done }
+public enum InstallStep { Preparing, Identifying, BackingUp, CheckingBackup, CheckingBootloader, Writing, Verifying, Reconnecting, Done }
 
 public sealed record InstallProgress(InstallStep Step, int Percent, string Text);
 
@@ -481,7 +481,7 @@ public sealed class FirmwareInstaller(Esptool esptool, IDevicePort port, string 
         {
             return (null, Failed($"the backup file is not {profile.FlashSize}"));
         }
-        progress?.Report(new(InstallStep.BackingUp, 92, "Checking the backup against the board"));
+        progress?.Report(new(InstallStep.CheckingBackup, 92, "Checking the backup against the board"));
         if (!await EnterBootModeAsync(request, "check the backup", ct).ConfigureAwait(false))
         {
             return (null, Fail(InstallFailure.Cancelled, "Cancelled before anything was written.", "Nothing was changed.", false, null, identity));
@@ -496,12 +496,13 @@ public sealed class FirmwareInstaller(Esptool esptool, IDevicePort port, string 
         await using (var s = File.OpenRead(file))
         {
             var sha = Convert.ToHexStringLower(await SHA256.HashDataAsync(s, ct).ConfigureAwait(false));
+            // GNU format, "<hash>  <name>\n" with no path, BOM or CR: checked OK with sha256sum -c (Git Bash, PowerShell, cmd).
             await File.WriteAllTextAsync(Path.Combine(folder, "SHA256SUMS.txt"), $"{sha}  {Path.GetFileName(file)}\n", Encoding.ASCII, ct)
                 .ConfigureAwait(false);
         }
         await File.WriteAllTextAsync(Path.Combine(folder, "board.txt"),
             $"{identity.Summary}\nbefore: {request.Before?.Firmware ?? "no DeskBuddy"} build {request.Before?.Build ?? "-"}\n" +
-            $"restore: tools\\flash-backup.ps1 -Action restore -Image \"{file}\"\n", Encoding.UTF8, ct).ConfigureAwait(false);
+            $"restore: tools\\flash-backup.ps1 -Action restore -Image \"{file}\"\n", new UTF8Encoding(false), ct).ConfigureAwait(false);
         return (file, null);
     }
 

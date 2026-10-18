@@ -203,9 +203,9 @@ public sealed class FirmwareManager : IDevicePort, IFirmwareHost
 
 /// <summary>
 /// The public keys this Companion accepts firmware packages from: PEM files embedded from Firmware/TrustedKeys/ at
-/// build time. There are none yet; a production key is added there (only the public half) when it is created
-/// (docs/firmware-packages.md, "Signing"). A key is never trusted any other way: not from a file next to the exe, not
-/// from an environment variable, not because it signed the package being opened.
+/// build time, public halves only; the production key is deskbuddy-firmware-2026 (docs/firmware-packages.md,
+/// "Signing"). A key is never trusted any other way: not from a file next to the exe, not from an environment
+/// variable, not because it signed the package being opened.
 /// </summary>
 public static class FirmwareTrust
 {
