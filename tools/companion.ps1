@@ -4,7 +4,8 @@
 #   tools/companion.ps1 -Test      # run the companion's unit tests
 #   tools/companion.ps1 -Publish   # one self-contained DeskBuddy.Companion.exe in companion\publish: .NET is built in,
 #                                  # so it starts by double-click on any 64-bit Windows PC, no runtime or settings needed
-param([switch] $BuildOnly, [switch] $Test, [switch] $Publish)
+#   tools/companion.ps1 -Publish -PublishDir <folder>   # the same into another folder (a test copy beside the real one)
+param([switch] $BuildOnly, [switch] $Test, [switch] $Publish, [string] $PublishDir)
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'common.ps1')
 
@@ -16,7 +17,7 @@ if ($Test) {
     exit $LASTEXITCODE
 }
 if ($Publish) {
-    $out = [IO.Path]::GetFullPath((Join-Path $root 'publish'))
+    $out = [IO.Path]::GetFullPath($(if ($PublishDir) { $PublishDir } else { Join-Path $root 'publish' }))
     $exe = Join-Path $out 'DeskBuddy.Companion.exe'
     if (Get-Process DeskBuddy.Companion -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $exe }) {
         throw "DeskBuddy Companion is running from ${out}: close it first."

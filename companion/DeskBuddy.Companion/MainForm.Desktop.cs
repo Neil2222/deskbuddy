@@ -229,7 +229,7 @@ public sealed partial class MainForm
             // Quitting now would stop the flashing tool halfway (its process tree ends with the Companion).
             e.Cancel = true;
             _quitting = false;
-            MessageBox.Show(this, "DeskBuddy's firmware is being installed. Wait until it has finished, or cancel it on the Device page first.",
+            MessageBox.Show(this, "DeskBuddy's firmware is being installed. Wait until it has finished, or cancel it on the Firmware page first.",
                 "DeskBuddy", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }

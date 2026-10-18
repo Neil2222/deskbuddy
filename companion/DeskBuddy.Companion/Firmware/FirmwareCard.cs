@@ -44,7 +44,7 @@ public sealed record FirmwareConfirmRequest(
     bool NeedsModelConfirmation);
 
 /// <summary>
-/// The Device page's Firmware card: the package, the board, what can be done with them, and the run itself. Nothing
+/// The Firmware page's card: the package, the board, what can be done with them, and the run itself. Nothing
 /// happens without a click and a confirmation; the card only offers what <see cref="UpdatePolicy"/> and
 /// <see cref="FirmwareInstaller.Refusal"/> allow.
 /// </summary>
@@ -77,11 +77,11 @@ public sealed class FirmwareCard : Panel
         _log = log;
         BackColor = Theme.Card;
         _open = new FlatButton(theme, ButtonLook.Quiet) { Text = "Open package…", Width = 150, Height = 32 };
-        _install = new FlatButton(theme, ButtonLook.Accent) { Text = "Install DeskBuddy", Width = 170, Height = 34 };
-        _update = new FlatButton(theme, ButtonLook.Accent) { Text = "Update firmware", Width = 160, Height = 34 };
-        _repair = new FlatButton(theme, ButtonLook.Quiet) { Text = "Repair (full reinstall)…", Width = 200, Height = 34 };
-        _identify = new FlatButton(theme, ButtonLook.Quiet) { Text = "Identify board…", Width = 150, Height = 34 };
-        _cancel = new FlatButton(theme, ButtonLook.Quiet) { Text = "Cancel", Width = 100, Height = 34 };
+        _install = new FlatButton(theme, ButtonLook.Accent) { Text = "Install DeskBuddy", Width = 160, Height = 34 };
+        _update = new FlatButton(theme, ButtonLook.Accent) { Text = "Update firmware", Width = 150, Height = 34 };
+        _repair = new FlatButton(theme, ButtonLook.Quiet) { Text = "Full reinstall…", Width = 140, Height = 34, AccessibleName = "Repair (full reinstall)" };
+        _identify = new FlatButton(theme, ButtonLook.Quiet) { Text = "Identify board…", Width = 140, Height = 34 };
+        _cancel = new FlatButton(theme, ButtonLook.Quiet) { Text = "Cancel", Width = 90, Height = 30 };
         foreach (var l in new[] { _offer, _step, _result })
         {
             l.Font = theme.Small;
@@ -100,15 +100,20 @@ public sealed class FirmwareCard : Panel
         grid.Controls.Add(_offer, 1, 2);
         grid.SetColumnSpan(_offer, 2);
 
-        var actions = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 44, WrapContents = false, Padding = new Padding(68, 6, 0, 0) };
-        actions.Controls.AddRange([_identify, _install, _update, _repair, _cancel]);
-        var options = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 30, WrapContents = false, Padding = new Padding(58, 0, 0, 0) };
+        // Wrap at the minimum window width instead of cutting buttons off.
+        var actions = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, WrapContents = true, Padding = new Padding(68, 6, 0, 4) };
+        actions.Controls.AddRange([_identify, _install, _update, _repair]);
+        var options = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, WrapContents = true, Padding = new Padding(58, 0, 0, 4) };
         options.Controls.AddRange([_backup, _manual]);
-        _progressRow = new TableLayoutPanel { Dock = DockStyle.Top, Height = 30, ColumnCount = 2, Padding = new Padding(72, 6, 0, 0), Visible = false };
-        _progressRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 260));
+        _progressRow = new TableLayoutPanel { Dock = DockStyle.Top, Height = 38, ColumnCount = 3, Padding = new Padding(72, 4, 0, 0), Visible = false };
+        _progressRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 240));
         _progressRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        _progressRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        _bar.Dock = DockStyle.None;
+        _bar.Anchor = AnchorStyles.Left | AnchorStyles.Right;
         _progressRow.Controls.Add(_bar, 0, 0);
         _progressRow.Controls.Add(_step, 1, 0);
+        _progressRow.Controls.Add(_cancel, 2, 0);
         var result = new Panel { Dock = DockStyle.Top, AutoSize = true, Padding = new Padding(72, 4, 0, 0) };
         result.Controls.Add(_result);
         Controls.Add(result);

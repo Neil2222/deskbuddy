@@ -66,6 +66,7 @@ public enum InstallFailure
     WrongMac,
     BackupFailed,
     BootloaderIncompatible,
+    AlreadyInstalled,       // an Install on a board whose app is already DeskBuddy (the Companion was not connected)
     WriteFailed,            // nothing was written
     WriteInterrupted,       // writing had begun: the board may not start until it is installed again
     VerifyFailed,
@@ -238,6 +239,30 @@ public sealed class FirmwareInstaller(Esptool esptool, IDevicePort port, string 
                     "Nothing was changed. Connect only the board you want to update, and try again.", false, null, identity);
             }
             var mac = identity.Mac;
+
+            // An Install rewrites the bootloader too, with no backup by default: never on a board that already runs
+            // DeskBuddy just because the Companion was not connected to it. The app's description says (read-only).
+            if (request.Operation == FirmwareOperation.Install)
+            {
+                if (!await EnterBootModeAsync(request, "check what the board runs", ct).ConfigureAwait(false))
+                {
+                    return Fail(InstallFailure.Cancelled, "Cancelled before anything was written.", "Nothing was changed.", false, null, identity);
+                }
+                var appFile = Path.Combine(run, "app-head.bin");
+                var head = await esptool.ReadFlashAsync(request.Port, request.Entry, 0x10000, 0x1000, appFile, mac, resetAfter: false, null, ct)
+                    .ConfigureAwait(false);
+                Log(head);
+                if (!head.Ok)
+                {
+                    return FromEsptool(head, false, null, identity);
+                }
+                if (InstalledApp(await File.ReadAllBytesAsync(appFile, ct).ConfigureAwait(false)) is { } installed)
+                {
+                    return Fail(InstallFailure.AlreadyInstalled,
+                        $"This board already runs DeskBuddy {installed}.",
+                        "Nothing was changed. Let the Companion connect to it, then use Update (or Repair).", false, null, identity);
+                }
+            }
 
             // 2. The backup, before anything is written.
             if (request.Backup.Folder is { } folder)
@@ -489,6 +514,23 @@ public sealed class FirmwareInstaller(Esptool esptool, IDevicePort port, string 
         }
         return manualBootPrompt is not null && await manualBootPrompt(
             $"Hold BOOT, press and release RESET, then release BOOT, to {step}", ct).ConfigureAwait(false);
+    }
+
+    /// <summary>The version of the DeskBuddy app whose start is <paramref name="head"/> (flash at 0x10000), or null.</summary>
+    internal static string? InstalledApp(ReadOnlySpan<byte> head)
+    {
+        // The image header (24 bytes), the first segment's header (8), then esp_app_desc_t.
+        if (head.Length < 32 + 144 || head[0] != EspImage.Magic ||
+            System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(head[32..]) != 0xABCD5432)
+        {
+            return null;
+        }
+        static string Text(ReadOnlySpan<byte> f)
+        {
+            var end = f.IndexOf((byte)0);
+            return Encoding.ASCII.GetString(end < 0 ? f : f[..end]);
+        }
+        return Text(head.Slice(32 + 48, 32)) == FirmwareManifest.ProductName ? Text(head.Slice(32 + 16, 32)) : null;
     }
 
     private static int WritePercent(IReadOnlyList<FlashRegion> regions, EsptoolProgress p, long total)

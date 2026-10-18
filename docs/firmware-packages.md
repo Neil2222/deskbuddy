@@ -228,12 +228,18 @@ The procedure, for this key and any later one:
 
 ## Installing (the Firmware Manager)
 
-The Device page's **Firmware** card: *Open package…*, the board, what may be done, and the run with its progress and
-result. Nothing happens without a click and the confirmation dialog.
+The Companion's **Firmware** page (its own entry in the sidebar; the card needs the room, and its log stays visible
+during a run): *Open package…*, the board, what may be done, and the run with its progress and result. Nothing
+happens without a click and the confirmation dialog.
+- **Identify board…** is read-only. esptool `flash_id` reads the chip, PSRAM, flash chip and MAC; the board restarts
+  into download mode and back. Nothing is read from the flash and nothing is written. A connected DeskBuddy must
+  come back as the same device with the same firmware.
+- **An Install never runs over DeskBuddy.** It reads the app header at 0x10000 first (4 KB, read-only) and refuses
+  if that is already DeskBuddy, even when the Companion was not connected to it.
 
 | Operation | Writes | When |
 |---|---|---|
-| **Install** | bootloader 0x0, partition table 0x8000, app 0x10000 | a board where no DeskBuddy answers; the user confirms the exact model |
+| **Install** | bootloader 0x0, partition table 0x8000, app 0x10000 | a board without DeskBuddy (its app header is checked); the user confirms the exact model |
 | **Update** | the app at 0x10000 only | a connected DeskBuddy whose bootloader and partition table are verified compatible first (below) |
 | **Repair (full reinstall)** | all three again | any DeskBuddy, or a board an interrupted run left without one; the model is confirmed and *REPAIR* typed |
 

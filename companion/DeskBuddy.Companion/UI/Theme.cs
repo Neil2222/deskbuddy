@@ -92,6 +92,7 @@ public sealed class Theme : IDisposable
     public const string GlyphMessage = "\uE8BD";    // Message
     public const string GlyphPdc = "\uE716";        // People
     public const string GlyphDevice = "\uE88E";     // USB
+    public const string GlyphFirmware = "\uE896";   // Download
     public const string GlyphPlay = "\uE768";
     public const string GlyphStop = "\uE71A";
     public const string GlyphSchedule = "\uE787";   // Calendar

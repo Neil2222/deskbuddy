@@ -134,6 +134,23 @@ public sealed class FirmwareInstallerTests : IDisposable
     }
 
     [Fact]
+    public async Task Install_never_runs_over_DeskBuddy_even_when_the_Companion_was_not_connected_to_it()
+    {
+        var (board, _) = WithDeskBuddy(OldBootloader); // the Companion knows nothing: no hello was answered
+        var p = Package();
+        var rig = Make(board, p);
+        var before = (byte[])board.Flash.Clone();
+
+        var r = await rig.Installer.RunAsync(Request(FirmwareOperation.Install, p, null), null, CancellationToken.None);
+
+        Assert.Equal(InstallFailure.AlreadyInstalled, r.Failure);
+        Assert.Contains("1.0.0", r.Message);
+        Assert.Contains("Update", r.Recovery);
+        Assert.Empty(Writes(rig.Tool));
+        Assert.Equal(before, board.Flash);
+    }
+
+    [Fact]
     public async Task A_board_that_is_not_an_ESP32_S3_with_8_MB_PSRAM_and_16_MB_flash_is_refused_before_anything_is_read()
     {
         var p = Package();
@@ -429,7 +446,7 @@ public sealed class FirmwareInstallerTests : IDisposable
         });
         var r = await rig.Installer.RunAsync(Request(FirmwareOperation.Install, p, null, entry: EntryMode.Manual), null, CancellationToken.None);
         Assert.True(r.Succeeded, r.Message);
-        Assert.Equal(4, asked.Count); // identify, write, verify, then RESET to start it
+        Assert.Equal(5, asked.Count); // identify, check the app, write, verify, then RESET to start it
         Assert.All(rig.Tool.Runs, run => Assert.Equal(["--before", "no_reset", "--after", "no_reset"], run.Skip(6).Take(4)));
 
         var declined = Make(new FakeBoard(), p, (text, _) => Task.FromResult(!text.Contains("write", StringComparison.Ordinal)));

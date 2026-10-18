@@ -40,7 +40,7 @@ public sealed partial class MainForm : Form
     private readonly Panel _pageHost = new() { Dock = DockStyle.Fill };
     private readonly List<Page> _pages = [];
     private Page? _current;
-    private Page _buddyPage = null!, _messagePage = null!, _pdcPage = null!, _devicePage = null!;
+    private Page _buddyPage = null!, _messagePage = null!, _pdcPage = null!, _devicePage = null!, _firmwarePage = null!;
 
     private sealed record Page(string Title, string Subtitle, FlatButton Nav, Panel Body);
 
@@ -122,6 +122,11 @@ public sealed partial class MainForm : Form
     {
         Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Both, WordWrap = false, BorderStyle = BorderStyle.None,
     };
+    // The Firmware page's own log: what the Firmware Manager and esptool said (also in Diagnostics).
+    private readonly TextBox _firmwareLog = new()
+    {
+        Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Both, WordWrap = false, BorderStyle = BorderStyle.None,
+    };
 
     public MainForm(SingleInstance instance, bool minimized)
     {
@@ -200,7 +205,8 @@ public sealed partial class MainForm : Form
         _service.HistoryChanged += _historyPage.HistoryChanged;
         _messagePage = AddPage(nav, "Message", "Text that scrolls across his LED sign", Theme.GlyphMessage, BuildMessagePage());
         _pdcPage = AddPage(nav, "PDC Manager", "The ZDMW Teams button, from here or from Buddy's menu", Theme.GlyphPdc, BuildPdcPage());
-        _devicePage = AddPage(nav, "Device", "Connection, firmware, the desktop simulator and the protocol log", Theme.GlyphDevice, BuildDevicePage());
+        _devicePage = AddPage(nav, "Device", "Connection, the desktop simulator and the protocol log", Theme.GlyphDevice, BuildDevicePage());
+        _firmwarePage = AddPage(nav, "Firmware", "Install, update or repair DeskBuddy's firmware over USB", Theme.GlyphFirmware, BuildFirmwarePage());
 
         Controls.Add(content);
         Controls.Add(sidebar);
@@ -759,25 +765,40 @@ public sealed partial class MainForm : Form
     {
         var page = new Panel();
         page.Controls.Add(BuildDiagnosticsCard()); // first: it fills what the cards above leave
-        Stack(page, BuildConnectionCard(), Gap(), BuildFirmwareCard(), Gap(), BuildSimulatorCard(), Gap(), BuildWindowsCard(), Gap());
+        Stack(page, BuildConnectionCard(), Gap(), BuildSimulatorCard(), Gap(), BuildWindowsCard(), Gap());
         return page;
     }
 
-    private Card BuildFirmwareCard()
+    // Its own page: the card needs the room, and its log stays visible while a run is under way.
+    private Panel BuildFirmwarePage()
     {
-        var card = new Card(_theme) { Title = "Firmware", Dock = DockStyle.Top, Height = 340 };
+        var page = new Panel();
+        var log = new Card(_theme) { Title = "Firmware log · the Firmware Manager and esptool", Dock = DockStyle.Fill };
+        _firmwareLog.Font = _theme.Mono;
+        _firmwareLog.ForeColor = Theme.Muted;
+        var frame = new InputFrame(_firmwareLog) { Dock = DockStyle.Fill, Padding = new Padding(10, 8, 4, 8) };
+        NativeLook.DarkScrollBars(_firmwareLog);
+        log.Controls.Add(frame);
+        page.Controls.Add(log); // first: it fills what the card above leaves
+        var card = new Card(_theme) { Title = "Firmware", Dock = DockStyle.Top, Height = 360 };
         card.Controls.Add(_firmware);
-        return card;
+        Stack(page, card, Gap());
+        return page;
     }
 
-    // The Firmware Manager reports from worker threads: into the Diagnostics log on the UI thread.
+    // The Firmware Manager reports from worker threads: into the Firmware log and Diagnostics, on the UI thread.
     private void FirmwareLog(string text)
     {
         if (InvokeRequired)
         {
-            BeginInvoke(() => AppendLog(LogKind.Info, text));
+            BeginInvoke(() => FirmwareLog(text));
             return;
         }
+        if (_firmwareLog.Lines.Length > MaxLogLines)
+        {
+            _firmwareLog.Lines = _firmwareLog.Lines[^(MaxLogLines / 2)..];
+        }
+        _firmwareLog.AppendText($"{DateTime.Now:HH:mm:ss} {text}{Environment.NewLine}");
         AppendLog(LogKind.Info, text);
     }
 
