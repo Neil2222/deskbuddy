@@ -5,10 +5,16 @@ checking it completely (`companion/DeskBuddy.Firmware`). This page covers the pa
 how the Firmware Manager writes it to a board over USB ([Installing](#installing-the-firmware-manager)), with
 Espressif's esptool v4.12.0 ([decision](#flashing-backend-decision)).
 
-**Not yet physically validated:** nothing on this page has been written to a board yet. Install, Update and
-Repair are tested against a simulated board and esptool only. Only one board exists, and it is the working DeskBuddy.
-First-time installation on a factory-new board is not physically validated, and no test may restore the factory
-firmware on the working board.
+**Validation status.** Only one board exists, and it is the working DeskBuddy; no test may restore the factory
+firmware on it.
+
+| Operation | Status |
+|---|---|
+| Identify | **Physically tested** on the working board (18 Oct 2026, Companion 1.1.0 test build): chip, PSRAM, flash and MAC read; DeskBuddy reconnected 3 s after the reset |
+| Update (app only) | **Physically tested** on the working board (18 Oct 2026): `57eb475` → 1.0.0 (`28c96c5`) with full backup, bootloader and partition table check, write of 0x10000 only, read-back verify, reconnect with `hw=ok` |
+| Install | Automated tests against a simulated board and esptool only |
+| Repair (full reinstall) | Automated tests against a simulated board and esptool only |
+| Install on a factory-new Waveshare board | **Not physically validated** (no factory-new board to test on) |
 
 ## Versions
 
@@ -268,6 +274,9 @@ The package's own bootloader differs only because reproducible builds drop the d
    - A failed backup stops the run, and the user decides explicitly.
    - Saved in `Documents\DeskBuddy-backups\fw-<old>-before-<new>-<time>` (`<data dir>\firmware-backups` with
      `DESKBUDDY_DATA_DIR`).
+   - `SHA256SUMS.txt` is one GNU line (`<sha256>  <file>`, LF): in that folder `sha256sum -c SHA256SUMS.txt` (Git
+     Bash, or Git's `sha256sum.exe` from PowerShell or cmd) prints `OK`; `Get-FileHash -Algorithm SHA256 <file>`
+     shows the same hash. `board.txt` (UTF-8, no BOM) has the chip, MAC, the firmware it held and the restore command.
 4. **Update only: the bootloader check** above.
 5. **Write** (`write_flash --flash_mode keep --flash_freq keep --flash_size keep`, the regions above).
    - The image files come from the verified package and are checked again on disk just before.
@@ -302,6 +311,19 @@ loads its stub. A different chip or MAC stops the run there, so a board swapped 
 | Hardware check failed | restore the backup |
 
 Cancelling before the write changes nothing; cancelling while writing asks first and then says a Repair is needed.
+While a run has the port, the sidebar's status names the step (*Identifying the board*, *Backing up the flash*,
+*Checking the backup*, *Checking the bootloader*, *Flashing firmware*, *Verifying firmware*, *Restarting DeskBuddy*);
+only *Flashing firmware* writes. The result, with what to do next and the backup's path, stays on the card.
+
+**Restoring a backup** (recovery outside the Companion, independent of its esptool):
+1. Quit the Companion (window X, or *Quit DeskBuddy* in tray mode); nothing else may have the COM port.
+2. `tools\flash-backup.ps1 -Action verify -Image <backup>.bin -Port COM6` (optional, read-only: is it on the board already?).
+3. `tools\flash-backup.ps1 -Action restore -Image <backup>.bin -Port COM6`: writes the 16 MB image and verifies it.
+4. If the board does not enter download mode: hold BOOT, tap RESET, release BOOT, and run it again.
+
+The working board's image from before the first update is
+`Documents\DeskBuddy-backups\fw-57eb475-before-1.0.0-20261018-133137\deskbuddy_441bf68d1178_full_16MB.bin`
+(SHA-256 `b0bb17e2…42b7`).
 
 **The flashing tool.** `esptool.exe` v4.12.0, Espressif's signed Windows build, pinned by SHA-256 (zip
 `42fddc5e…0889`, exe `1cd8386a…d1a3`).
