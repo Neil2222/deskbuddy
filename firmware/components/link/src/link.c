@@ -22,6 +22,7 @@ static const struct {
     {"time.set", LINK_CMD_TIME_SET}, {"msg.show", LINK_CMD_MSG_SHOW}, {"mood.set", LINK_CMD_MOOD_SET},
     {"act", LINK_CMD_ACT},           {"pdc.set", LINK_CMD_PDC_SET}, {"pdc.result", LINK_CMD_PDC_RESULT},
     {"log.since", LINK_CMD_LOG_SINCE}, {"clock.face", LINK_CMD_CLOCK_FACE}, {"info", LINK_CMD_INFO},
+    {"usage.set", LINK_CMD_USAGE_SET},
 };
 
 static const char *const PDC_RESULTS[LINK_PDC_RESULT_COUNT] = {
@@ -316,6 +317,30 @@ static link_result_t decode_args(link_command_t *c, const arg_t *args, int n)
         }
         c->u.pdc_set.on = strcmp(state, "on") == 0;
         c->u.pdc_set.count = (int32_t)v_count;
+    } else if (c->cmd == LINK_CMD_USAGE_SET) {
+        // Each window comes whole (its pct with its end) or not at all; a prediction only with its window.
+        static const char *const k_keys[LINK_USAGE_WINDOWS][3] = {{"five", "five_end", "five_pred"},
+                                                                  {"week", "week_end", "week_pred"}};
+        const char *state = get_arg(args, n, "state", v[0]);
+        if (!state || (strcmp(state, "on") != 0 && strcmp(state, "off") != 0)) {
+            return LINK_ERR_ARGS;
+        }
+        c->u.usage_set.on = strcmp(state, "on") == 0;
+        for (int w = 0; w < LINK_USAGE_WINDOWS; w++) {
+            const bool has_pct = find_arg(args, n, k_keys[w][0]) != NULL;
+            const bool has_end = find_arg(args, n, k_keys[w][1]) != NULL;
+            const bool has_pred = find_arg(args, n, k_keys[w][2]) != NULL;
+            const char *pct = get_arg(args, n, k_keys[w][0], v[1]), *end = get_arg(args, n, k_keys[w][1], v[2]);
+            const char *pred = get_arg(args, n, k_keys[w][2], v[3]);
+            int64_t v_pct = 0, v_end = 0, v_pred = -1;
+            if (has_pct != has_end || (has_pred && !has_pct) ||
+                (has_pct && (!pct || !parse_int(pct, 0, LINK_USAGE_PCT_MAX, &v_pct) || !end ||
+                             !parse_int(end, 0, UTC_LIMIT, &v_end))) ||
+                (has_pred && (!pred || !parse_int(pred, 0, LINK_USAGE_PCT_MAX, &v_pred)))) {
+                return LINK_ERR_ARGS;
+            }
+            c->u.usage_set.win[w] = (link_usage_t){has_pct, (uint16_t)v_pct, (int16_t)v_pred, v_end};
+        }
     } else if (c->cmd == LINK_CMD_LOG_SINCE) {
         const char *boot = get_arg(args, n, "boot", v[0]), *seq = get_arg(args, n, "seq", v[1]);
         int64_t v_seq;

@@ -2,8 +2,9 @@
 // the test moves, frame buffers in memory, and the lines it sends to the companion collected. Commands go in as
 // protocol lines, touches as touch events. Covers what the companion relies on: evt act (shown, then exactly one
 // outcome; no and timeout distinct; an interruption never an answer), act retries, status act=, evt did (MY DAY),
-// evt mood src=, and the recorded events' identity, time and replay (log.since). One application for all tests in this
-// file (it is a singleton, like on the board), run in order.
+// evt mood src=, the recorded events' identity, time and replay (log.since), and the Claude usage strip (usage.set: in
+// normal mode and Clock Mode, not during Missile Defense, its lease). One application for all tests in this file (it is
+// a singleton, like on the board), run in order.
 #include <inttypes.h>
 #include <stdarg.h>
 #include <stdlib.h>
@@ -23,6 +24,7 @@
 #include "menu_ttt.h"
 #include "test.h"
 #include "ttt.h"
+#include "usage_view.h"
 
 enum { W = 1024, H = 600, ALIGN = 32 };
 enum { KEPT = 64 };                    // APP_EVENTS_KEPT
@@ -221,7 +223,7 @@ void test_app_hello_offers_tracking_and_the_question(void)
     CHECK(start());
     clear_out();
     command(1, "hello");
-    CHECK(sent("caps=poke,monster,mode,time,status,msg,mood,act,pdc,track,did,log,face,info "));
+    CHECK(sent("caps=poke,monster,mode,time,status,msg,mood,act,pdc,track,did,log,face,info,usage "));
     CHECK(sent("acts=water,sneeze,stare,meditate,focus,ask_peukie,kitt faces=classic,skeleton dev="));
     clear_out();
     command(2, "status");
@@ -1019,4 +1021,104 @@ void test_app_missile_defense_fullscreen_and_back(void)
     command(310, "mood.set name=idle");
     tap_back(); // Home, for whatever runs next
     run(600);
+}
+
+// ---- Claude usage ----
+
+// Pixels of the usage strip's plate in the last presented frame (its colour is nowhere else on the stage or the clock).
+static int usage_plate_px(void)
+{
+    const gfx_rect_t a = usage_view_area(s_layout.stage);
+    int n = 0;
+    for (int y = a.y; y < a.y + a.h; y++) {
+        for (int x = a.x; x < a.x + a.w; x++) {
+            n += front_px(x, y) == GFX_RGB(20, 23, 36);
+        }
+    }
+    return n;
+}
+
+#define USAGE_ON "usage.set state=on five=37 five_end=1792009000 five_pred=130 week=20 week_end=1792266400 week_pred=90"
+
+// The strip: offered in hello's caps; shown while the lease holds, at the bottom of the stage, the same in Clock Mode;
+// its countdowns only while the clock is set; not during Missile Defense (from his alert on); gone 30 s after the last
+// usage.set, at once on a hello or state=off. Malformed lines get err bad_args.
+void test_app_usage_strip_follows_the_lease_and_the_mode(void)
+{
+    CHECK(start());
+    clear_out();
+    command(400, "hello");
+    CHECK(sent(",info,usage "));
+    run(100);
+    CHECK_EQ(usage_plate_px(), 0);
+
+    s_wall_us = 0; // the clock not set: no countdowns
+    command(401, USAGE_ON);
+    command(402, "usage.set state=on five=37");
+    command(403, "usage.set state=on five=1000 five_end=1792009000");
+    CHECK(sent("<DB1 401 ok #"));
+    CHECK(sent("<DB1 402 err bad_args #"));
+    CHECK(sent("<DB1 403 err bad_args #"));
+    run(100);
+    const int unset = usage_plate_px();
+    CHECK(unset > 0);
+    s_wall_us = 1792000000LL * 1000000; // set: "2:30" and "3d 2u" join in (the plate grows)
+    run(100);
+    const int shown = usage_plate_px();
+    CHECK(shown > unset);
+
+    // Clock Mode: the same strip in the same place; and back.
+    clear_out();
+    command(404, "mode.set mode=office");
+    run(4000);
+    CHECK(sent("evt mode mode=office"));
+    CHECK_EQ(usage_plate_px(), shown);
+    touch(W / 2, H / 2);
+    run(3000);
+    CHECK(sent("evt mode mode=normal"));
+    CHECK_EQ(usage_plate_px(), shown);
+
+    // The lease: renewed every 10 s it holds; 30 s without, the strip goes.
+    for (int i = 0; i < 4; i++) {
+        command(405, USAGE_ON);
+        run(10000);
+        CHECK_EQ(usage_plate_px(), shown);
+    }
+    run(20500); // 30.5 s since the last one
+    CHECK_EQ(usage_plate_px(), 0);
+    command(406, USAGE_ON);
+    run(100);
+    CHECK_EQ(usage_plate_px(), shown);
+    command(407, "hello"); // a new connection: gone at once
+    run(100);
+    CHECK_EQ(usage_plate_px(), 0);
+    command(408, USAGE_ON);
+    run(100);
+    CHECK_EQ(usage_plate_px(), shown);
+    command(409, "usage.set state=off");
+    run(100);
+    CHECK_EQ(usage_plate_px(), 0);
+
+    // Missile Defense: hidden from his alert on, back with his stage.
+    command(410, USAGE_ON);
+    run(100);
+    CHECK_EQ(usage_plate_px(), shown);
+    open_missiles();
+    run(300);
+    CHECK(!game_on_screen()); // his alert, on his stage
+    CHECK_EQ(usage_plate_px(), 0);
+    run(1200);
+    CHECK(game_on_screen());
+    CHECK_EQ(usage_plate_px(), 0);
+    command(411, USAGE_ON);
+    run(1000);
+    CHECK_EQ(usage_plate_px(), 0);
+    touch(MD_W - 34, 20); // the X
+    run(800);
+    CHECK(!game_on_screen());
+    CHECK_EQ(usage_plate_px(), shown);
+    command(412, "usage.set state=off");
+    tap_back(); // Home, for whatever runs next
+    run(600);
+    CHECK_EQ(usage_plate_px(), 0);
 }

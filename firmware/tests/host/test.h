@@ -182,7 +182,13 @@ extern int g_test_failed;
     X(md_buddy_faces_follow_the_game)                \
     X(md_view_touch_shoots_at_once_buttons_on_release) \
     X(md_view_redraws_match_full_redraw)             \
-    X(app_missile_defense_fullscreen_and_back)
+    X(app_missile_defense_fullscreen_and_back)       \
+    X(usage_protocol_lines)                          \
+    X(usage_lease_and_hello)                         \
+    X(usage_countdown_boundaries)                    \
+    X(usage_colours_follow_the_pct)                  \
+    X(usage_strip_fits_and_redraws_only_on_change)   \
+    X(app_usage_strip_follows_the_lease_and_the_mode)
 
 #define X(name) void test_##name(void);
 TEST_LIST

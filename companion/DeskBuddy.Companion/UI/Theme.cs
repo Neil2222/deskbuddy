@@ -91,6 +91,7 @@ public sealed class Theme : IDisposable
     public const string GlyphActivities = "\uE945"; // LightningBolt
     public const string GlyphMessage = "\uE8BD";    // Message
     public const string GlyphPdc = "\uE716";        // People
+    public const string GlyphUsage = "\uE9D2";      // AreaChart
     public const string GlyphDevice = "\uE88E";     // USB
     public const string GlyphFirmware = "\uE896";   // Download
     public const string GlyphPlay = "\uE768";

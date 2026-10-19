@@ -3,6 +3,7 @@ using DeskBuddy.Companion.History;
 using DeskBuddy.Companion.Pdc;
 using DeskBuddy.Companion.Protocol;
 using DeskBuddy.Companion.Schedule;
+using DeskBuddy.Companion.Usage;
 using DeskBuddy.Firmware.Flashing;
 using Microsoft.Win32;
 
@@ -36,6 +37,7 @@ public sealed partial class CompanionService : IDisposable
     private DateTime _nextSync;
     private int _missedPings;
     private readonly PdcLease _pdcLease = new();
+    private readonly UsageLease _usageLease = new();
     private readonly string? _pdcWarning;
     private readonly string _dataDirectory = PdcStore.DefaultDirectory;
     private readonly PdcStore _settings; // settings.json: also holds the last Clock face
@@ -82,6 +84,8 @@ public sealed partial class CompanionService : IDisposable
     public IReadOnlySet<string> Caps { get; private set; } = new HashSet<string>();
     /// <summary>The PDC Manager "Ze Doen Maar Wat" integration (off by default; see Pdc/).</summary>
     public PdcIntegration Pdc { get; }
+    /// <summary>The Claude plan usage strip (off by default; see Usage/).</summary>
+    public UsageIntegration Usage { get; }
 
     public event Action? Changed;
     public event Action<LogKind, string>? Log;
@@ -96,6 +100,9 @@ public sealed partial class CompanionService : IDisposable
         Pdc = PdcIntegration.CreateDefault(out _pdcWarning);
         Pdc.Log += Write;
         Pdc.Changed += SendPdcLease;
+        Usage = UsageIntegration.CreateDefault();
+        Usage.Log += Write;
+        Usage.Changed += SendUsageLease;
         SystemEvents.TimeChanged += OnTimeChanged; // also raised when the time zone changes
         SystemEvents.PowerModeChanged += OnPowerModeChanged;
     }
@@ -116,6 +123,7 @@ public sealed partial class CompanionService : IDisposable
             Write(LogKind.Warning, $"PDC Manager: using the test server {Pdc.BaseUri} ({PdcEndpoint.EnvironmentVariable})");
         }
         _ = Pdc.StartAsync();
+        _ = Usage.StartAsync();
         Tick();
     }
 
@@ -271,6 +279,7 @@ public sealed partial class CompanionService : IDisposable
     {
         var now = DateTime.UtcNow;
         _ = Pdc.TickAsync(); // no network at all while the integration is off
+        _ = Usage.TickAsync();
         ScheduleTick(); // also while not connected: a due action waits, or is recorded as skipped
         // The hold concerns serial ports only; a simulator connection (TCP) carries on while a tool flashes.
         var simulator = _link?.IsSimulator ?? SelectedPort == DeviceLink.SimulatorName;
@@ -318,6 +327,7 @@ public sealed partial class CompanionService : IDisposable
         }
         _history?.Tick();
         SendPdcLease();
+        SendUsageLease();
     }
 
     private async Task ConnectAsync()
@@ -417,6 +427,8 @@ public sealed partial class CompanionService : IDisposable
             Pdc.ResetDeviceIds(); // the board may have restarted while disconnected
             _pdcLease.Reset();
             SendPdcLease();
+            _usageLease.Reset();
+            SendUsageLease();
         }
         finally
         {
@@ -483,6 +495,8 @@ public sealed partial class CompanionService : IDisposable
             Pdc.ResetDeviceIds();
             _pdcLease.Reset(); // it lost the lease: resent right away
             SendPdcLease();
+            _usageLease.Reset();
+            SendUsageLease();
             if (IsConnected)
             {
                 // It lost the face too: decided now (before anything else is awaited), sent after the time.
@@ -505,6 +519,20 @@ public sealed partial class CompanionService : IDisposable
             return;
         }
         if (_pdcLease.Next(DateTimeOffset.UtcNow, Pdc.CanClick, Pdc.Count) is { } body)
+        {
+            _ = SendPdcAsync(link, body);
+        }
+    }
+
+    // The usage lease: usage.set right after hello, on every change, and every 10 s (only to firmware with the usage
+    // capability). No fresh numbers: state=off.
+    private void SendUsageLease()
+    {
+        if (_link is not { } link || !IsConnected || !Caps.Contains(UsageWire.Cap))
+        {
+            return;
+        }
+        if (_usageLease.Next(DateTimeOffset.UtcNow, Usage.Usage) is { } body)
         {
             _ = SendPdcAsync(link, body);
         }
@@ -543,6 +571,10 @@ public sealed partial class CompanionService : IDisposable
             if (_link == link && body.StartsWith("pdc.set", StringComparison.Ordinal))
             {
                 _pdcLease.Reset(); // sent again on the next tick
+            }
+            else if (_link == link && body.StartsWith("usage.set", StringComparison.Ordinal))
+            {
+                _usageLease.Reset();
             }
         }
         catch (Exception e) when (e is IOException or OperationCanceledException)
@@ -836,6 +868,7 @@ public sealed partial class CompanionService : IDisposable
         _history?.Disconnected();
         _history = null;
         _pdcLease.Reset();
+        _usageLease.Reset();
         if (link is not null)
         {
             Write(LogKind.Info, text);
@@ -893,9 +926,14 @@ public sealed partial class CompanionService : IDisposable
         {
             _ = SendPdcAsync(link, PdcWire.Set(false, null)); // best effort: written before the port closes
         }
+        if (_link is { } usageLink && IsConnected && Caps.Contains(UsageWire.Cap))
+        {
+            _ = SendPdcAsync(usageLink, UsageWire.Set(null)); // best effort, as pdc.set
+        }
         _link?.Dispose();
         _boardHistory?.Dispose(); // the last lines reach the disk
         _simulatorHistory?.Dispose();
         Pdc.Dispose();
+        Usage.Dispose();
     }
 }

@@ -32,6 +32,8 @@
 #include "office_zoom.h"
 #include "pdc.h"
 #include "ttt.h"
+#include "usage.h"
+#include "usage_view.h"
 
 static const char *TAG = "deskbuddy";
 
@@ -223,6 +225,11 @@ static void perf_log(const perf_t *p, int64_t window_us)
 
 // The PDC Manager integration as the companion offers it (pdc.h); the companion does the HTTP.
 static pdc_t s_pdc;
+
+// Claude usage as the companion reports it (usage.h), and its strip at the bottom of the stage (usage_view.h).
+static usage_t s_usage;
+static usage_view_t s_usage_view;
+static bool s_has_usage; // the strip could be set up
 
 // What the menu shows depends on Buddy; the brain owns his state (reading the mood also ends a timed one).
 static menu_status_t menu_status(buddy_brain_t *brain, bool has_office, uint32_t now)
@@ -644,12 +651,16 @@ static void run_command(const link_command_t *c, buddy_brain_t *brain, office_sw
     }
     case LINK_CMD_HELLO: // answered by the link (app_link.c); a new connection forgets what the previous one offered
         pdc_reset(&s_pdc);
+        usage_reset(&s_usage);
         return;
     case LINK_CMD_PDC_SET:
         if (c->u.pdc_set.on != pdc_available(&s_pdc, now)) {
             APP_LOGI(TAG, "PDC Manager %s (companion)", c->u.pdc_set.on ? "available" : "unavailable");
         }
         pdc_set(&s_pdc, c->u.pdc_set.on, c->u.pdc_set.count, now);
+        break;
+    case LINK_CMD_USAGE_SET: // the strip follows in app_frame
+        usage_set(&s_usage, c->u.usage_set.on, c->u.usage_set.win, now);
         break;
     case LINK_CMD_PDC_RESULT:
         // Only the click we are waiting for counts: a late or repeated result changes nothing (at most one outcome).
@@ -704,6 +715,7 @@ static struct {
     int64_t pending_touch_us; // time of a touch whose reaction is not on screen yet
     uint32_t presented;
     bool pdc_was;    // the companion offered PDC Manager last time round (to log when that ends)
+    bool usage_was;  // ...and Claude usage
     bool backlight;  // off until both buffers are drawn
     const char *mode; // last mode reported to the companion
     buddy_mood_t mood; // last mood reported
@@ -1171,6 +1183,13 @@ bool app_init(const app_config_t *config)
     if (!s_msg.ready) {
         APP_LOGW(TAG, "no room in the scene for the message marquee");
     }
+    // Read by the compositor whenever the strip redraws (once a minute at most): internal RAM if there is room.
+    uint8_t *usage_mem = alloc_internal_first(USAGE_VIEW_MEMORY);
+    s_has_usage = usage_view_init(&s_usage_view, &s_scene, s_layout.stage, usage_mem, 28); // below the sign
+    if (!s_has_usage) {
+        APP_LOGW(TAG, "the Claude usage strip cannot be shown (no memory, or no room in the scene)");
+    }
+    usage_init(&s_usage);
 
     app_events_init();
     buddy_brain_init(&s.brain, t_start, app_port_random());
@@ -1527,6 +1546,27 @@ uint32_t app_frame(void)
         }
         next = sign_next < next ? sign_next : next;
     }
+
+    // Claude usage: the strip at the bottom of the stage, in normal mode and in Clock Mode alike, while the companion's
+    // lease holds; not during Missile Defense (the whole screen is the game's). Countdowns only while the clock is set.
+    const bool usage_now = usage_available(&s_usage, now);
+    if (usage_now != s.usage_was) {
+        APP_LOGI(TAG, "Claude usage %s", usage_now ? "shown (companion)"
+                                                   : "no longer shown (switched off, the lease ran out, or a new "
+                                                     "companion connection)");
+        s.usage_was = usage_now;
+    }
+    if (s_has_usage) {
+        int64_t sec;
+        uint32_t usec;
+        app_port_wall_get(&sec, &usec);
+        const int64_t utc_ms = office_time_valid((time_t)sec) ? sec * 1000 + usec / 1000 : -1;
+        const bool show = usage_now && !md_on() && !s_md_view.shown;
+        const uint32_t strip_next = usage_view_apply(&s_usage_view, show ? &s_usage : NULL, utc_ms);
+        next = strip_next < next ? strip_next : next;
+    }
+    const uint32_t usage_wake = usage_next(&s_usage, now); // the lease runs out
+    next = usage_wake < next ? usage_wake : next;
 
     const char *new_mode = mode_name(&s.screen, &s.brain);
     if (new_mode != s.mode) {

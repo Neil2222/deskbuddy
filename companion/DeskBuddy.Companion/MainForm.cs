@@ -4,6 +4,7 @@ using DeskBuddy.Companion.Firmware;
 using DeskBuddy.Companion.Pdc;
 using DeskBuddy.Companion.Protocol;
 using DeskBuddy.Companion.UI;
+using DeskBuddy.Companion.Usage;
 
 namespace DeskBuddy.Companion;
 
@@ -40,7 +41,7 @@ public sealed partial class MainForm : Form
     private readonly Panel _pageHost = new() { Dock = DockStyle.Fill };
     private readonly List<Page> _pages = [];
     private Page? _current;
-    private Page _buddyPage = null!, _messagePage = null!, _pdcPage = null!, _devicePage = null!, _firmwarePage = null!;
+    private Page _buddyPage = null!, _messagePage = null!, _pdcPage = null!, _usagePage = null!, _devicePage = null!, _firmwarePage = null!;
 
     private sealed record Page(string Title, string Subtitle, FlatButton Nav, Panel Body);
 
@@ -115,6 +116,19 @@ public sealed partial class MainForm : Form
     private PdcClickResult? _shownClick;
     private DateTime _shownClickAt;
 
+    // Claude usage.
+    private readonly Card _usageCard;
+    private readonly Panel _usageBar = new() { Dock = DockStyle.Top, Height = 40 };
+    private readonly FlatButton _usageToggle;
+    private readonly Label _usageSummary = new()
+    {
+        Dock = DockStyle.Fill, ForeColor = Theme.Muted, TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(10, 0, 0, 0),
+        AutoEllipsis = true, UseMnemonic = false,
+    };
+    private readonly TableLayoutPanel _usageDetails = new() { Dock = DockStyle.Top, Height = 88, ColumnCount = 2, RowCount = 3, Padding = new Padding(0, 4, 0, 0) };
+    private readonly Label _usageStatus = new(), _usageFive = new(), _usageWeek = new();
+    private readonly System.Windows.Forms.Timer _usageTimer = new() { Interval = 15000 }; // the countdowns
+
     // Diagnostics.
     private readonly FlatButton _clearLog;
     private readonly CheckBox _showDevice = new() { Text = "Device log", Checked = true, AutoSize = true, FlatStyle = FlatStyle.Flat };
@@ -165,6 +179,8 @@ public sealed partial class MainForm : Form
         _pdcLogout = Quiet("Log out", null, 90);
         _zdmw = new FlatButton(_theme, ButtonLook.Accent) { Text = "Ze doen maar wat!", Dock = DockStyle.Left, Width = 320, AccessibleName = "Ze doen maar wat" };
         _pdcCard = new Card(_theme) { Title = "Ze Doen Maar Wat", Dock = DockStyle.Top, Height = 92 };
+        _usageToggle = new FlatButton(_theme, ButtonLook.Pill) { Dock = DockStyle.Left, Width = 76, AccessibleName = "Claude usage" };
+        _usageCard = new Card(_theme) { Title = "Claude usage", Dock = DockStyle.Top, Height = 92 };
 
         var content = new Panel { Dock = DockStyle.Fill, Padding = new Padding(24, 18, 24, 18) };
         _pageTitle.Font = _theme.Title;
@@ -206,6 +222,7 @@ public sealed partial class MainForm : Form
         _service.HistoryChanged += _historyPage.HistoryChanged;
         _messagePage = AddPage(nav, "Message", "Text that scrolls across his LED sign", Theme.GlyphMessage, BuildMessagePage());
         _pdcPage = AddPage(nav, "PDC Manager", "The ZDMW Teams button, from here or from Buddy's menu", Theme.GlyphPdc, BuildPdcPage());
+        _usagePage = AddPage(nav, "Claude usage", "How much of your Claude plan is used, on Buddy's screen", Theme.GlyphUsage, BuildUsagePage());
         _devicePage = AddPage(nav, "Device", "Connection, the desktop simulator and the protocol log", Theme.GlyphDevice, BuildDevicePage());
         _firmwarePage = AddPage(nav, "Firmware", "Install, update or repair DeskBuddy's firmware over USB", Theme.GlyphFirmware, BuildFirmwarePage());
 
@@ -215,6 +232,7 @@ public sealed partial class MainForm : Form
         _service.Changed += UpdateState;
         _service.Log += AppendLog;
         _service.Pdc.Changed += UpdatePdc;
+        _service.Usage.Changed += UpdateUsage;
         _simulator.Changed += UpdateSimulator;
         _simulator.Output += AppendLog;
         _simulator.Ready += () =>
@@ -234,6 +252,7 @@ public sealed partial class MainForm : Form
         ResumeLayout(true);
         UpdateState();
         UpdatePdc();
+        UpdateUsage();
         UpdateSimulator();
         Load += (_, _) =>
         {
@@ -760,6 +779,77 @@ public sealed partial class MainForm : Form
                           (_service.Pdc.Enabled ? _pdcDetails.Height + _pdcActionRow.Height : 0);
     }
 
+    // ---- Claude usage ----
+
+    // [On/Off] and a summary; while on, the status and a line per window as Buddy shows it.
+    private Panel BuildUsagePage()
+    {
+        var page = ScrollPage();
+        _usageSummary.Font = _theme.Small;
+        _usageBar.Padding = new Padding(0, 4, 0, 4);
+        _usageBar.Controls.Add(_usageSummary);
+        _usageBar.Controls.Add(_usageToggle);
+
+        _usageDetails.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 72));
+        _usageDetails.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        string[] captions = ["Status", "5 hours", "7 days"];
+        Label[] values = [_usageStatus, _usageFive, _usageWeek];
+        for (var i = 0; i < captions.Length; i++)
+        {
+            _usageDetails.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
+            var caption = Caption(captions[i], 72);
+            caption.Anchor = AnchorStyles.Left;
+            values[i].AutoSize = true;
+            values[i].Anchor = AnchorStyles.Left;
+            values[i].ForeColor = Theme.Text;
+            values[i].UseMnemonic = false;
+            _usageDetails.Controls.Add(caption, 0, i);
+            _usageDetails.Controls.Add(values[i], 1, i);
+        }
+        _usageDetails.Visible = false;
+
+        Stack(_usageCard, _usageBar, _usageDetails);
+        page.Controls.Add(_usageCard);
+        _usageToggle.Click += (_, _) => _ = _service.Usage.SetEnabledAsync(!_service.Usage.Enabled);
+        _usageTimer.Tick += (_, _) => UpdateUsage();
+        return page;
+    }
+
+    private void UpdateUsage()
+    {
+        var usage = _service.Usage;
+        var on = usage.Enabled;
+        var numbers = usage.Usage;
+        _usageToggle.Text = on ? "On" : "Off";
+        _usageToggle.DotColor = !on ? Theme.Faint : numbers is not null ? Theme.Green : Theme.Amber;
+        _usageToggle.Invalidate();
+        _usagePage.Nav.ShowDot = on;
+        _usagePage.Nav.DotColor = _usageToggle.DotColor;
+        _usagePage.Nav.Invalidate();
+        _tips.SetToolTip(_usageToggle, on ? "Switch Claude usage off" : "Switch Claude usage on (off: no network traffic at all)");
+        _usageSummary.Text = on
+            ? "Claude Code's login, read from this PC every minute; Buddy shows it below his stage"
+            : "Off: no network traffic. On: your Claude plan's 5-hour and 7-day usage on Buddy's screen (needs Claude Code logged in)";
+
+        _usageStatus.Text = usage.Status ?? "–";
+        _usageStatus.ForeColor = usage.Problem ? Theme.Amber : Theme.Text;
+        var now = DateTimeOffset.UtcNow;
+        _usageFive.Text = numbers?.Five is { } five ? UsageText.Window("5U", five, now) : "–";
+        _usageWeek.Text = numbers?.Week is { } week ? UsageText.Window("7D", week, now) : "–";
+        _usageDetails.Visible = on;
+        if (on)
+        {
+            _usageTimer.Start();
+        }
+        else
+        {
+            _usageTimer.Stop();
+        }
+        _usageCard.Controls.SetChildIndex(_usageDetails, 0);
+        _usageCard.Controls.SetChildIndex(_usageBar, 1);
+        _usageCard.Height = _usageCard.Padding.Vertical + _usageBar.Height + (on ? _usageDetails.Height : 0);
+    }
+
     // ---- Device: connection, simulator, diagnostics ----
 
     private Panel BuildDevicePage()
@@ -1155,6 +1245,7 @@ public sealed partial class MainForm : Form
         _service.Dispose();
         _simulator.Dispose();
         _reactionTimer.Dispose();
+        _usageTimer.Dispose();
         _zdmwTimer.Dispose();
         _tips.Dispose();
         DisposeTrayIcon();

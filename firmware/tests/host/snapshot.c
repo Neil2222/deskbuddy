@@ -10,9 +10,11 @@
 // marquee.png, office_marquee.png), the Clock Mode clock: office_clock.png and office_not_set.png, and the
 // Mechanical Skeleton face (skeleton_*.png: the face, its tick positions, the minute roll, the hourly flourish,
 // a close-up, the menu page that picks it, and the zoom arriving at it), Tic-Tac-Toe (ttt_*.png and ttt_sheet.png:
-// the game's page, Buddy watching, thinking, winning, losing, puzzled by a draw, and asking for a rematch), and
+// the game's page, Buddy watching, thinking, winning, losing, puzzled by a draw, and asking for a rematch),
 // Missile Defense (md_*.png and md_sheet.png: his alert on the stage, then the whole screen: a wave starting, aiming,
-// firing, a desk item lost, a missile on his head, overheated eyes, panic, a wave cleared, the game over).
+// firing, a desk item lost, a missile on his head, overheated eyes, panic, a wave cleared, the game over), and the
+// Claude usage strip (usage.png and usage_ask.png on the stage, under his question's buttons; office_usage.png and
+// skeleton_usage.png in Clock Mode, under the sign).
 #include <stdio.h>
 #include <string.h>
 
@@ -35,6 +37,7 @@
 #include "office_faces.h"
 #include "office_zoom.h"
 #include "png.h"
+#include "usage_view.h"
 
 enum { W = 1024, H = 600, ALIGN = 32, STAGE_PERCENT = 65 }; // firmware defaults (Kconfig)
 
@@ -60,6 +63,19 @@ static menu_view_t s_menu_view;
 static gfx_dirty_t s_all;
 static const char *s_dir;
 static int s_panel_count;
+static usage_view_t s_usage_view;
+
+// The Claude usage strip as the companion's numbers put it (usage_view.h): calm (both bars green, the predictions red
+// and orange) or busy (the 5-hour window red, the week yellow without a prediction), counting down from now (UTC s).
+static void usage_strip(bool busy, int64_t now)
+{
+    static usage_t u;
+    const link_usage_t calm[LINK_USAGE_WINDOWS] = {{true, 37, 130, now + 150 * 60},
+                                                   {true, 20, 80, now + (3 * 24 + 2) * 3600}};
+    const link_usage_t hot[LINK_USAGE_WINDOWS] = {{true, 95, 180, now + 45 * 60}, {true, 62, -1, now + 26 * 3600}};
+    usage_set(&u, true, busy ? hot : calm, 0);
+    usage_view_apply(&s_usage_view, &u, now * 1000);
+}
 
 // Copies the stage crop of the last render, halved, into a sheet tile with a white top/left border.
 static void tile(gfx_color_t *sheet, int sheet_w, int col, int row)
@@ -514,6 +530,11 @@ static bool skeleton_screens(office_faces_t *faces, marquee_t *marquee)
     if (!shot("skeleton_marquee")) {
         return false;
     }
+    usage_strip(true, 1792360200); // the strip under the sign, clear of the plaque
+    if (!shot("skeleton_usage")) {
+        return false;
+    }
+    usage_view_apply(&s_usage_view, NULL, 0);
     marquee_apply(marquee, 0, 0, marquee_duration_ms(marquee)); // over: hidden
     office_faces_apply(faces, NULL, 0);
     if (!shot("skeleton_not_set")) {
@@ -941,6 +962,7 @@ int main(int argc, char **argv)
     static menu_ask_t ask;
     static menu_thought_t thought;
     static uint8_t thought_mem[MENU_THOUGHT_MEMORY];
+    static uint8_t usage_mem[USAGE_VIEW_MEMORY];
     s_layout = layout_compute(W, H, STAGE_PERCENT, false, ALIGN);
     if (!gfx_scene_init(&s_scene, W, H, layout_background, &s_layout, strip, 16 * 1024, ALIGN) ||
         !buddy_view_init(&s_view, &s_scene, s_layout.stage, 10, 0) ||
@@ -950,7 +972,8 @@ int main(int argc, char **argv)
         !marquee_init(&marquee, &s_scene, 30) ||
         !menu_ask_init(&ask, &s_scene, s_layout.stage, s_view.home_y0 - BUDDY_MAX_LIFT * s_view.home_scale, 25) ||
         !menu_thought_init(&thought, &s_scene, s_layout.stage, s_view.home_x0 + s_view.art->w * s_view.home_scale / 2,
-                           thought_mem, sizeof(thought_mem), 5)) {
+                           thought_mem, sizeof(thought_mem), 5) ||
+        !usage_view_init(&s_usage_view, &s_scene, s_layout.stage, usage_mem, 28)) {
         fprintf(stderr, "scene setup failed\n");
         return 1;
     }
@@ -977,6 +1000,20 @@ int main(int argc, char **argv)
             return 1;
         }
     }
+
+    // The Claude usage strip at the bottom of the stage, under Buddy; and with his question's buttons above it.
+    buddy_view_apply(&s_view, &shots[0].pose, 0);
+    usage_strip(false, 1792360200);
+    if (!shot("usage")) {
+        return 1;
+    }
+    menu_ask_apply(&ask, MENU_QUESTION_PEUKIE, BUDDY_ASK_MS, BUDDY_ASK_MS);
+    usage_strip(true, 1792360200);
+    if (!shot("usage_ask")) {
+        return 1;
+    }
+    menu_ask_apply(&ask, NULL, 0, BUDDY_ASK_MS);
+    usage_view_apply(&s_usage_view, NULL, 0);
 
     // Key moments of the Monster sequence, full screen (the menu says he is charging meanwhile).
     static const uint32_t k_moments[] = {150, 700, 1000, 1500, 1750, 2000, 2300, 2560, 2700, 3300, 3900, 4400,
@@ -1172,6 +1209,11 @@ int main(int argc, char **argv)
     if (!shot("office_marquee")) {
         return 1;
     }
+    usage_strip(false, 1792360200); // the same place as on the stage, under the sign
+    if (!shot("office_usage")) {
+        return 1;
+    }
+    usage_view_apply(&s_usage_view, NULL, 0);
     marquee_apply(&marquee, 0, 0, marquee_duration_ms(&marquee)); // over: hidden
     if (!shot("office_clock")) {
         return 1;

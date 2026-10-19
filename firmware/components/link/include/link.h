@@ -43,9 +43,24 @@ typedef enum {
     LINK_CMD_LOG_SINCE, // [boot=] seq=: replays the recorded events after seq (see app_events.h)
     LINK_CMD_CLOCK_FACE, // name=: Clock Mode's face (hello faces=)
     LINK_CMD_INFO,       // -> ok fw= build= board= ... hw=: what this firmware is and what it runs on (cap info)
+    LINK_CMD_USAGE_SET,  // state=on|off [five= five_end= [five_pred=]] [week= week_end= [week_pred=]]: Claude usage
 } link_cmd_t;
 
 #define LINK_PDC_COUNT_MAX 2147483647
+
+// usage.set: the Claude plan's two windows, the 5-hour one first (as the strip shows them).
+#define LINK_USAGE_FIVE 0
+#define LINK_USAGE_WEEK 1
+#define LINK_USAGE_WINDOWS 2
+#define LINK_USAGE_PCT_MAX 999
+
+// One window of usage.set: how much of it is used, what that will be when it resets, and when that is.
+typedef struct {
+    bool has;     // the companion sent this window (its pct and end)
+    uint16_t pct; // used now, whole percent (0..LINK_USAGE_PCT_MAX)
+    int16_t pred; // predicted at the window's end, whole percent; -1: no prediction
+    int64_t end;  // UTC seconds when the window resets
+} link_usage_t;
 
 // How a ZDMW click ended, as the companion reports it (pdc.result result=). Names are listed in link.c; a
 // well-formed name this firmware does not know counts as UNKNOWN (a newer companion: maybe sent).
@@ -112,6 +127,10 @@ typedef struct {
             int32_t count; // -1: not given
             int8_t teams;  // the Teams message went out: 1, 0; -1: not given
         } pdc_result; // PDC_RESULT
+        struct {
+            bool on;
+            link_usage_t win[LINK_USAGE_WINDOWS]; // LINK_USAGE_FIVE, LINK_USAGE_WEEK
+        } usage_set; // USAGE_SET
         struct {
             bool has_boot;
             uint64_t boot; // the boot (hello boot=) seq counts in; another one means: everything of this boot

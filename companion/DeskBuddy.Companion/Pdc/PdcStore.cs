@@ -11,7 +11,7 @@ namespace DeskBuddy.Companion.Pdc;
 /// What the PDC Manager integration keeps on disk, in its own folder (%APPDATA%\DeskBuddy by default):
 ///   settings.json     {"pdcEnabled": bool, "pdcUsername": "...", "clockFace": "...", "clockFaceDev": "...", "clockFaceBoot": "...",
 ///                      "scheduleMood": "...", "scheduleMoodDev": "...", "scheduleMoodBoot": "...",
-///                      "trayEnabled": bool, "trayNoticeShown": bool}
+///                      "trayEnabled": bool, "trayNoticeShown": bool, "usageEnabled": bool}
 ///                     (other keys in the file are kept; the clock face keys are the last face DeskBuddy reported and its boot;
 ///                     the schedule mood keys the mood the schedule last put Buddy in, see ScheduleMoodTracker)
 ///   pdc-session.bin   the session cookies for one server, encrypted with DPAPI for the current Windows user
@@ -101,6 +101,16 @@ public sealed class PdcStore
         var root = ReadSettings();
         root["trayEnabled"] = enabled;
         root["trayNoticeShown"] = noticeShown;
+        WriteSettings(root);
+    }
+
+    /// <summary>The Claude usage strip (key usageEnabled); off by default.</summary>
+    public bool LoadUsageEnabled() => Flag(ReadSettings()["usageEnabled"]);
+
+    public void SaveUsageEnabled(bool enabled)
+    {
+        var root = ReadSettings();
+        root["usageEnabled"] = enabled;
         WriteSettings(root);
     }
 
