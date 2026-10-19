@@ -6,7 +6,7 @@ using Xunit;
 
 namespace DeskBuddy.Companion.Tests;
 
-// The Claude usage strip: the API answer, the prediction, the usage.set line, and the token handling against a fake
+// The Claude usage strip: the API answer, the prediction, the usage.set line, and the org ID / session key handling against a fake
 // handler (never the real endpoint).
 public sealed class UsageTests : IDisposable
 {
@@ -20,19 +20,16 @@ public sealed class UsageTests : IDisposable
     public UsageTests()
     {
         Directory.CreateDirectory(_dir);
-        _usage = new UsageIntegration(_server, CredentialsPath, new PdcStore(_dir), _clock);
+        _usage = new UsageIntegration(_server, new PdcStore(_dir), _clock);
     }
 
-    private string CredentialsPath => Path.Combine(_dir, ".credentials.json");
+    private const string OrgId = "0a1b2c3d-4e5f-6789-abcd-ef0123456789";
 
     public void Dispose()
     {
         _usage.Dispose();
         Directory.Delete(_dir, recursive: true);
     }
-
-    private void Credentials(DateTimeOffset expires) => File.WriteAllText(CredentialsPath,
-        $$$"""{"claudeAiOauth":{"accessToken":"tok-123","refreshToken":"r","expiresAt":{{{expires.ToUnixTimeMilliseconds()}}}}}""");
 
     // --- the API answer --------------------------------------------------------------------------------------------
 
@@ -131,72 +128,189 @@ public sealed class UsageTests : IDisposable
         Assert.Equal("7D 20% 3d 2u", UsageText.Window("7D", new UsageWindow(20, Now.AddHours(74), null), Now));
     }
 
-    // --- the token --------------------------------------------------------------------------------------------------------
+    // --- org ID and session key -----------------------------------------------------------------------------------------
 
     [Fact]
-    public async Task A_poll_sends_the_token_and_yields_the_numbers()
-    {
-        Credentials(Now.AddHours(1));
-        await _usage.SetEnabledAsync(true);
-        var request = Assert.Single(_server.Requests);
-        Assert.Equal("Bearer tok-123", request.Authorization);
-        Assert.Equal("oauth-2025-04-20", request.Beta);
-        Assert.StartsWith("DeskBuddy/", request.UserAgent);
-        Assert.Equal(20, _usage.Usage?.Five?.Pct);
-        Assert.False(_usage.Problem);
-    }
-
-    [Fact]
-    public async Task An_expired_token_is_not_sent_and_turns_the_strip_off()
-    {
-        Credentials(Now.AddHours(1));
-        await _usage.SetEnabledAsync(true);
-        Assert.NotNull(_usage.Usage);
-
-        Credentials(Now.AddSeconds(-1));
-        _clock.Now = Now.AddMinutes(1);
-        await _usage.TickAsync();
-        Assert.Single(_server.Requests); // not sent again
-        Assert.Null(_usage.Usage);
-        Assert.Equal(UsageIntegration.LoginExpiredText, _usage.Status);
-        Assert.True(_usage.Problem);
-        Assert.DoesNotContain("tok-123", File.ReadAllText(Path.Combine(_dir, "settings.json")));
-    }
-
-    [Fact]
-    public async Task A_401_counts_as_an_expired_login()
-    {
-        Credentials(Now.AddHours(1));
-        _server.Status = HttpStatusCode.Unauthorized;
-        await _usage.SetEnabledAsync(true);
-        Assert.Null(_usage.Usage);
-        Assert.Equal(UsageIntegration.LoginExpiredText, _usage.Status);
-    }
-
-    [Fact]
-    public async Task Without_a_credentials_file_it_says_claude_code_is_not_logged_in()
+    public async Task Without_org_id_or_key_it_asks_for_them_and_sends_nothing()
     {
         await _usage.SetEnabledAsync(true);
         Assert.Empty(_server.Requests);
-        Assert.Equal(UsageIntegration.NotLoggedInText, _usage.Status);
+        Assert.Equal(UsageIntegration.NotConfiguredText, _usage.Status);
         Assert.Null(_usage.Usage);
+
+        Assert.Null(await _usage.SaveConfigAsync(OrgId, "")); // org ID only
+        Assert.Empty(_server.Requests);
+        Assert.Equal(UsageIntegration.NotConfiguredText, _usage.Status);
+    }
+
+    [Fact]
+    public async Task A_poll_sends_the_org_id_and_key_and_yields_the_numbers()
+    {
+        Assert.Null(await _usage.SaveConfigAsync(OrgId, "sk-ant-sid-123"));
+        Assert.Empty(_server.Requests); // off: nothing sent
+        await _usage.SetEnabledAsync(true);
+        var request = Assert.Single(_server.Requests);
+        Assert.Contains($"/api/organizations/{OrgId}/usage", request.Url);
+        Assert.StartsWith("https://claude.ai/", request.Url);
+        Assert.Equal("sessionKey=sk-ant-sid-123", request.Cookie);
+        Assert.StartsWith("DeskBuddy/", request.UserAgent);
+        Assert.Equal(20, _usage.Usage?.Five?.Pct);
+        Assert.False(_usage.Problem);
+        Assert.DoesNotContain("sk-ant-sid-123", File.ReadAllText(Path.Combine(_dir, "settings.json")));
+    }
+
+    [Fact]
+    public async Task A_401_drops_the_numbers_and_stops_polling_until_a_new_key_is_saved()
+    {
+        await _usage.SaveConfigAsync(OrgId, "old");
+        await _usage.SetEnabledAsync(true);
+        Assert.NotNull(_usage.Usage);
+
+        _server.Status = HttpStatusCode.Unauthorized;
+        _clock.Now = Now.AddMinutes(1);
+        await _usage.TickAsync();
+        Assert.Equal(2, _server.Requests.Count);
+        Assert.Null(_usage.Usage);
+        Assert.Equal(UsageIntegration.KeyExpiredText, _usage.Status);
+        Assert.True(_usage.Problem);
+
+        _clock.Now = Now.AddMinutes(10);
+        await _usage.TickAsync();
+        Assert.Equal(2, _server.Requests.Count); // halted
+
+        _server.Status = HttpStatusCode.OK;
+        Assert.Null(await _usage.SaveConfigAsync(OrgId, "new"));
+        Assert.Equal(3, _server.Requests.Count);
+        Assert.Equal("sessionKey=new", _server.Requests[^1].Cookie);
+        Assert.NotNull(_usage.Usage);
+    }
+
+    [Fact]
+    public async Task A_403_also_counts_as_an_expired_key_and_toggling_retries()
+    {
+        await _usage.SaveConfigAsync(OrgId, "k");
+        _server.Status = HttpStatusCode.Forbidden;
+        await _usage.SetEnabledAsync(true);
+        Assert.Equal(UsageIntegration.KeyExpiredText, _usage.Status);
+        await _usage.SetEnabledAsync(false);
+        await _usage.SetEnabledAsync(true);
+        Assert.Equal(2, _server.Requests.Count);
+    }
+
+    [Fact]
+    public async Task A_Cloudflare_challenge_is_not_an_expired_key()
+    {
+        await _usage.SaveConfigAsync(OrgId, "k");
+        _server.Status = HttpStatusCode.Forbidden;
+        _server.Challenge = true;
+        await _usage.SetEnabledAsync(true);
+        Assert.NotEqual(UsageIntegration.KeyExpiredText, _usage.Status);
+        Assert.True(_usage.Problem);
+        _clock.Now = Now.AddMinutes(1);
+        await _usage.TickAsync();
+        Assert.Equal(2, _server.Requests.Count); // still polling
+    }
+
+    [Fact]
+    public async Task A_429_honours_Retry_After()
+    {
+        await _usage.SaveConfigAsync(OrgId, "k");
+        _server.Status = HttpStatusCode.TooManyRequests;
+        _server.RetryAfter = TimeSpan.FromSeconds(90);
+        await _usage.SetEnabledAsync(true);
+        Assert.Equal(Now.AddSeconds(90), _usage.NextPoll);
+        Assert.True(_usage.Problem);
+    }
+
+    [Fact]
+    public async Task A_429_without_Retry_After_backs_off_5_then_10_minutes_and_resets_after_a_success()
+    {
+        await _usage.SaveConfigAsync(OrgId, "k");
+        await _usage.SetEnabledAsync(true);
+        Assert.NotNull(_usage.Usage);
+
+        _server.Status = HttpStatusCode.TooManyRequests;
+        _clock.Now = Now.AddMinutes(1);
+        await _usage.TickAsync();
+        Assert.Equal(_clock.Now.AddMinutes(5), _usage.NextPoll);
+        Assert.NotNull(_usage.Usage); // kept while fresh
+
+        _clock.Now = _usage.NextPoll;
+        await _usage.TickAsync();
+        Assert.Equal(_clock.Now.AddMinutes(10), _usage.NextPoll);
+        Assert.Null(_usage.Usage); // older than StaleAfter now
+
+        _clock.Now = _usage.NextPoll;
+        await _usage.TickAsync();
+        Assert.Equal(_clock.Now.AddMinutes(10), _usage.NextPoll); // capped
+
+        _server.Status = HttpStatusCode.OK;
+        _clock.Now = _usage.NextPoll;
+        await _usage.TickAsync();
+        Assert.Equal(_clock.Now + UsageIntegration.PollInterval, _usage.NextPoll);
+
+        _server.Status = HttpStatusCode.TooManyRequests;
+        _clock.Now = _usage.NextPoll;
+        await _usage.TickAsync();
+        Assert.Equal(_clock.Now.AddMinutes(5), _usage.NextPoll); // back to the first step
+    }
+
+    [Theory]
+    [InlineData(OrgId, true)]
+    [InlineData(" 0A1B2C3D-4E5F-6789-ABCD-EF0123456789 ", true)]
+    [InlineData("", false)]
+    [InlineData("not-a-guid", false)]
+    [InlineData("0a1b2c3d4e5f6789abcdef0123456789", false)]
+    public void Org_id_must_be_a_guid(string orgId, bool valid) => Assert.Equal(valid, UsageIntegration.IsValidOrgId(orgId));
+
+    [Fact]
+    public async Task An_invalid_org_id_is_not_saved()
+    {
+        Assert.Equal(UsageIntegration.BadOrgIdText, await _usage.SaveConfigAsync("nope", "k"));
+        Assert.Null(_usage.OrgId);
+        Assert.False(_usage.HasSessionKey);
+    }
+
+    [Fact]
+    public async Task The_key_is_stored_encrypted_and_an_empty_field_keeps_it()
+    {
+        var store = new PdcStore(_dir);
+        await _usage.SaveConfigAsync(OrgId, "secret-key");
+        Assert.Equal("secret-key", store.LoadClaudeSessionKey());
+        Assert.DoesNotContain("secret-key", Encoding.UTF8.GetString(File.ReadAllBytes(store.ClaudeSessionPath)));
+
+        await _usage.SaveConfigAsync(OrgId, "");
+        Assert.Equal("secret-key", store.LoadClaudeSessionKey());
+        Assert.Equal(OrgId, store.LoadUsageOrgId());
+        Assert.True(_usage.HasSessionKey);
     }
 }
 
 /// <summary>The usage endpoint in memory: answers <see cref="Status"/> with a fixed body.</summary>
 internal sealed class FakeUsageServer : HttpMessageHandler
 {
-    public sealed record Request(string? Authorization, string? Beta, string UserAgent);
+    public sealed record Request(string Url, string? Cookie, string UserAgent);
 
     public List<Request> Requests { get; } = [];
     public HttpStatusCode Status { get; set; } = HttpStatusCode.OK;
+    public TimeSpan? RetryAfter { get; set; }
+    public bool Challenge { get; set; }
 
     protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
-        Requests.Add(new Request(request.Headers.Authorization?.ToString(),
-                                 request.Headers.TryGetValues("anthropic-beta", out var beta) ? beta.Single() : null,
+        Requests.Add(new Request(request.RequestUri!.ToString(),
+                                 request.Headers.TryGetValues("cookie", out var cookie) ? string.Join("; ", cookie) : null,
                                  request.Headers.UserAgent.ToString()));
         const string body = """{"five_hour":{"utilization":20.0,"resets_at":"2026-10-18T21:50:00+00:00"},"seven_day":null}""";
-        return Task.FromResult(new HttpResponseMessage(Status) { Content = new StringContent(body, Encoding.UTF8, "application/json") });
+        var response = new HttpResponseMessage(Status) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
+        if (Challenge)
+        {
+            response.Headers.Add("cf-mitigated", "challenge");
+        }
+        if (RetryAfter is { } wait)
+        {
+            response.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(wait);
+        }
+        return Task.FromResult(response);
     }
 }

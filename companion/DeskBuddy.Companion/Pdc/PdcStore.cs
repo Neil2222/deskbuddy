@@ -11,15 +11,17 @@ namespace DeskBuddy.Companion.Pdc;
 /// What the PDC Manager integration keeps on disk, in its own folder (%APPDATA%\DeskBuddy by default):
 ///   settings.json     {"pdcEnabled": bool, "pdcUsername": "...", "clockFace": "...", "clockFaceDev": "...", "clockFaceBoot": "...",
 ///                      "scheduleMood": "...", "scheduleMoodDev": "...", "scheduleMoodBoot": "...",
-///                      "trayEnabled": bool, "trayNoticeShown": bool, "usageEnabled": bool}
+///                      "trayEnabled": bool, "trayNoticeShown": bool, "usageEnabled": bool, "usageOrgId": "..."}
 ///                     (other keys in the file are kept; the clock face keys are the last face DeskBuddy reported and its boot;
 ///                     the schedule mood keys the mood the schedule last put Buddy in, see ScheduleMoodTracker)
 ///   pdc-session.bin   the session cookies for one server, encrypted with DPAPI for the current Windows user
-/// The password is never stored.
+///   claude-session.bin the claude.ai sessionKey for the Claude usage strip (org ID: usageOrgId), DPAPI for the current user
+/// The password is never stored; the claude.ai session key never leaves claude-session.bin except in the request cookie.
 /// </summary>
 public sealed class PdcStore
 {
     private static readonly byte[] Entropy = Encoding.UTF8.GetBytes("DeskBuddy.PdcSession.v1");
+    private static readonly byte[] ClaudeEntropy = Encoding.UTF8.GetBytes("DeskBuddy.ClaudeSession.v1");
 
     /// <summary>Points the companion at another data folder (development and tests), instead of %APPDATA%\DeskBuddy.</summary>
     public const string DataDirectoryVariable = "DESKBUDDY_DATA_DIR";
@@ -27,6 +29,7 @@ public sealed class PdcStore
     public string Directory { get; }
     public string SettingsPath => Path.Combine(Directory, "settings.json");
     public string SessionPath => Path.Combine(Directory, "pdc-session.bin");
+    public string ClaudeSessionPath => Path.Combine(Directory, "claude-session.bin");
 
     public PdcStore(string directory) => Directory = directory;
 
@@ -114,6 +117,49 @@ public sealed class PdcStore
         WriteSettings(root);
     }
 
+    /// <summary>The claude.ai organization ID for the usage strip (key usageOrgId); null: none.</summary>
+    public string? LoadUsageOrgId() => Text(ReadSettings()["usageOrgId"]);
+
+    public void SaveUsageOrgId(string? orgId)
+    {
+        var root = ReadSettings();
+        root["usageOrgId"] = orgId;
+        WriteSettings(root);
+    }
+
+    /// <summary>The stored claude.ai session key; null when there is none (a damaged or another user's file is deleted).</summary>
+    public string? LoadClaudeSessionKey()
+    {
+        byte[] sealedBytes;
+        try
+        {
+            sealedBytes = File.ReadAllBytes(ClaudeSessionPath);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+        try
+        {
+            var key = Encoding.UTF8.GetString(ProtectedData.Unprotect(sealedBytes, ClaudeEntropy, DataProtectionScope.CurrentUser));
+            if (key.Length > 0)
+            {
+                return key;
+            }
+        }
+        catch (CryptographicException)
+        {
+        }
+        TryDelete(ClaudeSessionPath);
+        return null;
+    }
+
+    public void SaveClaudeSessionKey(string key)
+    {
+        System.IO.Directory.CreateDirectory(Directory);
+        WriteAtomically(ClaudeSessionPath, ProtectedData.Protect(Encoding.UTF8.GetBytes(key), ClaudeEntropy, DataProtectionScope.CurrentUser));
+    }
+
     private static string? Text(JsonNode? n) => n is JsonValue v && v.TryGetValue<string>(out var s) && s.Length > 0 ? s : null;
 
     private static bool Flag(JsonNode? n) => n is JsonValue v && v.TryGetValue<bool>(out var on) && on;
@@ -172,11 +218,13 @@ public sealed class PdcStore
         WriteAtomically(SessionPath, ProtectedData.Protect(plain, Entropy, DataProtectionScope.CurrentUser));
     }
 
-    public void DeleteSession()
+    public void DeleteSession() => TryDelete(SessionPath);
+
+    private static void TryDelete(string path)
     {
         try
         {
-            File.Delete(SessionPath);
+            File.Delete(path);
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {

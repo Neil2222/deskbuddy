@@ -128,6 +128,12 @@ public sealed partial class MainForm : Form
     private readonly TableLayoutPanel _usageDetails = new() { Dock = DockStyle.Top, Height = 88, ColumnCount = 2, RowCount = 3, Padding = new Padding(0, 4, 0, 0) };
     private readonly Label _usageStatus = new(), _usageFive = new(), _usageWeek = new();
     private readonly System.Windows.Forms.Timer _usageTimer = new() { Interval = 15000 }; // the countdowns
+    private readonly FlowLayoutPanel _usageConfigRow = new() { Dock = DockStyle.Top, Height = 46, WrapContents = false, Padding = new Padding(0, 5, 0, 0) };
+    private readonly TextBox _usageOrgId = new() { BorderStyle = BorderStyle.None, MaxLength = 36, PlaceholderText = "Org ID", AccessibleName = "claude.ai org ID" };
+    private readonly TextBox _usageKey = new() { BorderStyle = BorderStyle.None, MaxLength = 1000, UseSystemPasswordChar = true, AccessibleName = "claude.ai session key" };
+    private readonly FlatButton _usageSave;
+    private readonly Label _usageHint = new() { Dock = DockStyle.Top, Height = 24, AutoEllipsis = true, UseMnemonic = false };
+    private string? _usageConfigError; // the org ID was not saved: why
 
     // Diagnostics.
     private readonly FlatButton _clearLog;
@@ -181,6 +187,7 @@ public sealed partial class MainForm : Form
         _pdcCard = new Card(_theme) { Title = "Ze Doen Maar Wat", Dock = DockStyle.Top, Height = 92 };
         _usageToggle = new FlatButton(_theme, ButtonLook.Pill) { Dock = DockStyle.Left, Width = 76, AccessibleName = "Claude usage" };
         _usageCard = new Card(_theme) { Title = "Claude usage", Dock = DockStyle.Top, Height = 92 };
+        _usageSave = Quiet("Save", null, 90);
 
         var content = new Panel { Dock = DockStyle.Fill, Padding = new Padding(24, 18, 24, 18) };
         _pageTitle.Font = _theme.Title;
@@ -808,11 +815,46 @@ public sealed partial class MainForm : Form
         }
         _usageDetails.Visible = false;
 
-        Stack(_usageCard, _usageBar, _usageDetails);
+        foreach (var box in new[] { _usageOrgId, _usageKey })
+        {
+            box.Font = _theme.Text10;
+            box.ForeColor = Theme.Text;
+        }
+        var frames = new[] { new InputFrame(_usageOrgId), new InputFrame(_usageKey) };
+        frames[0].Size = new Size(320, 36);
+        frames[1].Size = new Size(260, 36);
+        foreach (var frame in frames)
+        {
+            frame.Padding = new Padding(10, 9, 8, 5);
+            frame.Margin = new Padding(0, 0, 8, 0);
+            _usageConfigRow.Controls.Add(frame);
+        }
+        _usageSave.Height = 36;
+        _usageConfigRow.Controls.Add(_usageSave);
+        _usageHint.Font = _theme.Small;
+
+        Stack(_usageCard, _usageBar, _usageDetails, _usageConfigRow, _usageHint);
         page.Controls.Add(_usageCard);
         _usageToggle.Click += (_, _) => _ = _service.Usage.SetEnabledAsync(!_service.Usage.Enabled);
+        _usageSave.Click += (_, _) => _ = SaveUsageConfigAsync();
+        _usageKey.KeyDown += (_, e) =>
+        {
+            if (e.KeyCode == Keys.Enter)
+            {
+                e.SuppressKeyPress = true;
+                _ = SaveUsageConfigAsync();
+            }
+        };
         _usageTimer.Tick += (_, _) => UpdateUsage();
         return page;
+    }
+
+    private async Task SaveUsageConfigAsync()
+    {
+        var key = _usageKey.Text;
+        _usageKey.Clear(); // never kept in the box
+        _usageConfigError = await _service.Usage.SaveConfigAsync(_usageOrgId.Text, key);
+        UpdateUsage();
     }
 
     private void UpdateUsage()
@@ -828,8 +870,15 @@ public sealed partial class MainForm : Form
         _usagePage.Nav.Invalidate();
         _tips.SetToolTip(_usageToggle, on ? "Switch Claude usage off" : "Switch Claude usage on (off: no network traffic at all)");
         _usageSummary.Text = on
-            ? "Claude Code's login, read from this PC every minute; Buddy shows it below his stage"
-            : "Off: no network traffic. On: your Claude plan's 5-hour and 7-day usage on Buddy's screen (needs Claude Code logged in)";
+            ? "Asked from claude.ai every minute with your session key; Buddy shows it below his stage"
+            : "Off: no network traffic. On: your Claude plan's 5-hour and 7-day usage on Buddy's screen (needs the org ID and session key below)";
+        if (_usageOrgId.Text.Length == 0 && !_usageOrgId.Focused && usage.OrgId is { } orgId)
+        {
+            _usageOrgId.Text = orgId;
+        }
+        _usageKey.PlaceholderText = usage.HasSessionKey ? "saved — paste a new one to replace" : "Session key (sessionKey cookie)";
+        _usageHint.Text = _usageConfigError ?? "claude.ai → F12 → Application → Cookies: sessionKey is the key, lastActiveOrg the org ID";
+        _usageHint.ForeColor = _usageConfigError is null ? Theme.Muted : Theme.Amber;
 
         _usageStatus.Text = usage.Status ?? "–";
         _usageStatus.ForeColor = usage.Problem ? Theme.Amber : Theme.Text;
@@ -845,9 +894,12 @@ public sealed partial class MainForm : Form
         {
             _usageTimer.Stop();
         }
-        _usageCard.Controls.SetChildIndex(_usageDetails, 0);
-        _usageCard.Controls.SetChildIndex(_usageBar, 1);
-        _usageCard.Height = _usageCard.Padding.Vertical + _usageBar.Height + (on ? _usageDetails.Height : 0);
+        Control[] order = [_usageHint, _usageConfigRow, _usageDetails, _usageBar];
+        for (var i = 0; i < order.Length; i++)
+        {
+            _usageCard.Controls.SetChildIndex(order[i], i);
+        }
+        _usageCard.Height = _usageCard.Padding.Vertical + _usageBar.Height + (on ? _usageDetails.Height : 0) + _usageConfigRow.Height + _usageHint.Height;
     }
 
     // ---- Device: connection, simulator, diagnostics ----

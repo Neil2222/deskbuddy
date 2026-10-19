@@ -14,7 +14,7 @@ public sealed record UsageSnapshot(UsageWindow? Five, UsageWindow? Week)
     public bool IsEmpty => Five is null && Week is null;
 }
 
-/// <summary>The answer of <c>GET /api/oauth/usage</c>, and the prediction (a port of pdc-manager's).</summary>
+/// <summary>The answer of claude.ai's <c>GET /api/organizations/{orgId}/usage</c>, and the prediction (a port of pdc-manager's).</summary>
 public static class UsageApi
 {
     public static readonly TimeSpan FiveHours = TimeSpan.FromHours(5);

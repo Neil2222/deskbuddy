@@ -1,60 +1,64 @@
 using System.Net;
 using System.Net.Http.Headers;
-using System.Text.Json;
 using DeskBuddy.Companion.Pdc;
 
 namespace DeskBuddy.Companion.Usage;
 
 /// <summary>
-/// The Claude plan usage strip, built in and off by default: every <see cref="PollInterval"/> it reads Claude Code's
-/// OAuth token from <c>%USERPROFILE%\.claude\.credentials.json</c> (again on every poll: Claude Code rewrites it) and
-/// asks <c>GET https://api.anthropic.com/api/oauth/usage</c> how much of the 5-hour and 7-day windows is used. The
-/// token is never logged, shown, refreshed or written: an expired login is Claude Code's to renew. While it is off it
-/// makes no network traffic at all. Used on the UI thread.
+/// The Claude plan usage strip, built in and off by default: every <see cref="PollInterval"/> it asks
+/// <c>GET https://claude.ai/api/organizations/{orgId}/usage</c> how much of the 5-hour and 7-day windows is used, with
+/// the org ID and claude.ai session key the user pasted into the window (see <see cref="PdcStore"/>). The key is never
+/// logged or shown. An expired key stops polling until a new one is saved or the switch is toggled. While it is off
+/// (or not filled in) it makes no network traffic at all. Used on the UI thread.
 /// </summary>
 public sealed class UsageIntegration : IDisposable
 {
-    public static readonly Uri Endpoint = new("https://api.anthropic.com/api/oauth/usage");
+    public static readonly Uri BaseUri = new("https://claude.ai/");
     public static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(60);
+    /// <summary>Back-off after the first 429 without Retry-After; later ones wait <see cref="MaxRateLimitedInterval"/>.</summary>
     public static readonly TimeSpan RateLimitedInterval = TimeSpan.FromMinutes(5);
+    public static readonly TimeSpan MaxRateLimitedInterval = TimeSpan.FromMinutes(10);
     /// <summary>How long the last numbers are kept when polls fail for a passing reason.</summary>
     public static readonly TimeSpan StaleAfter = TimeSpan.FromMinutes(5);
     public static readonly TimeSpan HttpTimeout = TimeSpan.FromSeconds(15);
 
-    public const string LoginExpiredText = "Claude Code login expired: run claude to renew it";
-    public const string NotLoggedInText = "Claude Code is not logged in on this PC (no .claude\\.credentials.json): run claude and log in";
+    public const string KeyExpiredText = "Session key expired: paste a new one from claude.ai";
+    public const string NotConfiguredText = "Fill in the org ID and session key from claude.ai, then Save";
+    public const string BadOrgIdText = "The org ID must look like 01234567-89ab-cdef-0123-456789abcdef";
 
     private readonly HttpClient _http;
-    private readonly string _credentialsPath;
     private readonly PdcStore _store;
     private readonly TimeProvider _clock;
-    private int _epoch; // bumped by on/off: answers to older requests are dropped
+    private int _epoch; // bumped by on/off and saves: answers to older requests are dropped
     private bool _polling;
+    private bool _halted; // the key was refused: no polls until it is saved again or the switch is toggled
+    private int _rateLimits; // 429s in a row
     private DateTimeOffset _nextPoll = DateTimeOffset.MinValue;
     private UsageSnapshot? _last;
     private DateTimeOffset _lastAt;
 
-    public UsageIntegration(HttpMessageHandler handler, string credentialsPath, PdcStore store, TimeProvider clock)
+    public UsageIntegration(HttpMessageHandler handler, PdcStore store, TimeProvider clock)
     {
         _http = new HttpClient(handler) { Timeout = HttpTimeout };
-        _credentialsPath = credentialsPath;
         _store = store;
         _clock = clock;
     }
 
-    /// <summary>The real thing: the live endpoint, the current user's Claude Code credentials, settings.json in
-    /// %APPDATA%\DeskBuddy.</summary>
+    /// <summary>The real thing: the live endpoint through curl.exe (see <see cref="CurlHandler"/>), settings in %APPDATA%\DeskBuddy.</summary>
     public static UsageIntegration CreateDefault() =>
-        new(new SocketsHttpHandler(), DefaultCredentialsPath, new PdcStore(PdcStore.DefaultDirectory), TimeProvider.System);
-
-    public static string DefaultCredentialsPath =>
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude", ".credentials.json");
+        new(new CurlHandler(), new PdcStore(PdcStore.DefaultDirectory), TimeProvider.System);
 
     public bool Enabled { get; private set; }
     /// <summary>What is going on, for the window; null while off.</summary>
     public string? Status { get; private set; }
     /// <summary>True while <see cref="Status"/> is a problem.</summary>
     public bool Problem { get; private set; }
+    /// <summary>The saved org ID; null: none.</summary>
+    public string? OrgId => _store.LoadUsageOrgId();
+    /// <summary>Whether a session key is saved (the key itself is never handed out).</summary>
+    public bool HasSessionKey => _store.LoadClaudeSessionKey() is not null;
+    /// <summary>When the next poll is due (while on).</summary>
+    public DateTimeOffset NextPoll => _nextPoll;
 
     /// <summary>The numbers to show: on, fresh (at most <see cref="StaleAfter"/> old) and with at least one window;
     /// otherwise null. This is also what the device is told.</summary>
@@ -65,6 +69,33 @@ public sealed class UsageIntegration : IDisposable
     public event Action<LogKind, string>? Log;
 
     private DateTimeOffset Now => _clock.GetUtcNow();
+
+    public static bool IsValidOrgId(string? orgId) => Guid.TryParseExact(orgId?.Trim(), "D", out _);
+
+    /// <summary>Saves the org ID and, when <paramref name="sessionKey"/> is not empty, the session key (empty keeps the
+    /// stored one); when on, polls at once. Returns the problem (nothing saved) or null.</summary>
+    public async Task<string?> SaveConfigAsync(string orgId, string? sessionKey)
+    {
+        if (!IsValidOrgId(orgId))
+        {
+            return BadOrgIdText;
+        }
+        _store.SaveUsageOrgId(orgId.Trim().ToLowerInvariant());
+        if (sessionKey?.Trim() is { Length: > 0 } key)
+        {
+            _store.SaveClaudeSessionKey(key);
+        }
+        Write(LogKind.Info, "Claude usage: org ID and session key saved");
+        if (Enabled)
+        {
+            await ActivateAsync();
+        }
+        else
+        {
+            Changed?.Invoke();
+        }
+        return null;
+    }
 
     /// <summary>Reads the setting; when on, polls at once.</summary>
     public Task StartAsync()
@@ -91,6 +122,7 @@ public sealed class UsageIntegration : IDisposable
         }
         _epoch++;
         Enabled = false;
+        _halted = false;
         _last = null;
         Status = null;
         Problem = false;
@@ -103,6 +135,8 @@ public sealed class UsageIntegration : IDisposable
     {
         _epoch++;
         Enabled = true;
+        _halted = false;
+        _rateLimits = 0;
         _last = null;
         Status = "checking…";
         Problem = false;
@@ -111,13 +145,13 @@ public sealed class UsageIntegration : IDisposable
         return PollAsync();
     }
 
-    /// <summary>Called every second: polls every 60 s (5 min after a 429). Does nothing while off.</summary>
-    public Task TickAsync() => Enabled && !_polling && Now >= _nextPoll ? PollAsync() : Task.CompletedTask;
+    /// <summary>Called every second: polls every 60 s (longer after a 429). Does nothing while off or after the key was refused.</summary>
+    public Task TickAsync() => Enabled && !_halted && !_polling && Now >= _nextPoll ? PollAsync() : Task.CompletedTask;
 
-    /// <summary>One poll: the token from the file, then the endpoint.</summary>
+    /// <summary>One poll of the endpoint with the saved org ID and key.</summary>
     public async Task PollAsync()
     {
-        if (!Enabled || _polling)
+        if (!Enabled || _halted || _polling)
         {
             return;
         }
@@ -126,30 +160,41 @@ public sealed class UsageIntegration : IDisposable
         _nextPoll = Now + PollInterval;
         try
         {
-            var token = ReadToken(out var problem);
-            if (token is null)
+            var orgId = _store.LoadUsageOrgId();
+            var key = _store.LoadClaudeSessionKey();
+            if (!IsValidOrgId(orgId) || key is null)
             {
-                Fail(problem!, drop: true);
+                _last = null;
+                Status = NotConfiguredText;
+                Problem = true;
                 return;
             }
-            using var request = new HttpRequestMessage(HttpMethod.Get, Endpoint);
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-            request.Headers.Add("anthropic-beta", "oauth-2025-04-20");
-            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+            using var request = new HttpRequestMessage(HttpMethod.Get, new Uri(BaseUri, $"api/organizations/{Uri.EscapeDataString(orgId!)}/usage"));
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("*/*"));
+            request.Headers.TryAddWithoutValidation("cookie", $"sessionKey={key}");
+            request.Headers.Add("anthropic-client-platform", "web_claude_ai");
             request.Headers.UserAgent.Add(new ProductInfoHeaderValue("DeskBuddy", Version));
+            request.Content = new ByteArrayContent([]);
+            request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+            TimeSpan? retryAfter = null;
+            var challenged = false;
             int status;
             string body;
             try
             {
                 using var response = await _http.SendAsync(request);
                 status = (int)response.StatusCode;
+                retryAfter = response.Headers.RetryAfter is { } ra
+                    ? ra.Delta ?? (ra.Date is { } d ? d - Now : null)
+                    : null;
+                challenged = response.Headers.TryGetValues("cf-mitigated", out var mitigated) && mitigated.Contains("challenge");
                 body = await response.Content.ReadAsStringAsync();
             }
             catch (Exception e) when (e is HttpRequestException or TaskCanceledException or IOException)
             {
                 if (epoch == _epoch)
                 {
-                    Fail(e is TaskCanceledException ? "no answer from api.anthropic.com in time" : "api.anthropic.com not reachable", drop: false);
+                    Fail(e is TaskCanceledException ? "no answer from claude.ai in time" : "claude.ai not reachable", drop: false);
                 }
                 return;
             }
@@ -157,25 +202,36 @@ public sealed class UsageIntegration : IDisposable
             {
                 return;
             }
+            if (challenged)
+            {
+                Fail("claude.ai's Cloudflare check refused the request", drop: false); // not the key: no halt
+                return;
+            }
             if (status is (int)HttpStatusCode.Unauthorized or (int)HttpStatusCode.Forbidden)
             {
-                Fail(LoginExpiredText, drop: true);
+                _halted = true;
+                Fail(KeyExpiredText, drop: true);
                 return;
             }
             if (status == (int)HttpStatusCode.TooManyRequests)
             {
-                _nextPoll = Now + RateLimitedInterval;
-                Fail("rate limited by api.anthropic.com: trying again in 5 minutes", drop: false);
+                _rateLimits++;
+                var wait = retryAfter is { } r && r > TimeSpan.Zero
+                    ? r
+                    : _rateLimits == 1 ? RateLimitedInterval : MaxRateLimitedInterval;
+                _nextPoll = Now + wait;
+                Fail($"rate limited by claude.ai: trying again at {_nextPoll.ToLocalTime():HH:mm}", drop: false);
                 return;
             }
             if (status is < 200 or >= 300 || UsageApi.Parse(body, Now) is not { } usage)
             {
-                Fail(status is >= 200 and < 300 ? "unexpected answer from api.anthropic.com" : $"api.anthropic.com answered HTTP {status}", drop: false);
+                Fail(status is >= 200 and < 300 ? "unexpected answer from claude.ai" : $"claude.ai answered HTTP {status}", drop: false);
                 return;
             }
+            _rateLimits = 0;
             _last = usage;
             _lastAt = Now;
-            Status = usage.IsEmpty ? "logged in; no usage windows reported" : $"updated {Now.ToLocalTime():HH:mm}";
+            Status = usage.IsEmpty ? "connected; no usage windows reported" : $"updated {Now.ToLocalTime():HH:mm}";
             Problem = false;
         }
         finally
@@ -185,51 +241,7 @@ public sealed class UsageIntegration : IDisposable
         }
     }
 
-    // The access token, or null with the reason. An expired token is not sent (and never refreshed here).
-    private string? ReadToken(out string? problem)
-    {
-        problem = null;
-        string text;
-        try
-        {
-            text = File.ReadAllText(_credentialsPath);
-        }
-        catch (Exception e) when (e is FileNotFoundException or DirectoryNotFoundException)
-        {
-            problem = NotLoggedInText;
-            return null;
-        }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
-        {
-            problem = "cannot read Claude Code's credentials file";
-            return null;
-        }
-        try
-        {
-            using var doc = JsonDocument.Parse(text);
-            if (doc.RootElement.ValueKind != JsonValueKind.Object ||
-                !doc.RootElement.TryGetProperty("claudeAiOauth", out var oauth) || oauth.ValueKind != JsonValueKind.Object ||
-                !oauth.TryGetProperty("accessToken", out var t) || t.ValueKind != JsonValueKind.String || t.GetString() is not { Length: > 0 } token)
-            {
-                problem = NotLoggedInText;
-                return null;
-            }
-            if (oauth.TryGetProperty("expiresAt", out var exp) && exp.ValueKind == JsonValueKind.Number && exp.TryGetInt64(out var ms) &&
-                DateTimeOffset.FromUnixTimeMilliseconds(ms) <= Now)
-            {
-                problem = LoginExpiredText;
-                return null;
-            }
-            return token;
-        }
-        catch (JsonException)
-        {
-            problem = "Claude Code's credentials file is damaged";
-            return null;
-        }
-    }
-
-    // drop: the numbers are wrong now (login gone); otherwise they are kept until they are StaleAfter old.
+    // drop: the numbers are wrong now (key refused); otherwise they are kept until they are StaleAfter old.
     private void Fail(string problem, bool drop)
     {
         if (drop)
