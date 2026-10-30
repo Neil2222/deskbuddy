@@ -22,7 +22,7 @@ static const struct {
     {"time.set", LINK_CMD_TIME_SET}, {"msg.show", LINK_CMD_MSG_SHOW}, {"mood.set", LINK_CMD_MOOD_SET},
     {"act", LINK_CMD_ACT},           {"pdc.set", LINK_CMD_PDC_SET}, {"pdc.result", LINK_CMD_PDC_RESULT},
     {"log.since", LINK_CMD_LOG_SINCE}, {"clock.face", LINK_CMD_CLOCK_FACE}, {"info", LINK_CMD_INFO},
-    {"usage.set", LINK_CMD_USAGE_SET},
+    {"usage.set", LINK_CMD_USAGE_SET}, {"sys.set", LINK_CMD_SYS_SET},
 };
 
 static const char *const PDC_RESULTS[LINK_PDC_RESULT_COUNT] = {
@@ -341,6 +341,29 @@ static link_result_t decode_args(link_command_t *c, const arg_t *args, int n)
             }
             c->u.usage_set.win[w] = (link_usage_t){has_pct, (uint16_t)v_pct, (int16_t)v_pred, v_end};
         }
+    } else if (c->cmd == LINK_CMD_SYS_SET) {
+        // Each stat comes on its own or not at all; the free space only with the disk it belongs to.
+        static const char *const k_keys[3] = {"cpu", "ram", "disk"};
+        const char *state = get_arg(args, n, "state", v[0]);
+        if (!state || (strcmp(state, "on") != 0 && strcmp(state, "off") != 0)) {
+            return LINK_ERR_ARGS;
+        }
+        c->u.sys_set.on = strcmp(state, "on") == 0;
+        int64_t pct[3];
+        for (int i = 0; i < 3; i++) {
+            const char *s = get_arg(args, n, k_keys[i], v[1 + i]);
+            pct[i] = -1;
+            if (find_arg(args, n, k_keys[i]) && (!s || !parse_int(s, 0, 100, &pct[i]))) {
+                return LINK_ERR_ARGS;
+            }
+        }
+        const char *free_gb = get_arg(args, n, "disk_free", v[4]);
+        int64_t v_free = -1;
+        if (find_arg(args, n, "disk_free") &&
+            (pct[2] < 0 || !free_gb || !parse_int(free_gb, 0, LINK_SYS_FREE_MAX, &v_free))) {
+            return LINK_ERR_ARGS;
+        }
+        c->u.sys_set.sys = (link_sys_t){(int8_t)pct[0], (int8_t)pct[1], (int8_t)pct[2], (int32_t)v_free};
     } else if (c->cmd == LINK_CMD_LOG_SINCE) {
         const char *boot = get_arg(args, n, "boot", v[0]), *seq = get_arg(args, n, "seq", v[1]);
         int64_t v_seq;

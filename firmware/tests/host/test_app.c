@@ -17,11 +17,13 @@
 #include "buddy_kitt.h"
 #include "buddy_view.h"
 #include "layout.h"
+#include "marquee.h"
 #include "md.h"
 #include "md_view.h"
 #include "menu.h"
 #include "menu_ask.h"
 #include "menu_ttt.h"
+#include "sysinfo_view.h"
 #include "test.h"
 #include "ttt.h"
 #include "usage_view.h"
@@ -166,6 +168,7 @@ static void touch(int x, int y)
 static layout_t s_layout;
 static menu_t s_where; // only for the menu's area
 static int s_no_x, s_no_y, s_yes_x, s_yes_y;
+static gfx_rect_t s_no, s_yes; // Buddy's NEE/JA buttons, while he asks
 
 static void tap_slot(menu_layout_t layout, int slot)
 {
@@ -204,6 +207,8 @@ static bool start(void)
     s_no_y = no.y + no.h / 2;
     s_yes_x = yes.x + yes.w / 2;
     s_yes_y = yes.y + yes.h / 2;
+    s_no = no;
+    s_yes = yes;
 
     const app_config_t config = {.width = W, .height = H, .stage_percent = 65};
     s_now_us = 1000000;
@@ -223,7 +228,7 @@ void test_app_hello_offers_tracking_and_the_question(void)
     CHECK(start());
     clear_out();
     command(1, "hello");
-    CHECK(sent("caps=poke,monster,mode,time,status,msg,mood,act,pdc,track,did,log,face,info,usage "));
+    CHECK(sent("caps=poke,monster,mode,time,status,msg,mood,act,pdc,track,did,log,face,info,usage,sys "));
     CHECK(sent("acts=water,sneeze,stare,meditate,focus,ask_peukie,kitt faces=classic,skeleton dev="));
     clear_out();
     command(2, "status");
@@ -1025,17 +1030,26 @@ void test_app_missile_defense_fullscreen_and_back(void)
 
 // ---- Claude usage ----
 
-// Pixels of the usage strip's plate in the last presented frame (its colour is nowhere else on the stage or the clock).
-static int usage_plate_px(void)
+// Pixels of a strip's plate in a of the last presented frame, outside skip (its colour is nowhere else on the stage or
+// the clock; Buddy's buttons and the sign are skipped where they may cover it).
+static int plate_px(gfx_rect_t a, const gfx_rect_t *skip, int n_skip)
 {
-    const gfx_rect_t a = usage_view_area(s_layout.stage);
     int n = 0;
     for (int y = a.y; y < a.y + a.h; y++) {
         for (int x = a.x; x < a.x + a.w; x++) {
-            n += front_px(x, y) == GFX_RGB(20, 23, 36);
+            bool skipped = false;
+            for (int i = 0; i < n_skip; i++) {
+                skipped = skipped || gfx_rect_contains_point(skip[i], x, y);
+            }
+            n += !skipped && front_px(x, y) == GFX_RGB(20, 23, 36);
         }
     }
     return n;
+}
+
+static int usage_plate_px(void)
+{
+    return plate_px(usage_view_area(s_layout.stage), NULL, 0);
 }
 
 #define USAGE_ON "usage.set state=on five=37 five_end=1792009000 five_pred=130 week=20 week_end=1792266400 week_pred=90"
@@ -1048,7 +1062,7 @@ void test_app_usage_strip_follows_the_lease_and_the_mode(void)
     CHECK(start());
     clear_out();
     command(400, "hello");
-    CHECK(sent(",info,usage "));
+    CHECK(sent(",info,usage,sys "));
     run(100);
     CHECK_EQ(usage_plate_px(), 0);
 
@@ -1121,4 +1135,128 @@ void test_app_usage_strip_follows_the_lease_and_the_mode(void)
     tap_back(); // Home, for whatever runs next
     run(600);
     CHECK_EQ(usage_plate_px(), 0);
+}
+
+// ---- The PC's load ----
+
+#define SYS_ON "sys.set state=on cpu=12 ram=45 disk=85 disk_free=120"
+
+static int sys_plate_px(bool raised)
+{
+    return plate_px(sysinfo_view_area(s_layout.stage, raised), NULL, 0);
+}
+
+// ...raised, beside what covers it (whose own colours may include the plate's).
+static int sys_plate_px_beside(gfx_rect_t a, gfx_rect_t b)
+{
+    const gfx_rect_t skip[] = {a, b};
+    return plate_px(sysinfo_view_area(s_layout.stage, true), skip, 2);
+}
+
+// The strip: offered in hello's caps; in the usage strip's place while that one is hidden, directly above it while it
+// shows. Raised, it gives way to Buddy's NEE/JA buttons and to a message on the sign in Clock Mode, and comes back
+// after them. Gone 30 s after the last sys.set, at once on a hello or state=off; not during Missile Defense. Malformed
+// lines get err bad_args.
+void test_app_sys_strip_stacks_with_usage(void)
+{
+    CHECK(start());
+    clear_out();
+    command(500, "hello");
+    CHECK(sent(",usage,sys "));
+    run(100);
+    CHECK_EQ(sys_plate_px(false) + sys_plate_px(true), 0);
+
+    command(501, SYS_ON);
+    command(502, "sys.set state=on cpu=101");
+    command(503, "sys.set state=on disk_free=120");
+    CHECK(sent("<DB1 501 ok #"));
+    CHECK(sent("<DB1 502 err bad_args #"));
+    CHECK(sent("<DB1 503 err bad_args #"));
+    run(100);
+    const int alone = sys_plate_px(false);
+    CHECK(alone > 0);
+    CHECK_EQ(sys_plate_px(true), 0);
+
+    // With Claude usage: that one at the bottom, this one above it, the same plate.
+    command(504, USAGE_ON);
+    run(100);
+    CHECK(usage_plate_px() > 0 && usage_plate_px() != alone);
+    CHECK_EQ(sys_plate_px(true), alone);
+
+    // Buddy's question: gone while his buttons are up; back once he is answered.
+    command(505, "act name=ask_peukie");
+    run(100);
+    CHECK_EQ(sys_plate_px_beside(s_no, s_yes), 0);
+    CHECK(usage_plate_px() > 0);
+    touch(s_no_x, s_no_y);
+    run(500);
+    CHECK_EQ(sys_plate_px(true), alone);
+
+    // Clock Mode: both as on the stage; a message on the sign takes the raised strip's place while it shows.
+    clear_out();
+    command(506, "mode.set mode=office");
+    run(4000);
+    CHECK(sent("evt mode mode=office"));
+    CHECK_EQ(sys_plate_px(true), alone);
+    command(507, "msg.show id=507 text=HI");
+    run(500);
+    CHECK(sent("evt msg id=507 state=showing"));
+    const gfx_rect_t sign = {(W - MARQUEE_W) / 2, H - MARQUEE_H - 36, MARQUEE_W, MARQUEE_H};
+    CHECK_EQ(sys_plate_px_beside(sign, sign), 0);
+    for (int i = 0; i < 30 && !sent("evt msg id=507 state=done"); i++) {
+        command(508, SYS_ON);
+        command(509, USAGE_ON);
+        run(1000);
+    }
+    CHECK(sent("evt msg id=507 state=done"));
+    run(100);
+    CHECK_EQ(sys_plate_px(true), alone);
+    touch(W / 2, H / 2);
+    run(3000);
+    CHECK(sent("evt mode mode=normal"));
+
+    // Claude usage off: down in its place.
+    command(510, "usage.set state=off");
+    run(100);
+    CHECK_EQ(sys_plate_px(false), alone);
+    CHECK_EQ(sys_plate_px(true), 0);
+
+    // The lease: 30 s without a sys.set, a hello, state=off.
+    command(511, SYS_ON);
+    run(29000);
+    CHECK_EQ(sys_plate_px(false), alone);
+    run(1500);
+    CHECK_EQ(sys_plate_px(false), 0);
+    command(512, SYS_ON);
+    run(100);
+    CHECK_EQ(sys_plate_px(false), alone);
+    command(513, "hello");
+    run(100);
+    CHECK_EQ(sys_plate_px(false), 0);
+    command(514, SYS_ON);
+    run(100);
+    CHECK_EQ(sys_plate_px(false), alone);
+    command(515, "sys.set state=off");
+    run(100);
+    CHECK_EQ(sys_plate_px(false), 0);
+
+    // Missile Defense: hidden from his alert on, back with his stage.
+    command(516, SYS_ON);
+    run(100);
+    CHECK_EQ(sys_plate_px(false), alone);
+    open_missiles();
+    run(300);
+    CHECK(!game_on_screen()); // his alert, on his stage
+    CHECK_EQ(sys_plate_px(false), 0);
+    run(1200);
+    CHECK(game_on_screen());
+    command(517, SYS_ON);
+    touch(MD_W - 34, 20); // the X
+    run(800);
+    CHECK(!game_on_screen());
+    CHECK_EQ(sys_plate_px(false), alone);
+    command(518, "sys.set state=off");
+    tap_back(); // Home, for whatever runs next
+    run(600);
+    CHECK_EQ(sys_plate_px(false), 0);
 }

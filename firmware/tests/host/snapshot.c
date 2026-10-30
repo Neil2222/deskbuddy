@@ -14,7 +14,8 @@
 // Missile Defense (md_*.png and md_sheet.png: his alert on the stage, then the whole screen: a wave starting, aiming,
 // firing, a desk item lost, a missile on his head, overheated eyes, panic, a wave cleared, the game over), and the
 // Claude usage strip (usage.png and usage_ask.png on the stage, under his question's buttons; office_usage.png and
-// skeleton_usage.png in Clock Mode, under the sign).
+// skeleton_usage.png in Clock Mode, under the sign), and the PC load strip (sysinfo.png alone, usage_sysinfo.png and
+// office_usage_sysinfo.png stacked with the usage strip).
 #include <stdio.h>
 #include <string.h>
 
@@ -37,6 +38,7 @@
 #include "office_faces.h"
 #include "office_zoom.h"
 #include "png.h"
+#include "sysinfo_view.h"
 #include "usage_view.h"
 
 enum { W = 1024, H = 600, ALIGN = 32, STAGE_PERCENT = 65 }; // firmware defaults (Kconfig)
@@ -64,6 +66,16 @@ static gfx_dirty_t s_all;
 static const char *s_dir;
 static int s_panel_count;
 static usage_view_t s_usage_view;
+static sysinfo_view_t s_sys_view;
+
+// The PC load strip as the companion's numbers put it (sysinfo_view.h), alone or raised above the usage strip.
+static void sys_strip(bool raised)
+{
+    static sysinfo_t s;
+    sysinfo_init(&s);
+    sysinfo_set(&s, true, &(link_sys_t){12, 63, 85, 120}, 0);
+    sysinfo_view_apply(&s_sys_view, &s, raised);
+}
 
 // The Claude usage strip as the companion's numbers put it (usage_view.h): calm (both bars green, the predictions red
 // and orange) or busy (the 5-hour window red, the week yellow without a prediction), counting down from now (UTC s).
@@ -962,7 +974,7 @@ int main(int argc, char **argv)
     static menu_ask_t ask;
     static menu_thought_t thought;
     static uint8_t thought_mem[MENU_THOUGHT_MEMORY];
-    static uint8_t usage_mem[USAGE_VIEW_MEMORY];
+    static uint8_t usage_mem[USAGE_VIEW_MEMORY], sys_mem[SYSINFO_VIEW_MEMORY];
     s_layout = layout_compute(W, H, STAGE_PERCENT, false, ALIGN);
     if (!gfx_scene_init(&s_scene, W, H, layout_background, &s_layout, strip, 16 * 1024, ALIGN) ||
         !buddy_view_init(&s_view, &s_scene, s_layout.stage, 10, 0) ||
@@ -973,7 +985,8 @@ int main(int argc, char **argv)
         !menu_ask_init(&ask, &s_scene, s_layout.stage, s_view.home_y0 - BUDDY_MAX_LIFT * s_view.home_scale, 25) ||
         !menu_thought_init(&thought, &s_scene, s_layout.stage, s_view.home_x0 + s_view.art->w * s_view.home_scale / 2,
                            thought_mem, sizeof(thought_mem), 5) ||
-        !usage_view_init(&s_usage_view, &s_scene, s_layout.stage, usage_mem, 28)) {
+        !usage_view_init(&s_usage_view, &s_scene, s_layout.stage, usage_mem, 28) ||
+        !sysinfo_view_init(&s_sys_view, &s_scene, s_layout.stage, sys_mem, 28)) {
         fprintf(stderr, "scene setup failed\n");
         return 1;
     }
@@ -1014,6 +1027,19 @@ int main(int argc, char **argv)
     }
     menu_ask_apply(&ask, NULL, 0, BUDDY_ASK_MS);
     usage_view_apply(&s_usage_view, NULL, 0);
+
+    // The PC load strip: alone in the usage strip's place; above it while that one shows.
+    sys_strip(false);
+    if (!shot("sysinfo")) {
+        return 1;
+    }
+    usage_strip(false, 1792360200);
+    sys_strip(true);
+    if (!shot("usage_sysinfo")) {
+        return 1;
+    }
+    usage_view_apply(&s_usage_view, NULL, 0);
+    sysinfo_view_apply(&s_sys_view, NULL, false);
 
     // Key moments of the Monster sequence, full screen (the menu says he is charging meanwhile).
     static const uint32_t k_moments[] = {150, 700, 1000, 1500, 1750, 2000, 2300, 2560, 2700, 3300, 3900, 4400,
@@ -1218,6 +1244,13 @@ int main(int argc, char **argv)
     if (!shot("office_clock")) {
         return 1;
     }
+    usage_strip(false, 1792360200); // with the sign gone, the PC load above the usage strip
+    sys_strip(true);
+    if (!shot("office_usage_sysinfo")) {
+        return 1;
+    }
+    usage_view_apply(&s_usage_view, NULL, 0);
+    sysinfo_view_apply(&s_sys_view, NULL, false);
     office_faces_apply(&faces, NULL, 0);
     if (!shot("office_not_set")) {
         return 1;

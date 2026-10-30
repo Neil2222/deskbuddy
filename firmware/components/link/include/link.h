@@ -44,6 +44,7 @@ typedef enum {
     LINK_CMD_CLOCK_FACE, // name=: Clock Mode's face (hello faces=)
     LINK_CMD_INFO,       // -> ok fw= build= board= ... hw=: what this firmware is and what it runs on (cap info)
     LINK_CMD_USAGE_SET,  // state=on|off [five= five_end= [five_pred=]] [week= week_end= [week_pred=]]: Claude usage
+    LINK_CMD_SYS_SET,    // state=on|off [cpu=] [ram=] [disk= [disk_free=]]: the PC's load (cap sys)
 } link_cmd_t;
 
 #define LINK_PDC_COUNT_MAX 2147483647
@@ -61,6 +62,15 @@ typedef struct {
     int16_t pred; // predicted at the window's end, whole percent; -1: no prediction
     int64_t end;  // UTC seconds when the window resets
 } link_usage_t;
+
+// sys.set: the load of the PC the companion runs on, as it measures it; -1: not sent (not shown).
+#define LINK_SYS_FREE_MAX 999999 // GB
+typedef struct {
+    int8_t cpu;        // processor load, whole percent (0..100)
+    int8_t ram;        // memory in use, whole percent
+    int8_t disk;       // the system disk (C:) in use, whole percent
+    int32_t disk_free; // free on it, whole GB (0..LINK_SYS_FREE_MAX); only with disk
+} link_sys_t;
 
 // How a ZDMW click ended, as the companion reports it (pdc.result result=). Names are listed in link.c; a
 // well-formed name this firmware does not know counts as UNKNOWN (a newer companion: maybe sent).
@@ -131,6 +141,10 @@ typedef struct {
             bool on;
             link_usage_t win[LINK_USAGE_WINDOWS]; // LINK_USAGE_FIVE, LINK_USAGE_WEEK
         } usage_set; // USAGE_SET
+        struct {
+            bool on;
+            link_sys_t sys;
+        } sys_set; // SYS_SET
         struct {
             bool has_boot;
             uint64_t boot; // the boot (hello boot=) seq counts in; another one means: everything of this boot

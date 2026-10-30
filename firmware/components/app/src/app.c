@@ -31,6 +31,8 @@
 #include "office_switch.h"
 #include "office_zoom.h"
 #include "pdc.h"
+#include "sysinfo.h"
+#include "sysinfo_view.h"
 #include "ttt.h"
 #include "usage.h"
 #include "usage_view.h"
@@ -230,6 +232,11 @@ static pdc_t s_pdc;
 static usage_t s_usage;
 static usage_view_t s_usage_view;
 static bool s_has_usage; // the strip could be set up
+
+// The PC's load as the companion reports it (sysinfo.h), and its strip: in the usage strip's place, or above it.
+static sysinfo_t s_sys;
+static sysinfo_view_t s_sys_view;
+static bool s_has_sys; // the strip could be set up
 
 // What the menu shows depends on Buddy; the brain owns his state (reading the mood also ends a timed one).
 static menu_status_t menu_status(buddy_brain_t *brain, bool has_office, uint32_t now)
@@ -652,6 +659,7 @@ static void run_command(const link_command_t *c, buddy_brain_t *brain, office_sw
     case LINK_CMD_HELLO: // answered by the link (app_link.c); a new connection forgets what the previous one offered
         pdc_reset(&s_pdc);
         usage_reset(&s_usage);
+        sysinfo_reset(&s_sys);
         return;
     case LINK_CMD_PDC_SET:
         if (c->u.pdc_set.on != pdc_available(&s_pdc, now)) {
@@ -661,6 +669,9 @@ static void run_command(const link_command_t *c, buddy_brain_t *brain, office_sw
         break;
     case LINK_CMD_USAGE_SET: // the strip follows in app_frame
         usage_set(&s_usage, c->u.usage_set.on, c->u.usage_set.win, now);
+        break;
+    case LINK_CMD_SYS_SET: // the strip follows in app_frame
+        sysinfo_set(&s_sys, c->u.sys_set.on, &c->u.sys_set.sys, now);
         break;
     case LINK_CMD_PDC_RESULT:
         // Only the click we are waiting for counts: a late or repeated result changes nothing (at most one outcome).
@@ -716,6 +727,7 @@ static struct {
     uint32_t presented;
     bool pdc_was;    // the companion offered PDC Manager last time round (to log when that ends)
     bool usage_was;  // ...and Claude usage
+    bool sys_was;    // ...and the PC's load
     bool backlight;  // off until both buffers are drawn
     const char *mode; // last mode reported to the companion
     buddy_mood_t mood; // last mood reported
@@ -1190,6 +1202,13 @@ bool app_init(const app_config_t *config)
         APP_LOGW(TAG, "the Claude usage strip cannot be shown (no memory, or no room in the scene)");
     }
     usage_init(&s_usage);
+    // Read by the compositor whenever the strip redraws (every few seconds at most): internal RAM if there is room.
+    uint8_t *sys_mem = alloc_internal_first(SYSINFO_VIEW_MEMORY);
+    s_has_sys = sysinfo_view_init(&s_sys_view, &s_scene, s_layout.stage, sys_mem, 28); // below the sign
+    if (!s_has_sys) {
+        APP_LOGW(TAG, "the PC load strip cannot be shown (no memory, or no room in the scene)");
+    }
+    sysinfo_init(&s_sys);
 
     app_events_init();
     buddy_brain_init(&s.brain, t_start, app_port_random());
@@ -1567,6 +1586,31 @@ uint32_t app_frame(void)
     }
     const uint32_t usage_wake = usage_next(&s_usage, now); // the lease runs out
     next = usage_wake < next ? usage_wake : next;
+
+    // The PC's load: in the usage strip's place, or directly above it while that one shows; under the same rules.
+    // Raised, it gives way to what only comes and goes there (Buddy's NEE/JA buttons, the sign in Clock Mode).
+    const bool sys_now = sysinfo_available(&s_sys, now);
+    if (sys_now != s.sys_was) {
+        APP_LOGI(TAG, "PC load %s", sys_now ? "shown (companion)"
+                                            : "no longer shown (switched off, the lease ran out, or a new companion "
+                                              "connection)");
+        s.sys_was = sys_now;
+    }
+    if (s_has_sys) {
+        const bool raised = s_has_usage && !(s_usage_view.sprite.flags & GFX_SPRITE_HIDDEN);
+        bool show = sys_now && !md_on() && !s_md_view.shown;
+        if (show && raised) {
+            const gfx_rect_t area = sysinfo_view_area(s_layout.stage, true);
+            const gfx_sprite_t *const k_above[] = {&s_ask.button[0], &s_ask.button[1], &s_ask.timer,
+                                                   &s_msg.sign.sprite};
+            for (unsigned i = 0; i < sizeof(k_above) / sizeof(k_above[0]); i++) {
+                show = show && !gfx_rect_overlaps(area, gfx_sprite_bounds(k_above[i]));
+            }
+        }
+        sysinfo_view_apply(&s_sys_view, show ? &s_sys : NULL, raised);
+    }
+    const uint32_t sys_wake = sysinfo_next(&s_sys, now); // the lease runs out
+    next = sys_wake < next ? sys_wake : next;
 
     const char *new_mode = mode_name(&s.screen, &s.brain);
     if (new_mode != s.mode) {

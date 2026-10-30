@@ -103,20 +103,19 @@ public static class UsageWire
 }
 
 /// <summary>
-/// When to send <c>usage.set</c>: at once after hello and on every change, and every <see cref="Interval"/>
-/// otherwise (the device drops the lease after 30 s without one).
+/// When to send a strip's line (<c>usage.set</c>, <c>sys.set</c>): at once after hello and on every change, and every
+/// <see cref="Interval"/> otherwise (the device drops the lease after 30 s without one).
 /// </summary>
-public sealed class UsageLease
+public sealed class StripLease
 {
     public static readonly TimeSpan Interval = TimeSpan.FromSeconds(10);
 
     private string? _sent;
     private DateTimeOffset _sentAt;
 
-    /// <summary>The command to send now, or null.</summary>
-    public string? Next(DateTimeOffset now, UsageSnapshot? usage)
+    /// <summary>The command to send now (<paramref name="want"/>), or null.</summary>
+    public string? Next(DateTimeOffset now, string want)
     {
-        var want = UsageWire.Set(usage);
         if (_sent == want && now - _sentAt < Interval)
         {
             return null;

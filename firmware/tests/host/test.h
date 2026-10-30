@@ -188,7 +188,11 @@ extern int g_test_failed;
     X(usage_countdown_boundaries)                    \
     X(usage_colours_follow_the_pct)                  \
     X(usage_strip_fits_and_redraws_only_on_change)   \
-    X(app_usage_strip_follows_the_lease_and_the_mode)
+    X(app_usage_strip_follows_the_lease_and_the_mode) \
+    X(sysinfo_protocol_lines)                        \
+    X(sysinfo_lease_and_hello)                       \
+    X(sysinfo_strip_fits_stacks_and_redraws_only_on_change) \
+    X(app_sys_strip_stacks_with_usage)
 
 #define X(name) void test_##name(void);
 TEST_LIST

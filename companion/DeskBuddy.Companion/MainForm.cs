@@ -135,6 +135,21 @@ public sealed partial class MainForm : Form
     private readonly Label _usageHint = new() { Dock = DockStyle.Top, Height = 24, AutoEllipsis = true, UseMnemonic = false };
     private string? _usageConfigError; // the org ID was not saved: why
 
+    // PC load.
+    private readonly Card _sysCard;
+    private readonly Panel _sysBar = new() { Dock = DockStyle.Top, Height = 40 };
+    private readonly FlatButton _sysToggle;
+    private readonly Label _sysSummary = new()
+    {
+        Dock = DockStyle.Fill, ForeColor = Theme.Muted, TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(10, 0, 0, 0),
+        AutoEllipsis = true, UseMnemonic = false,
+    };
+    private readonly Label _sysNow = new()
+    {
+        Dock = DockStyle.Top, Height = 32, ForeColor = Theme.Text, TextAlign = ContentAlignment.MiddleLeft, AutoEllipsis = true,
+        UseMnemonic = false,
+    };
+
     // Diagnostics.
     private readonly FlatButton _clearLog;
     private readonly CheckBox _showDevice = new() { Text = "Device log", Checked = true, AutoSize = true, FlatStyle = FlatStyle.Flat };
@@ -188,6 +203,8 @@ public sealed partial class MainForm : Form
         _usageToggle = new FlatButton(_theme, ButtonLook.Pill) { Dock = DockStyle.Left, Width = 76, AccessibleName = "Claude usage" };
         _usageCard = new Card(_theme) { Title = "Claude usage", Dock = DockStyle.Top, Height = 92 };
         _usageSave = Quiet("Save", null, 90);
+        _sysToggle = new FlatButton(_theme, ButtonLook.Pill) { Dock = DockStyle.Left, Width = 76, AccessibleName = "PC load" };
+        _sysCard = new Card(_theme) { Title = "PC load", Dock = DockStyle.Top, Height = 92 };
 
         var content = new Panel { Dock = DockStyle.Fill, Padding = new Padding(24, 18, 24, 18) };
         _pageTitle.Font = _theme.Title;
@@ -229,7 +246,8 @@ public sealed partial class MainForm : Form
         _service.HistoryChanged += _historyPage.HistoryChanged;
         _messagePage = AddPage(nav, "Message", "Text that scrolls across his LED sign", Theme.GlyphMessage, BuildMessagePage());
         _pdcPage = AddPage(nav, "PDC Manager", "The ZDMW Teams button, from here or from Buddy's menu", Theme.GlyphPdc, BuildPdcPage());
-        _usagePage = AddPage(nav, "Claude usage", "How much of your Claude plan is used, on Buddy's screen", Theme.GlyphUsage, BuildUsagePage());
+        _usagePage = AddPage(nav, "Usage", "Your Claude plan and this PC's load, on the strips below Buddy's stage", Theme.GlyphUsage,
+                             BuildUsagePage());
         _devicePage = AddPage(nav, "Device", "Connection, the desktop simulator and the protocol log", Theme.GlyphDevice, BuildDevicePage());
         _firmwarePage = AddPage(nav, "Firmware", "Install, update or repair DeskBuddy's firmware over USB", Theme.GlyphFirmware, BuildFirmwarePage());
 
@@ -240,6 +258,7 @@ public sealed partial class MainForm : Form
         _service.Log += AppendLog;
         _service.Pdc.Changed += UpdatePdc;
         _service.Usage.Changed += UpdateUsage;
+        _service.Sys.Changed += UpdateSys;
         _simulator.Changed += UpdateSimulator;
         _simulator.Output += AppendLog;
         _simulator.Ready += () =>
@@ -260,6 +279,7 @@ public sealed partial class MainForm : Form
         UpdateState();
         UpdatePdc();
         UpdateUsage();
+        UpdateSys();
         UpdateSimulator();
         Load += (_, _) =>
         {
@@ -786,9 +806,10 @@ public sealed partial class MainForm : Form
                           (_service.Pdc.Enabled ? _pdcDetails.Height + _pdcActionRow.Height : 0);
     }
 
-    // ---- Claude usage ----
+    // ---- Usage: Claude usage and PC load ----
 
-    // [On/Off] and a summary; while on, the status and a line per window as Buddy shows it.
+    // Two cards. Claude usage: [On/Off] and a summary; while on, the status and a line per window as Buddy shows it.
+    // PC load: [On/Off] and a summary; while on, the numbers.
     private Panel BuildUsagePage()
     {
         var page = ScrollPage();
@@ -834,7 +855,16 @@ public sealed partial class MainForm : Form
         _usageHint.Font = _theme.Small;
 
         Stack(_usageCard, _usageBar, _usageDetails, _usageConfigRow, _usageHint);
-        page.Controls.Add(_usageCard);
+
+        _sysSummary.Font = _theme.Small;
+        _sysBar.Padding = new Padding(0, 4, 0, 4);
+        _sysBar.Controls.Add(_sysSummary);
+        _sysBar.Controls.Add(_sysToggle);
+        _sysNow.Font = _theme.Text10;
+        Stack(_sysCard, _sysBar, _sysNow);
+
+        Stack(page, _usageCard, Gap(), _sysCard);
+        _sysToggle.Click += (_, _) => _service.Sys.SetEnabled(!_service.Sys.Enabled);
         _usageToggle.Click += (_, _) => _ = _service.Usage.SetEnabledAsync(!_service.Usage.Enabled);
         _usageSave.Click += (_, _) => _ = SaveUsageConfigAsync();
         _usageKey.KeyDown += (_, e) =>
@@ -865,9 +895,7 @@ public sealed partial class MainForm : Form
         _usageToggle.Text = on ? "On" : "Off";
         _usageToggle.DotColor = !on ? Theme.Faint : numbers is not null ? Theme.Green : Theme.Amber;
         _usageToggle.Invalidate();
-        _usagePage.Nav.ShowDot = on;
-        _usagePage.Nav.DotColor = _usageToggle.DotColor;
-        _usagePage.Nav.Invalidate();
+        UpdateUsageNav();
         _tips.SetToolTip(_usageToggle, on ? "Switch Claude usage off" : "Switch Claude usage on (off: no network traffic at all)");
         _usageSummary.Text = on
             ? "Asked from claude.ai every minute with your session key; Buddy shows it below his stage"
@@ -900,6 +928,38 @@ public sealed partial class MainForm : Form
             _usageCard.Controls.SetChildIndex(order[i], i);
         }
         _usageCard.Height = _usageCard.Padding.Vertical + _usageBar.Height + (on ? _usageDetails.Height : 0) + _usageConfigRow.Height + _usageHint.Height;
+    }
+
+    // [On/Off] and a summary; while on, the numbers as Buddy shows them.
+    private void UpdateSys()
+    {
+        var sys = _service.Sys;
+        var on = sys.Enabled;
+        var sample = sys.Sample is { IsEmpty: false } s ? s : null;
+        _sysToggle.Text = on ? "On" : "Off";
+        _sysToggle.DotColor = !on ? Theme.Faint : sample is not null ? Theme.Green : Theme.Amber;
+        _sysToggle.Invalidate();
+        UpdateUsageNav();
+        _tips.SetToolTip(_sysToggle, on ? "Switch PC load off" : "Switch PC load on (measured on this PC, nothing goes online)");
+        _sysSummary.Text = on
+            ? "Measured on this PC every 5 seconds; Buddy shows it below his stage, above Claude usage when that is on"
+            : "Off. On: this PC's processor, memory and C: disk on Buddy's screen";
+        _sysNow.Text = sample is not null ? SysWire.Text(sample) : "measuring…";
+        _sysNow.Visible = on;
+        _sysCard.Controls.SetChildIndex(_sysNow, 0);
+        _sysCard.Controls.SetChildIndex(_sysBar, 1);
+        _sysCard.Height = _sysCard.Padding.Vertical + _sysBar.Height + (on ? _sysNow.Height : 0);
+    }
+
+    // The page's dot: on while either strip is; amber while one that is on has no numbers yet.
+    private void UpdateUsageNav()
+    {
+        var usage = _service.Usage;
+        var sys = _service.Sys;
+        var waiting = (usage.Enabled && usage.Usage is null) || (sys.Enabled && sys.Sample is not { IsEmpty: false });
+        _usagePage.Nav.ShowDot = usage.Enabled || sys.Enabled;
+        _usagePage.Nav.DotColor = waiting ? Theme.Amber : Theme.Green;
+        _usagePage.Nav.Invalidate();
     }
 
     // ---- Device: connection, simulator, diagnostics ----

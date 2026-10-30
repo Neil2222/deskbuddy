@@ -20,8 +20,8 @@ extern "C" {
 // The commands this firmware offers (hello caps=) and the message styles it draws (hello styles=). track: act iid=,
 // evt act, status act=, evt mood src=; did: evt did (MY DAY); log: seq=/t=/up= on evt act and evt did, dev= and boot=
 // in hello and evt boot, log.since; face: clock.face, hello faces=, status face=, evt face; info: the info command;
-// usage: usage.set (the Claude usage strip).
-#define APP_LINK_CAPS "poke,monster,mode,time,status,msg,mood,act,pdc,track,did,log,face,info,usage"
+// usage: usage.set (the Claude usage strip); sys: sys.set (the PC load strip).
+#define APP_LINK_CAPS "poke,monster,mode,time,status,msg,mood,act,pdc,track,did,log,face,info,usage,sys"
 #define APP_LINK_STYLES "marquee"
 
 // Passes a command event to the application thread. false: it could not be queued (the command gets "err busy").
