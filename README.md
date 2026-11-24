@@ -1,196 +1,156 @@
 # DeskBuddy
 
-A standalone desk gadget with animated pixel-art characters, built on the Waveshare ESP32-S3-Touch-LCD-7B.
+**A little pixel-art robot that lives on your desk.** He has moods, reacts when you tap him, asks whether you fancy a
+smoke break, plays games with you and turns into a desk clock when you need one. A Windows app lets you send him
+messages, plan his week and keep a journal of your day.
 
-Status: board bring-up done; rendering engine and a placeholder robot character running on the device, with personality: seven moods (idle, relaxed, a smoke break, angry, sleepy, working, happy) and KITT, activities (Water, Sneeze, Stare, Meditate, Focus, the *Peukie?* question), a Monster Energy animation (drinking a can through a charging cable), a touchscreen menu with MY DAY, two games (Tic-Tac-Toe and Buddy Missile Defense), and Clock Mode: Buddy zooms in until his face becomes a desk clock (*Classic* or *Mechanical Skeleton*). A Windows companion app connects over USB: it sets the clock, chooses his mood, triggers actions, sends messages that scroll across a retro LED sign, runs a weekly schedule (moods and actions, off until switched to *Live*) and keeps his history (what he did and what you told him). Optional: PDC Manager's *Ze Doen Maar Wat* button. No workplace integrations yet; the board keeps no state across restarts (the history lives in the companion), and Buddy does not learn from it yet.
-See [HANDOVER.md](HANDOVER.md) for project state and next steps. Measurements: [docs/bringup-results.md](docs/bringup-results.md) and [docs/rendering-results.md](docs/rendering-results.md). A desktop simulator runs the same application code on a Windows PC ([below](#desktop-simulator)).
+<p align="center">
+  <img src="docs/images/monster.gif" width="720" alt="Buddy plugs a cable into a can of Monster and charges up, while the touch menu waits on the right">
+</p>
 
-## Layout
+DeskBuddy runs on a [Waveshare ESP32-S3-Touch-LCD-7B](https://www.waveshare.com/wiki/ESP32-S3-Touch-LCD-7B), a
+7-inch 1024×600 touchscreen with an ESP32-S3. Buddy lives on the left; on the right is a touch menu built for a
+finger. Everything is drawn in pixel art by DeskBuddy's own small rendering engine.
 
-```
-firmware/deskbuddy/           Board firmware: tasks, touch, UART link, the hardware under the application (port.c), options (menuconfig "DeskBuddy")
-firmware/components/app/      The application, shared by board and simulator: menu, companion commands, Clock Mode, messages, recorded events (app.h, app_port.h)
-firmware/simulator/           Desktop simulator (Windows): the application in a window, mouse as touch, TCP link for the companion
-firmware/components/gfx/      Hardware-independent renderer: dirty rectangles, sprites, compositor, double-buffer repair
-firmware/components/buddy/    Placeholder character: behavior (moods, reactions, activities, KITT, game faces), ASCII programmer art, pose-to-sprite view
-firmware/components/layout/   Screen split: character stage + control panel
-firmware/components/link/     Serial protocol to the Windows companion: frame parsing and formatting (docs/protocol.md)
-firmware/components/marquee/  LED marquee for messages: 5x7 dot-matrix font, text policy, scrolling sign sprite
-firmware/components/menu/     Touchscreen menu in the control panel: item table, navigation and touch rules, pixel-art view, the Tic-Tac-Toe board
-firmware/components/ttt/      Tic-Tac-Toe: rules, Buddy's moves (minimax with deliberate blunders), rounds and score, his lines (pure logic)
-firmware/components/missile/  Buddy Missile Defense: game logic, Buddy's game faces, drawing (md, md_buddy, md_view)
-firmware/components/pdc/      PDC Manager "Ze Doen Maar Wat" on the device: lease, confirmation, results
-firmware/components/usage/    The strips at the bottom of the stage: Claude usage (the companion's lease, countdowns; usage, usage_view) and the PC load stacked above it (sysinfo, sysinfo_view)
-firmware/components/office/   Clock Mode (first called Office Mode): stroke font, the faces (Classic, Mechanical Skeleton), moon art, scene switch, Buddy's zoom
-firmware/components/display/  Application-owned frame buffers, scanout fill, buffer-swap proof
-firmware/components/board/    Board support: I2C, IO expander, RGB panel, GT911 touch, backlight
-firmware/bringup/             Bring-up firmware: test pattern, touch dot, performance benchmarks (hardware regression)
-firmware/tests/host/          Host-side unit tests and PNG snapshot tool (no ESP32 needed)
-companion/                    Windows companion app (C#, .NET 10, WinForms): DeskBuddy Control Center with pages for Buddy, activities, the weekly schedule, the history, LED-sign messages, PDC Manager (ZDMW), usage (Claude usage, PC load) and the device (connection, simulator start, Windows options, diagnostics)
-companion/DeskBuddy.Firmware/ Firmware package format shared by the companion and the tool: versions, ESP image and partition checks, signed manifest, update policy (docs/firmware-packages.md)
-companion/DeskBuddy.FirmwareTool/  Developer tool: pack, sign, verify firmware packages; keygen
-assets/buddy/                 Buddy's real pixel art exported for the companion (faces, can, moon, app icons); made by host-test -Icons
-tools/common.ps1              Pinned ESP-IDF and .NET versions, tool paths and serial-port resolution
-tools/setup-idf.ps1           One-time ESP-IDF install
-tools/setup-dotnet.ps1        One-time per-user .NET SDK install (no administrator rights)
-tools/idf.ps1                 Runs idf.py in the pinned environment (auto-detects the port)
-tools/companion.ps1           Builds and starts the companion app; -Publish makes the double-clickable exe
-tools/pdc-fake-server.py      Local stand-in for PDC Manager's ZDMW (no Teams) to try the companion's PDC integration
-tools/host-test.ps1           Builds and runs the host tests with MSVC
-tools/simulator.ps1           Builds and starts the desktop simulator
-tools/flash-backup.ps1        Full 16 MB flash backup / verify / restore
-tools/package-firmware.ps1    Builds the committed firmware in a fresh directory and makes a firmware package (docs/firmware-packages.md)
-tools/fetch-esptool.ps1       Fetches the pinned esptool v4.12.0 the Companion embeds, with its sources (companion/third_party/esptool)
-tools/schedule-board-test/    Scripts of the P6 schedule board test (docs/schedule-board-test.md)
-docs/                         Hardware (hardware.md), measured results (bringup-results.md, rendering-results.md), serial protocol (protocol.md), firmware versions and packages (firmware-packages.md), schedule and history design (schedule.md, schedule-board-test.md, examples/), daily use on the laptop (daily-use.md)
-```
+## Meet Buddy
 
-## Fresh Windows setup
+He always has a mood, and it shows. Pick one on the touchscreen or in the Windows app; the other side follows.
 
-Prerequisites: Git, Python 3.9–3.13, PowerShell 5.1+ (built in). The CH343 USB-UART driver installs automatically through Windows Update. If it doesn't, use [WCH's driver](https://www.wch-ic.com/downloads/CH343SER_EXE.html).
+<table>
+  <tr>
+    <td align="center"><img src="assets/buddy/face-neutral@8x.png" width="96" alt=""><br><b>Idle</b><br><sub>breathing, blinking</sub></td>
+    <td align="center"><img src="assets/buddy/face-relaxed@8x.png" width="96" alt=""><br><b>Relaxed</b><br><sub>slow and content</sub></td>
+    <td align="center"><img src="assets/buddy/face-peukie@8x.png" width="96" alt=""><br><b>Peukie</b><br><sub>a smoke break</sub></td>
+    <td align="center"><img src="assets/buddy/face-angry@8x.png" width="96" alt=""><br><b>Angry</b><br><sub>steam and fury</sub></td>
+    <td align="center"><img src="assets/buddy/face-sleepy@8x.png" width="96" alt=""><br><b>Sleepy</b><br><sub>nodding off, Zs</sub></td>
+    <td align="center"><img src="assets/buddy/face-working@8x.png" width="96" alt=""><br><b>Working</b><br><sub>tongue out, sweating</sub></td>
+    <td align="center"><img src="assets/buddy/face-happy@8x.png" width="96" alt=""><br><b>Happy</b><br><sub>hops and sparkles</sub></td>
+  </tr>
+</table>
+
+He also has short shows that play on top of his mood: he drinks **Water** (and short-circuits), **Sneezes** his head
+off, loses a **Staring** contest, **Meditates** until a notification drops him, and builds a grand plan in
+**Focus** until someone asks "do you have 1 sec?". And he can turn into **KITT**.
+
+## Things he does
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/images/question.png" alt="Buddy asks PEUKIE ROKEN? with NEE and JA buttons"></td>
+    <td width="50%"><img src="docs/images/my-day.png" alt="The MY DAY page: work, meeting, coffee, water, smoke, stretch, lunch"></td>
+  </tr>
+  <tr>
+    <td><b>He asks you things.</b> <i>Peukie roken?</i> Answer <i>JA</i> and he happily joins you for a smoke break; answer <i>NEE</i> and he sulks for a moment.</td>
+    <td><b>MY DAY.</b> Tell him what you're up to (coffee, a meeting, lunch) and he cheers you on. The Windows app turns your taps into a journal of your day.</td>
+  </tr>
+  <tr>
+    <td><img src="docs/images/message.png" alt="A message scrolls across an amber LED sign above Buddy"></td>
+    <td><img src="docs/images/buddy.png" alt="Buddy idle next to the touch menu"></td>
+  </tr>
+  <tr>
+    <td><b>Messages</b> sent from your PC scroll across a retro LED sign above his head.</td>
+    <td><b>The menu:</b> moods, activities, food &amp; drink, MY DAY and games, all a tap away.</td>
+  </tr>
+</table>
+
+## Clock Mode
+
+Tap his head and he walks up to you until his face fills the screen, closes his eyes, and becomes a desk clock. Tap
+again and he steps back. There are two faces: *Classic* and the steampunk *Mechanical Skeleton*, whose gears tick,
+roll and whir on the hour.
+
+<p align="center">
+  <img src="docs/images/clock-zoom.gif" width="720" alt="Buddy zooms in until his face becomes the clock">
+</p>
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/images/clock-classic.png" alt="The Classic clock face"></td>
+    <td width="50%"><img src="docs/images/clock-skeleton.png" alt="The Mechanical Skeleton clock face with brass gears"></td>
+  </tr>
+</table>
+
+## Games
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/images/tic-tac-toe.png" alt="Tic-Tac-Toe against Buddy, who is thinking"></td>
+    <td width="50%"><img src="docs/images/missile-defense.png" alt="Buddy Missile Defense: Buddy fires eye lasers at missiles above his desk"></td>
+  </tr>
+  <tr>
+    <td><b>Tic-Tac-Toe.</b> Buddy is good but beatable. He gets smug when he wins and sulks when he loses.</td>
+    <td><b>Buddy Missile Defense.</b> Tap the sky and he fires his eye lasers. Protect his coffee, his plant, the rubber duck and the Monster can.</td>
+  </tr>
+</table>
+
+## The Windows app
+
+**DeskBuddy Control Center** connects to Buddy over USB. It sets his clock, picks his mood, starts his shows, sends
+messages, runs a weekly schedule and keeps a history of what he did and what you told him.
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/images/companion-buddy.png" alt="Control Center: mode and mood tiles"></td>
+    <td width="50%"><img src="docs/images/companion-schedule.png" alt="Control Center: the weekly schedule with a selected block"></td>
+  </tr>
+  <tr>
+    <td><b>Buddy:</b> his mode, his mood and the clock face.</td>
+    <td><b>Schedule:</b> plan his week in blocks: a mood, an action at the start, what you plan to do.</td>
+  </tr>
+  <tr>
+    <td><img src="docs/images/companion-history.png" alt="Control Center: the history journal for today"></td>
+    <td><img src="docs/images/companion-message.png" alt="Control Center: sending a message to the LED sign"></td>
+  </tr>
+  <tr>
+    <td><b>History:</b> your day as Buddy's journal, with his questions and your answers.</td>
+    <td><b>Message:</b> type it, press Enter, watch it scroll.</td>
+  </tr>
+</table>
+
+Optionally it shows your Claude usage and this PC's load as small strips under Buddy. It also updates his firmware
+(signed packages, with a backup first), can live in the notification area and start with Windows. Details: [docs/companion.md](docs/companion.md).
+
+## Getting started
+
+You need the Waveshare ESP32-S3-Touch-LCD-7B, a USB-C cable (use the port labelled **UART**) and a Windows PC.
 
 ```powershell
 git clone https://github.com/neil2222/deskbuddy.git
 cd deskbuddy
-Set-ExecutionPolicy -Scope CurrentUser RemoteSigned   # once, if scripts are blocked
-tools\setup-idf.ps1                                   # ESP-IDF v5.5.5 -> %USERPROFILE%\esp\v5.5.5\esp-idf
+tools\setup-idf.ps1                                  # once: ESP-IDF (the ESP32 toolchain)
+tools\idf.ps1 -C firmware\deskbuddy build flash      # build the firmware and put it on the board
+tools\setup-dotnet.ps1                               # once: .NET SDK for the Windows app, no admin rights needed
+tools\companion.ps1 -Publish                         # companion\publish\DeskBuddy.Companion.exe: double-click it
 ```
 
-To keep ESP-IDF elsewhere, set `DESKBUDDY_IDF_PATH` to the `esp-idf` directory first, for both setup and later use. The scripts check that this checkout is exactly v5.5.5.
+**No board?** The desktop simulator runs the same code in a window on your PC, with the mouse as your finger, and the
+Windows app connects to it: `tools\simulator.ps1`, or *Device → Build and start* in the app. The screens of Buddy on
+this page come from the simulator and from the snapshot renderer in the host tests, which run the board's own code.
 
-The Companion needs the .NET 10 SDK (per user, no admin): `tools\setup-dotnet.ps1`, then `tools\companion.ps1 -Publish` for `companion\publish\DeskBuddy.Companion.exe`. Its data lives in `%APPDATA%\DeskBuddy` and is not in Git (history, settings, this installation's id: each PC keeps its own). To start from the example week instead of an empty schedule, copy `docs\examples\schedule.demo.json` there as `schedule.json` before the first start (it is off: switch it to *Live* in the Schedule page to apply it). Setting up the laptop for daily use, moving that folder between PCs, and backing it up: [docs/daily-use.md](docs/daily-use.md).
+Full setup, build options, tests and the code layout: [docs/development.md](docs/development.md).
 
-Optional: clone Waveshare's reference code into `_ref/`, which is gitignored:
+## Status
 
-```powershell
-git clone --depth 1 https://github.com/waveshareteam/ESP32-S3-Touch-LCD-7B.git _ref/ESP32-S3-Touch-LCD-7B
-```
+A personal hobby project. Buddy is still a placeholder character (the real design
+comes later); the board keeps no settings across restarts (the Windows app restores the clock, mood and clock face
+when it connects, and keeps the history). There is an optional integration with a workplace tool (PDC Manager's
+*Ze Doen Maar Wat* button) that is off by default.
 
-## Build, flash, monitor
+## Documentation
 
-```powershell
-tools\idf.ps1 -C firmware\deskbuddy build
-tools\idf.ps1 -C firmware\deskbuddy flash monitor     # Ctrl+] exits the monitor
-tools\idf.ps1 -C firmware\bringup -p COM7 flash       # bring-up regression firmware, explicit port
-```
+| Document | What's in it |
+|---|---|
+| [What Buddy does](docs/features.md) | The touchscreen menu, moods, activities, Clock Mode and games in detail |
+| [Windows app](docs/companion.md) | Every page of the Control Center |
+| [Daily use](docs/daily-use.md) | Running it every day on a laptop: install, data, backup and restore |
+| [Development](docs/development.md) | Setup, building and flashing, the simulator, host tests, the factory firmware backup |
+| [Hardware](docs/hardware.md) | The Waveshare board: pins, timings, quirks |
+| [Protocol](docs/protocol.md) | The USB serial protocol between the board and the app |
+| [Schedule and history](docs/schedule.md) | How the weekly schedule and the history work |
+| [Firmware packages](docs/firmware-packages.md) | Versions, signed packages and the Firmware Manager |
+| [Handover](HANDOVER.md) | Where the project stands, the decisions behind it and what comes next |
 
-- **Touch:** tap the robot for a surprise and happy hops. Everything else is in the **menu** in the control panel on the right (below).
-- **Menu:** a pixel-art panel next to Buddy, built for a finger.
-  - **Home** lists the categories: *Moods*, *Activities*, *Food & Drink*, *My Day*, *Games*. *PDC* appears after *My Day* only while the companion offers its PDC Manager integration (then *Games* moves to a second page). *Back* (top left) goes up a level.
-  - **Moods:** all seven as tiles with Buddy's face; a tap switches at once. The current mood has a cyan rim and a blinking light, also when it was set by the companion (and the companion follows changes made here). The eighth tile, **KITT**, is a transformation rather than a mood: his eyes close, red traces race across his face screen and leave it black, and a Knight Rider scanner sweeps left and right under a steady red antenna, for as long as you like. A tap on Buddy (or any mood tile) turns him back, and his mood carries on. Clock Mode ends it too. Meanwhile other shows are dimmed; the companion can start it with `act name=kitt` but has no tile for it yet.
-  - **Activities:** *Surprise!* (the tap reaction), *Sneeze*, *Stare*, *Meditate*, *Focus* and *Peukie?*. **Food & Drink:** *Monster* (he drinks a can through a cable plugged into his head, about 7 s) and *Water*; coffee, lunch and snacks are planned (SOON). While an activity plays, the others are dimmed and the footer says what he is doing.
-  - **The clock lives on Buddy's head in the header** (top right, on every page): **tap** it for Clock Mode with the selected face; **hold** it for about 0.65 s for the *Clock faces* page (*Classic* or *Skeleton*; the selected one is marked; *Back* goes Home). The head looks and blinks as before; its touch area is a little larger than the head (up to the panel's top-right corner), clear of *Back* and the tiles. A finger that slides off it does nothing; a hold never also counts as a tap. Without a clock (Clock Mode unavailable) the head is just his head; with only one face, holding it does nothing.
-  - **My Day:** you tell Buddy what you are doing: *Work*, *Meeting*, *Coffee*, *Water*, *Smoke*, *Stretch*, *Lunch*. He hops and cheers on his sign ("ENJOY YOUR COFFEE!"), and the companion gets `evt did` to record it (recording comes with the activity history). Unlike the shows in *Activities* and *Food & Drink*, which never count as something you did. Works while he is busy with a show.
-  - **Games → Tic-Tac-Toe:** you are X (amber), Buddy is O (the cyan of his eyes), on a 3×3 board of big buttons in the panel; the header stays (Back leaves the game, the clock on his head works as always). You start the first round after boot, then the starter alternates. Buddy thinks for 0.6–1.5 s (*HMM...* in a speech bubble, narrowed eyes darting to the board) before he moves; a tap during his turn gets *HEY, MY TURN!*. He is good but beatable: he usually takes a win he sees, usually blocks yours, usually plays the best move, and sometimes just doesn't. After two wins in a row he gets smug (and sloppier), after two losses keen (and sharper). A win: hops, sparkles and *I WIN!* / *TOO EASY!*, then smug until the rematch (*ANOTHER ONE?*). A loss: a frustrated shake, then he droops with a tear (*NOOO...*), then sulks and glares at the board (*REMATCH?*). A draw: confused, a *?* beside his head, then puzzled (*AGAIN?*). The strip under the board keeps the score (until reboot) and becomes the *REMATCH* / *AGAIN* button. **Clock Mode pauses the round:** in the clock he is himself (his mood, not busy: the companion's shows and questions work as usual), and back from it the same board carries on exactly where it was (his thinking, his reaction and the idle time continue from where they stopped); a round left in the clock for more than 10 minutes is dropped (the score stays) and you come back to the GAMES page. Back or two minutes without a touch (*BORED...*) end the game (Back quits the round: the game opens on a fresh board), and his mood carries on (also one the companion set meanwhile). While he plays, the companion's shows get `err busy mode=game`; nothing is recorded.
-  - **Games → Missiles (Buddy Missile Defense):** the whole screen. Buddy's alarm goes off on his stage (*INCOMING!*, a "!" over his head, sweat), then the game takes the 1024×600 display: a night sky, his desk with six things on it (coffee mug, plant, Monster can, laptop, rubber duck, donut) and Buddy in the middle on a little plate. Missiles come down with glowing trails; **tap anywhere in the sky** and both of his eye lasers fire there at once (as the finger comes down), a pixel blast grows where you tapped and catches every missile in it, and a caught missile's blast catches the next (chains; the 2nd and 3rd of one shot count double and triple). A missile that gets through destroys its desk item (a white flash, flames, charred rubble; he names it: *MY COFFEE!!*, *NOT THE MONSTER!*), or now and then lands on his head (it flies off his neck, stars, 1.6 s without shots; nothing lost). Too many shots too fast overheat his eyes (red face, steam, 1.4 s; the heat bar under his feet). He tracks the lowest missile with his eyes, gets cocky on a streak, panics when too many are close, cheers a cleared wave (100 points per item still standing). Waves get faster and fuller; the first ones are gentle (one missile takes 11 s to fall, two at a time). Every difficulty number is in `firmware/components/missile/include/md_tuning.h`. When the last item goes the world freezes as it is (missiles stop in mid-air; only the last item's flames burn out): *GAME OVER*, his last words, *RETRY* and *QUIT*; the best score stays until reboot. The *X* at the top right leaves at any time, back to the GAMES page and his mood; two minutes without a touch on the game-over screen close it; Clock Mode (from the companion) ends the game first, then he zooms into the clock. While it is on he is busy (`mode=game`) and messages wait until it is over.
-  - **Using it:** a button sinks in under the finger and acts when the finger is lifted on it; sliding off cancels. Categories with more items than fit get pages: arrows in the footer, or swipe sideways (a grid page holds 8 tiles, a list page 5 rows; the 9th item goes to a second page automatically, so more moods or activities need no new code, only a row in `menu_items.c`). The header shows the page title and Buddy's head in his current mood; the footer says what he is up to.
-  - **Adding things:** see [menu.h](firmware/components/menu/include/menu.h): one row in `menu_items.c` per item (label, category, icon, action), plus an icon in `menu_art.c` if it needs a new one. A new activity: its timeline in `components/buddy/src/buddy_activity.c` (see `buddy_activity.h`).
-- **Activities** (short shows on top of his mood, which resumes afterwards; taps wait until one has finished):
-  - **Water:** he proudly raises a glass, gulps it down, looks at the empty glass... and remembers he is a robot. Short circuit: sparks, bolts, electrocuted flashes, smoke from both ears, a cough. The sign: *NOTE TO SELF: ROBOTS + WATER = NO*. About 5 s.
-  - **Sneeze:** an itch, "a... a...", ACHOO: his head flies off his neck, hangs in the air, drops back with a clunk and a puff of dust. A dazed wobble, a sheepish smile. About 2.7 s.
-  - **Stare:** a staring contest. The camera pushes in until his head fills the stage (the menu stays as it is); he stares, completely still. An eye twitches, a drop of sweat, eyes forced wide... he blinks. Red with fury, back to his place, fuming. The sign: *BEST OF THREE?* About 5 s.
-  - **Meditate:** eyes closed, he floats up and hovers, sparkles drifting by; the sign: *OMMMM...*. A notification jolts him (wide eyes, strobing antenna) and he drops to the ground with a thud. About 7.4 s.
-  - **Focus** (after MonkeyUser's comic "Focus"): eyes narrowed, he builds a plan in the air above him in chalk lines (A → B → C → D, a flowchart, E), tongue out, then a smug smirk. *HEY! DO YOU HAVE 1 SEC?* from off-stage: he glares... *POOF*, the plan goes up in smoke. *NEVERMIND*. Then he floats, blank and dimmed, among the drifting pieces: *WHAT WAS I DOING?* About 9 s.
-  - **Peukie?:** he asks *PEUKIE ROKEN?* in a speech bubble, holding out a cigarette, and looks hopefully from *NEE* (bottom left of the stage) to *JA* (bottom right); a bar between them runs down (red in the last 10 s) and towards the end he gets impatient. *JA*: happy hops, then a smoke break (the *peukie* mood for 2 minutes, then back to the mood he had). *NEE*, or no answer within a minute: he takes the cigarette back, hangs his head and a tear rolls down (3 s). Answered on the touchscreen only.
-  - His sign lines only go up when the sign is free; a message from the companion takes the sign over.
-- **PDC → Ze doen maar wat!** (only while the companion's optional PDC Manager integration is on, logged in and allowed to click; the counter shows below the label): a tap makes Buddy ask *ZE DOEN MAAR WAT? / TEAMS-BERICHT VERSTUREN?* with *NEE* and *JA* (15 s, then as if NEE). Only *JA* sends anything: the click goes over USB to the companion, which posts it to PDC Manager (every click is a real Teams message). When PDC Manager confirms it, Buddy fumes for about 2.6 s (angry eyes, a red face, a waving hand, anger marks) and the sign shows *ZE DOEN MAAR WAT!!! #123* with the real count; otherwise the sign says what went wrong, and never "not sent" when it may have been sent. One click at a time, then 5 s before the next. The board never holds a login: see the companion below and [docs/protocol.md](docs/protocol.md).
-- **Moods** (chosen in the menu, in the companion, or by any program over USB: `mood.set`, see [docs/protocol.md](docs/protocol.md)): how Buddy is, as a looping animation; he starts in *idle* after every power-up. Whichever side changes it, the other follows.
-  - **Idle:** the original Buddy, breathing and blinking.
-  - **Relaxed:** calm and content: a broad smile, half-closed eyes, breathing at half idle's pace, a long contented blink now and then, sometimes an unhurried look aside.
-  - **Peukie:** a smoke break. He holds a cigarette in his telescopic hand, smoke curls up from the tip; now and then he brings it to his mouth for a long drag (the tip lights up, his eyes close), then blows the smoke out. It burns down over a few drags, and he lights a fresh one.
-  - **Angry:** slanted brows and a frown, steam puffing from his head; now and then a fit of fury: red face, clenched teeth, shaking, an anger mark.
-  - **Sleepy:** heavy lids and dimmed eyes, slow breathing; he nods off with floating Zs (and a little snore), jerks awake, and yawns.
-  - **Working:** focused eyes scanning back and forth, a busy little bob, tongue out in concentration, sweat running down his head, moments of real effort, short pauses to look up.
-  - **Happy:** bursts of hops with a big grin and sparkles, a happy dance in between.
-  - Taps, messages and Monster interrupt any mood; he goes back to it afterwards. Clock Mode keeps it (a mood chosen meanwhile shows when he is back).
-- **Clock Mode:** a tap on Buddy's head in the menu's header (or *Clock* in the companion). Buddy notices, blinks, and comes toward you until his face fills the screen; he closes his eyes, his face screen goes dark, and the desk clock (24-hour time and date) is there. Tap anywhere: the clock sinks back into his dark face, his eyes open, he steps back to his place, stretches, and carries on with his mood; the menu comes back on the page you left. Each way takes about 1.5 s. The character is paused meanwhile; a running Monster sequence is dropped. The backlight keeps its brightness: the board's backlight controller did not apply brightness changes reliably.
-  - **Its first name was Office Mode,** which stays in the code (`components/office`, `office_*`) and on the wire (`mode=office`), so existing integrations keep working.
-  - **How the zoom works:** a camera on Buddy's own sprites (integer scales 8 → 75, crisp pixels), centred on his face screen; the face's last, dark frame is exactly the clock's background, so with *Classic* only the digits appear. Taps, Surprise!, Monster and new messages wait while he zooms. See `components/office/include/office_zoom.h`.
-  - **Clock faces** (hold Buddy's head in the menu's header, the companion's *Clock face*, or `clock.face`): *Classic*, the desk clock above, and *Mechanical Skeleton*: a steampunk movement in brass and bronze (wheels with teeth and curved crossings, steel pinions, ruby jewels, blued screws, a frosted frame) around a dark enamel timeplate with the time in four windows and the date on a plaque. The escapement ticks every second, the two gear trains step every 5 and 15 s, a changing digit rolls up like a counter, and on the hour the whole movement whirs for a moment. Its pixel art is drawn on the PC by `components/office/src/office_skeleton_art.c` and built into the firmware packed (`office_skeleton_assets.c`, `tools\host-test.ps1 -Assets`); the board unpacks it at start (about 390 KB of PSRAM, plus 25 KB of internal RAM for the frame). The zoom, the tap to leave and the mood afterwards are the same for every face. The face is kept until the next restart (then *Classic* again); the companion puts its last one back after a restart.
-  - **If the screen stays dark or very dim** (seen after plugging in and after flashing): unplug the board for about 10 s. If it is dark right after plugging in, pressing RESET also helps.
-  - **The clock is set by the Windows companion.** The board has no RTC and the ESP32 clock restarts at 1970 on every power-up, so until the companion has connected the clock shows `--:--` and *CLOCK NOT SET* rather than a guessed time. The time zone comes from Windows.
-- **Options** (`tools\idf.ps1 -C firmware\deskbuddy menuconfig` → *DeskBuddy*):
-  - stage width (default 65 %) and panel side;
-  - backlight brightness;
-  - performance-log interval;
-  - automatic demo pokes, Monster animations and Clock Mode toggles (hands-off measurements);
-  - `GFX_VERIFY` debug mode.
-- **Debug variants without touching the committed config:** use a separate build directory and an extra defaults file, e.g.
-  `tools\idf.ps1 -C firmware\deskbuddy -B $env:TEMP\db-verify -D SDKCONFIG=$env:TEMP\db-verify\sdkconfig -D "SDKCONFIG_DEFAULTS=sdkconfig.defaults;$env:TEMP\verify.defaults" flash`.
-- **Port selection:** the port comes from `-p`, else `$env:ESPPORT`, else auto-detection. Auto-detection prefers the CH343 UART port (USB `1A86:55D3`) over native USB (`303A:1001`).
-- **Which Type-C port to use:** prefer the one labelled **UART**. Its DTR/RTS auto-reset works whatever firmware is running.
-  - Set DIP switch #16 (UART select) to the ESP32 side. In the other position the CH343 talks to the external UART header, and esptool gets "No serial data received".
-- **Native USB port** (labelled **USB**) also works with our firmware. Any firmware that drives IO expander pin EXIO5 high disconnects it, and the factory firmware does this.
-- **Host power settings:** disable Windows "USB battery saver" (stop USB devices when the screen turns off). The panel blanked once while the firmware kept running, possibly because of this (not confirmed); see [docs/rendering-results.md](docs/rendering-results.md).
-- **Pinned versions:**
-  - ESP-IDF is pinned in `tools/common.ps1`.
-  - Managed components are pinned in `firmware/*/dependencies.lock`.
-  - Build settings are in `sdkconfig.defaults`. `sdkconfig` is generated and not committed.
+## License
 
-## Windows companion
-
-```powershell
-tools\setup-dotnet.ps1       # once: .NET 10 SDK -> %LOCALAPPDATA%\Microsoft\dotnet (no administrator rights)
-tools\companion.ps1          # build and start
-tools\companion.ps1 -Test    # unit tests (protocol, schedule, history, PDC Manager against a fake server, Claude usage against a fake endpoint, PC load against fake readings, tray and autostart rules, firmware packages and the Firmware Manager against a simulated board and esptool; temporary folders and a fake registry only)
-tools\companion.ps1 -Publish # companion\publish\DeskBuddy.Companion.exe: one self-contained file (~48 MB) to double-click
-```
-
-- **Starting it by double-click:** use `companion\publish\DeskBuddy.Companion.exe` (make it with `-Publish`; pin it to the taskbar or copy it anywhere, also to another PC). It has .NET built in. The exe in `bin\Release` is a small development build that needs the .NET runtime: double-clicked, Windows says *You must install .NET Desktop Runtime*, because the SDK from `setup-dotnet.ps1` is installed per user and only `tools\companion.ps1` tells the app where it is. Re-run `-Publish` after changes (close the published app first; in tray mode use *Quit DeskBuddy*). Its version is `<Version>+<commit>` (the exe's file properties): the semantic version in `DeskBuddy.Companion.csproj` (1.1.0 on `feature/firmware-manager`, 1.0.0 before) and the commit it was built from.
-
-- **Window:** a sidebar with Buddy's face (it reacts: sleepy while disconnected, happy or surprised after an action), the pages and, at the bottom, the connection status (click it for the *Device* page). One page at a time: *Buddy* (mode and mood), *Activities*, *Schedule*, *History*, *Message*, *PDC Manager*, *Usage* (Claude usage, PC load), *Device* (connection, the desktop simulator, Windows options, diagnostics). The *Schedule*, *Device*, *PDC Manager* and *Usage* entries carry a status dot. All artwork is Buddy's own pixel art, scaled by whole numbers only.
-- **Closing, tray and Start with Windows** (*Device → Windows*, both off by default): without tray mode, closing the window quits the Companion, and with it the connection and the schedule. With *Keep running in the notification area when I close the window*, closing only hides it: Buddy's icon stays in the notification area (its tooltip shows the connection), a click on it opens the window, and *Quit DeskBuddy* in its right-click menu quits; a notice says so the first time. Signing out, shutting down or ending it in Task Manager always quits. *Start with Windows, minimized* lets Windows start this exe at sign-in (`--minimized`: in the notification area with tray mode, else minimized on the taskbar); only the published exe can be registered. The Companion checks that entry at every start and when its window is activated: an entry for another copy (moved, or published elsewhere), for a file that no longer exists, or switched off in Task Manager is reported in full, with *Use this copy*. Only one Companion runs per Windows session: starting it again brings the running one's window up.
-- **Test data folder:** with the environment variable `DESKBUDDY_DATA_DIR` set to a folder, the Companion keeps everything there instead of `%APPDATA%\DeskBuddy` (shown as a warning in *Diagnostics*). Use it for every development or simulator test; never point it at the real folder.
-- **Connection** (*Device*): finds DeskBuddy's UART port (CH343, USB `1A86:55D3`) by itself and reconnects after unplugging; without a board it connects to the [desktop simulator](#desktop-simulator) if that is running. *Simulator* in the port list chooses the simulator explicitly, also while a board is plugged in. Opening the port does not reset the board. *Disconnect* keeps it disconnected until *Connect*. Below it, the firmware (version, and for firmware 1.0.0 on the short build commit and a failed hardware check, from `info`), the clock (*Sync clock*), and *Diagnostics*: the log of commands, replies and the board's own log output (so a separate serial monitor is not needed).
-- **Desktop simulator** (*Device*): *Build and start* builds the latest code of the checkout the companion runs from (`tools\simulator.ps1`), starts it and switches the connection to it; build problems show in *Diagnostics*. *Rebuild and restart* after a code change; *Close* closes it and goes back to auto-detect (the board, if plugged in). Only offered when the companion runs from a DeskBuddy checkout (a development build or `companion\publish`), with the host-test toolchain installed.
-- **Clock:** synced on connect, when the board restarts, every hour, and when Windows' time or time zone changes or the laptop wakes up. Daylight-saving switches happen on time even while the companion is not running.
-- **Buddy and Activities:** tiles for modes (Buddy, Clock; the one that is on is outlined) and moods (Idle, Relaxed, Peukie, Angry, Sleepy, Working, Happy, with Buddy's face for each; the current one is outlined, and the sidebar face shows it too) on *Buddy*; actions (Surprise!, Sneeze, Stare, Meditate, Focus) and Food & Drink (Monster, Water) on *Activities*. After an action the sidebar face shows Buddy's face for it for a moment. They come from the list in `companion/DeskBuddy.Companion/Activities.cs`: a new firmware command, mood or activity is one entry there, and its tile is enabled only when the board announces it (`caps=`, `moods=`, `acts=`).
-- **Clock face** (*Buddy*, below the tiles; only for firmware with the `face` capability): a drop-down with the faces the device offers (*Classic*, *Mechanical Skeleton*; `faces=` in hello). It shows the device's face, also when it was changed on the touchscreen, and changes it live in Clock Mode; the *Clock* tile still just enters Clock Mode. DeskBuddy forgets its face at every restart, so the companion remembers the last face it reported with the boot it was seen in (`clockFace`, `clockFaceDev`, `clockFaceBoot` in `%APPDATA%\DeskBuddy\settings.json`) and sends it again only after a restart (a new boot), never on an ordinary reconnect or when only the companion restarted, so a touchscreen choice is never overridden.
-- **Schedule** (design and rules in [docs/schedule.md](docs/schedule.md)): Buddy's week, Monday to Sunday, as blocks from a start to an end time to the minute (00:00–24:00). A block may set a **mood**, start one **action** at its start time (*Ask: Peukie?*, *Sneeze*, *Stare*, *Meditate*, *Focus* or *Water*; never Monster, PDC, Teams or messages), name a **planned activity** (an intention: nothing is ever logged because of it), any of these, or none, and can be switched off. Pick a day in the chips (each shows its blocks as a small bar; today has a cyan dot), select a block on the timeline and edit it on the right: name, times (type them, or ↑/↓ for a minute and Shift+↑/↓ for 15), mood, plan, action, on/off, *Duplicate*, *Delete* (with *Undo delete*). **On the timeline,** drag a block's body to move it (its length stays) or its top or bottom edge to change its start or end: 5-minute steps, Shift for single minutes, a label shows the new times and the editor follows; release to keep it, Escape to cancel; dragging near the top or bottom scrolls; a block stays within its day. A small movement first, so a click never moves a block; the block on top is the one you drag. *New block* adds an hour after the selected block; double-clicking empty time adds one there. Blocks may **overlap**: the one that started last is on top (equal starts: the shorter one), and the one below applies again when it ends. A block cannot cross midnight: an end before the start offers *Split over two days*. *Copy … to* copies the day to other days (replacing them; you are asked first if they have blocks). **Live:** the switch in the header is *Off* until you turn it on (also for a schedule made before); *Live* applies it to Buddy. A scheduled mood is sent only when the schedule starts asking for a different mood; when no block asks for one, Buddy keeps the mood he has (no forced idle); your own mood choice (touchscreen or a mood tile) stays until the next such change or *Resume*. An action runs once per block per day at its start: if Buddy is busy (Clock Mode, a show, the question) it is tried again every 10 s for up to 3 minutes (questions) or 1 minute (shows), never interrupting him; otherwise, or when DeskBuddy is not connected, it is skipped and recorded as such, never run late or twice, also after a restart. *Pause…* stops scheduled moods and actions for 1 hour, the rest of today, a number of days or until *Resume*; nothing missed is done afterwards. Every scheduled request and skip is recorded in the history (below). Stored in `%APPDATA%\DeskBuddy\schedule.json` (readable JSON, version 2 with `live` and `paused_until`; written atomically, the previous version kept as `.bak`, a damaged file set aside and the backup used).
-- **Schedule status in the sidebar:** under the connection status, on every page: *Schedule Off*, *Schedule Live*, *Paused until …* or *Paused until resumed* (grey, green, amber). Click it for the quick controls: *Turn Live on*, *Pause for 1 hour*, *Pause for the rest of today*, *Away for…* (2–14 days), *Pause until I resume*, *Resume*, *Turn Off*, *Open Schedule* (only those that apply). They are the Schedule page's own switch and Pause menu: the same stored schedule, so the page and the sidebar always agree.
-- **History** (page *History*; design in [docs/schedule.md](docs/schedule.md) §3 and §4b): what Buddy really did and what you told him on MY DAY, kept in `%APPDATA%\DeskBuddy\device-events.jsonl` (append-only, one line per device event `(dev, boot, seq)`; the simulator's in `device-events.sim.jsonl`). After every connect the companion asks DeskBuddy for what happened while it was away (`log.since`), so a MY DAY tap or an answered question while the companion was closed is not lost (as long as the board kept power); duplicates are impossible by the key, and anything the board could no longer supply is written down as a gap rather than guessed. Questions and shows become interactions (yes, no, timeout, interrupted, unknown), MY DAY taps and a JA to *Peukie?* become activities; moods and shows never do. The page shows a day at a time as Buddy's journal: arrows, *Today* and a month picker (days with entries have a dot); four numbers (activities, smoke breaks, questions asked with their answers, skipped actions); the entries in time order with his pixel art (a JA's smoke break inside its question, Buddy's shows folded into one line, *Timed out* never shown as *No*, lost entries as a notice), entries whose time the board did not know under *Time unknown*, restarts and schedule changes folded away under *Technical*; today's plan from the schedule on top, labelled *Planned*, today only. Select an entry for its details on the right (ids and device details folded under *Technical details*). New events appear as they are recorded, keeping the selection and the scroll position. With a simulator history, a picker switches between the board's and the simulator's (never mixed). **Keyboard:** in the month picker arrows, Page Up / Down, Home, Enter and Escape; in the journal Up / Down (entries and the lines that open), Enter or Space to open, the menu key for an entry's menu; Tab to *Technical details* and Enter to open it.
-- **Test data in the History:** test sessions can be left out of the History without deleting anything. Select an entry and *Hide as test* (or right-click it): it and, for a question, its smoking break are no longer shown or counted; *Undo* right after. *Test data → Hide a period as test…* hides everything in a time span of one day after a preview of exactly what it covers (linked smoking breaks and entries with an unknown time included) and an explicit *Hide n entries*. *Test data → Show hidden entries* shows them marked *Hidden · test*; *Restore* (or *Test data → Hidden entries…*) brings them back. Hides are kept in `%APPDATA%\DeskBuddy\history-annotations.jsonl` (the simulator's in `history-annotations.sim.jsonl`); the recorded history itself is never changed, and nothing is hidden automatically.
-- **Messages:** type up to 100 characters and press Enter or *Send*: he jumps and the text scrolls across an amber LED sign above him (below the clock in Clock Mode, which stays on), one LED at a time, about 4 characters a second. Short messages repeat so they stay up at least 8 s; a full-length one takes about 28 s. A message sent during a Monster sequence, during Missile Defense or while another one is up waits its turn (one at a time); during Tic-Tac-Toe it shows right away. Accents show without accents, emoji as a box. The last 10 messages are listed under *Recent* (double-click or Enter to reuse); the list appears with the first message.
-- **PDC Manager (Ze Doen Maar Wat), optional, off by default:** the *PDC Manager* section switches it *On*; it then shows whether `https://pdcmanager` is reachable (off the company network it just says so and checks again every minute), who is logged in, the ZDMW permission and count, a login form when needed (the password is never stored; the session is kept DPAPI-encrypted in `%APPDATA%\DeskBuddy\pdc-session.bin`, settings in `settings.json`), *Log out*, and the *Ze doen maar wat!* button: click, then click again within 4 s to post the ZDMW Teams message. The same click can come from Buddy's touchscreen menu (firmware with the `pdc` capability). One click at a time, at least 5 s apart, never retried; a result without an answer says *maybe sent*. Off means no network traffic at all. PDC Manager's own certificate is pinned (`Pdc/PDCManager.cer`). To try it without Teams: `python tools\pdc-fake-server.py` and start the companion with `DESKBUDDY_PDC_URL=http://127.0.0.1:8765` (only loopback addresses are taken); details in the script. Protocol side: [docs/protocol.md](docs/protocol.md#pdc-manager-zdmw).
-- **Claude usage, optional, off by default:** the *Claude usage* section switches it *On* (`usageEnabled` in `settings.json`); every minute it asks `https://claude.ai/api/organizations/<org ID>/usage` how much of the plan's 5-hour and 7-day windows is used, with the org ID and claude.ai session key entered in the same section (on claude.ai: F12 → Application → Cookies: `sessionKey` is the key, `lastActiveOrg` the org ID; *Save* stores both and checks at once, an empty key field keeps the stored key). The org ID is kept as `usageOrgId` in `settings.json`, the key DPAPI-encrypted in `%APPDATA%\DeskBuddy\claude-session.bin`; it is never logged or shown, and the request goes through Windows' own `curl.exe` (claude.ai's Cloudflare turns .NET's own HTTPS client away) with the key passed over stdin, not the command line. It shows the status and a line per window as Buddy shows it: `5U 37% > 130% 2:30` (used now, predicted at the reset at the current rate, time to the reset: `3d 2u`, `2:30`, `45m`, `nu`). When the key expires (401/403) it says *Session key expired: paste a new one from claude.ai*, Buddy's strip goes off and it stops asking until a new key is saved or the switch is toggled. A 429 waits for `Retry-After`, or else 5 and then 10 minutes; after other failures the last numbers are kept for up to 5 minutes. Off, or without org ID and key, means no network traffic at all. To firmware with the `usage` capability it sends `usage.set` after hello, on every change and every 10 s, and `state=off` when it has no fresh numbers, is switched off or closes.
-- **PC load, optional, off by default:** the *PC load* card on the *Usage* page switches it *On* (`sysEnabled` in `settings.json`); every 5 s it measures this PC's processor (the average since the previous sample), memory and C: disk, as PDC Manager's service window does, and shows them as Buddy does: `CPU 12%  ·  RAM 45%  ·  C: 85%, 120 GB vrij`. Nothing goes online. To firmware with the `sys` capability it sends `sys.set` after hello, on every new sample and at least every 10 s, and `state=off` when it is switched off or closes. On Buddy's screen the strip sits where the Claude usage strip sits, or directly above it while that one shows (hidden meanwhile under his NEE/JA buttons and under the sign in Clock Mode).
-- **Firmware** (its own page; design, checks and recovery in [docs/firmware-packages.md](docs/firmware-packages.md#installing-the-firmware-manager)): opens a signed firmware package and offers *Identify board…* (read-only), *Install DeskBuddy* (a board without it; refused if the board already runs DeskBuddy), *Update firmware* (the app only, after the board's own bootloader and partition table are read back and found compatible) or *Full reinstall…* (Repair). Each needs a confirmation that names what is written and what is not. A full backup comes first by default for an existing DeskBuddy. Progress, the result and what to do after a failure are shown on the page, and the Firmware log (also in *Diagnostics*) shows every esptool line. The board's 0x9000–0xFFFF and the Companion's data are never touched. Only packages signed with the built-in key `deskbuddy-firmware-2026` are accepted. While it has the port, the sidebar status names the step (*Identifying the board*, *Backing up the flash*, … *Flashing firmware*); in a small window the page scrolls. **Validation:** *Identify* and the app-only *Update* are physically tested on the working board (18 Oct 2026: `57eb475` → 1.0.0, build `28c96c5`, `hw=ok`); *Install* and *Repair* are tested only against a simulated board and esptool; installing on a factory-new Waveshare board is not physically validated.
-- **Flashing while it runs:** `tools\idf.ps1 ... flash` / `monitor` signals the companion to let go of the port and reconnects it afterwards (and refuses while the Companion's Firmware Manager has the port; so does `tools\flash-backup.ps1`). Other serial tools (for example PuTTY) need *Disconnect* first: Windows lets only one program open a COM port.
-- **Without the companion** DeskBuddy works as before; only the clock stays *CLOCK NOT SET* after a power-up until the companion connects.
-- Protocol: [docs/protocol.md](docs/protocol.md).
-
-## Desktop simulator
-
-```powershell
-tools\simulator.ps1                  # build and start: a 1024x600 window, the log in the console
-tools\simulator.ps1 -Scale 2         # every panel pixel as 2x2 screen pixels
-tools\simulator.ps1 -Stage 70 -PanelLeft -Verify   # menuconfig's layout options and GFX_VERIFY
-```
-
-- **Same code as the board:** everything above the hardware lives in `firmware/components/app` and is compiled unchanged into both: the character, menu, companion commands, Clock Mode, messages, PDC. Each side implements `app_port.h` (time, memory, frame buffers, backlight, the link): `firmware/deskbuddy/main/port.c` on the board, `firmware/simulator/sim_port.c` here. Behaviour changes go into `app` and show up in both.
-- **Touch:** the left mouse button is a finger: press, drag, release, like the GT911 reports it.
-- **Companion:** the simulator listens on `127.0.0.1:47801` and speaks the board's protocol byte for byte, log lines included (they show in the companion's *Diagnostics*). Easiest: *Device → Build and start* in the companion builds, starts and connects in one go. A simulator started from a terminal is found by auto-detect when no board is plugged in, or chosen as *Simulator* in the port list. Clock, moods, activities, messages and PDC work as with the board.
-- **Like the board:** the clock starts at 1970 and shows *CLOCK NOT SET* until the companion sets it; the screen stays black until both buffers are drawn; the firmware version is `firmware/deskbuddy/version.txt` and the build the Git commit, as on the board (`info` says `board=simulator`).
-- **Not simulated:** the panel scanout and PSRAM timing (`PERF` lines show render times but `scanout 0.00 Hz`), the backlight controller and the IO expander; measure those on the board.
-- **Build:** MSVC like the host tests, in `firmware/tests/host/build-sim` (Release, no sanitizer). The host tests build it too, so a change in `app` that breaks the simulator fails `tools\host-test.ps1`.
-
-## Host tests (no hardware)
-
-```powershell
-tools\host-test.ps1              # 167 unit tests: gfx (dirty rectangles, scene, double-buffer repair, animation), buddy (moods, Monster, activities, the question, Focus, KITT, game faces), office (Clock Mode, faces, zoom), layout, link (protocol), marquee, menu, app (the whole application on a fake platform, info included), pdc, ttt, missile and usage (the Claude usage and PC load strips) (MSVC, AddressSanitizer by default)
-tools\host-test.ps1 -Snapshot    # also renders poses, Monster key frames, a Monster contact sheet, a mood contact sheet (mood_sheet.png), the menu (menu_*.png, and menu_sheet.png: the panel in every state), the LED marquee, the Clock Mode clock and the zoom into it (zoom_in_sheet.png, zoom_out_sheet.png), the Mechanical Skeleton face (skeleton_*.png: the face, close-ups, its ticks, the minute roll, the hourly whir, the CLOCK FACES page), the activities (act_*.png and activity_sheet.png: water, sneeze, stare, meditate, focus, the Peukie? and ZDMW questions), KITT (kitt_*.png, kitt_sheet.png, kitt_face_sheet.png), Tic-Tac-Toe (ttt_*.png, ttt_sheet.png), Missile Defense (md_*.png, md_sheet.png), the Claude usage strip (usage.png, usage_ask.png, office_usage.png, skeleton_usage.png) and the PC load strip (sysinfo.png, usage_sysinfo.png, office_usage_sysinfo.png) to firmware\tests\host\build\snapshots\*.png (162 files)
-tools\host-test.ps1 -Icons       # exports Buddy's art for the companion to assets\buddy\ (faces incl. the moods, can, moon, the MY DAY icons myday-*.png, icon-16..256.png, buddy.ico)
-tools\host-test.ps1 -Assets      # regenerates the Mechanical Skeleton's packed artwork (firmware\components\office\src\office_skeleton_assets.c, committed) from its drawing code; needed after changing office_skeleton_art.c (a host test fails until then)
-```
-
-- **Requirements:** Visual Studio Build Tools with the C++ workload, including *C++ AddressSanitizer* for x64 (the tests build with it by default: CMake option `HOST_SANITIZE`, ON). If linking fails because the x64 AddressSanitizer runtime is missing (as on the development PC, where only x86 is installed), either add it in the Visual Studio Installer, or build without the sanitizer: after a first `tools\host-test.ps1` has created `firmware\tests\host\build`, run `cmake -B firmware\tests\host\build -DHOST_SANITIZE=OFF` once (in a Developer PowerShell, or with ESP-IDF's CMake); CMake keeps that setting, so `tools\host-test.ps1` works from then on. CMake and Ninja come from Visual Studio's *C++ CMake tools* or, without them, from ESP-IDF's tools. On Linux/macOS, plain `cmake` + `ctest` in `firmware/tests/host` works too (tests only; the simulator is Windows-only).
-- **Managed machines:** the script locates the Windows SDK itself, because group policy may block `reg.exe`, which Visual Studio's own environment script relies on.
-
-## Factory firmware
-
-The verified 16 MB factory dump is kept **outside Git**. Its filename, checksum, location and restore procedure are in [HANDOVER.md](HANDOVER.md#factory-firmware-backup).
-
-```powershell
-tools\flash-backup.ps1 -Action verify  -Image <dump>.bin    # read-only compare
-tools\flash-backup.ps1 -Action restore -Image <dump>.bin    # write all 16 MB + verify
-```
+[MIT](LICENSE). Third-party components keep their own licences: the esptool the Windows app embeds for flashing is
+GPL-2.0-or-later, see [companion/third_party/esptool](companion/third_party/esptool/README.md).
