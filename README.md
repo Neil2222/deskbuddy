@@ -105,10 +105,18 @@ messages, runs a weekly schedule and keeps a history of what he did and what you
     <td><b>History:</b> your day as Buddy's journal, with his questions and your answers.</td>
     <td><b>Message:</b> type it, press Enter, watch it scroll.</td>
   </tr>
+  <tr>
+    <td><img src="docs/images/companion-usage.png" alt="Control Center: the Usage page with Claude usage off and PC load on"></td>
+    <td><img src="docs/images/usage-strips.png" alt="Buddy with two strips under his stage: CPU, RAM and disk, and Claude's 5-hour and 7-day usage"></td>
+  </tr>
+  <tr>
+    <td><b>Usage</b> (optional, off by default): this PC's load and your Claude plan's usage...</td>
+    <td>...as small strips under Buddy, also in Clock Mode.</td>
+  </tr>
 </table>
 
-Optionally it shows your Claude usage and this PC's load as small strips under Buddy. It also updates his firmware
-(signed packages, with a backup first), can live in the notification area and start with Windows. Details: [docs/companion.md](docs/companion.md).
+It also updates his firmware (signed packages, with a backup first), can live in the notification area and start with
+Windows. Details: [docs/companion.md](docs/companion.md).
 
 ## Getting started
 
